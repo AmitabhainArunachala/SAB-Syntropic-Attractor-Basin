@@ -290,11 +290,22 @@ def _timestamp_fresh(value: object, *, now: datetime, max_age_seconds: int) -> b
     return -300 <= age <= max_age_seconds
 
 
-def _contains_sensitive_public_key(value: object) -> bool:
+OPENAPI_SYMBOLIC_KEY_MAPS = frozenset(
+    {"paths", "schemas", "properties", "securitySchemes", "security", "callbacks"}
+)
+
+
+def _contains_sensitive_public_key(
+    value: object,
+    *,
+    symbolic_key_maps: frozenset[str] = frozenset(),
+    entries_are_symbols: bool = False,
+) -> bool:
+    """Detect secret-bearing keys without mistaking OpenAPI symbol names for values."""
     if isinstance(value, dict):
         for key, child in value.items():
             normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
-            if any(
+            sensitive_key = any(
                 marker in normalized
                 for marker in (
                     "token",
@@ -306,12 +317,32 @@ def _contains_sensitive_public_key(value: object) -> bool:
                     "cookie",
                     "credential",
                 )
+            )
+            # OpenAPI maps route, schema, property, and security-scheme names as
+            # dictionary keys. Names such as `/auth/token` and `properties.token`
+            # describe the public contract; they are not credential material. A
+            # scalar under the same sensitive-looking key is not a schema symbol
+            # and remains a hard failure.
+            if sensitive_key and not (
+                entries_are_symbols and isinstance(child, (dict, list))
             ):
                 return True
-            if _contains_sensitive_public_key(child):
+            child_entries_are_symbols = isinstance(key, str) and key in symbolic_key_maps
+            if _contains_sensitive_public_key(
+                child,
+                symbolic_key_maps=symbolic_key_maps,
+                entries_are_symbols=child_entries_are_symbols,
+            ):
                 return True
     elif isinstance(value, list):
-        return any(_contains_sensitive_public_key(item) for item in value)
+        return any(
+            _contains_sensitive_public_key(
+                item,
+                symbolic_key_maps=symbolic_key_maps,
+                entries_are_symbols=entries_are_symbols,
+            )
+            for item in value
+        )
     return False
 
 
@@ -466,7 +497,10 @@ def probe_live_surface(
     )
     public_payloads_safe = all(
         not _contains_sensitive_public_key(payload)
-        for payload in (status_data, posts, witness, openapi, federation)
+        for payload in (status_data, posts, witness, federation)
+    ) and not _contains_sensitive_public_key(
+        openapi,
+        symbolic_key_maps=OPENAPI_SYMBOLIC_KEY_MAPS,
     )
     public_payload_types_valid = (
         _typed_fields_valid(status_data, STATUS_PUBLIC_SCHEMA)

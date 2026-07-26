@@ -486,6 +486,66 @@ def test_type_invalid_heads_and_null_openapi_operations_fail_closed():
     assert module.onboarding_links(live, instance_verified=True)["registration_url"] is None
 
 
+def test_openapi_route_and_schema_names_do_not_self_block_canonical_preflight():
+    module = load_module()
+    payloads = {
+        "/status": {"status": "healthy", "posts": 9, "witness_entries": 11},
+        "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
+        "/witness": [
+            {
+                "id": 11,
+                "hash": "a" * 64,
+                "timestamp": "2026-07-26T00:01:00Z",
+            }
+        ],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": {}},
+                "/auth/token": {"post": {}},
+                "/auth/apikey": {"post": {}},
+                "/posts": {"get": {}, "post": {}},
+                "/witness": {"get": {}},
+            },
+            "components": {
+                "schemas": {
+                    "VerifyResponse": {
+                        "type": "object",
+                        "properties": {"token": {"type": "string"}},
+                    }
+                }
+            },
+        },
+        "/api/federation/health": {"status": "operational", "registered_agents": 0},
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=lambda base, path, timeout: (200, "text/html", "SAB Swagger UI"),
+        now=datetime(2026, 7, 26, 0, 2, tzinfo=timezone.utc),
+    )
+
+    assert live["canonical_sab_routes"] is True
+    assert live["preflight"]["public_payloads_safe"] is True
+    assert live["preflight"]["passed"] is True
+    assert live["recruitment_ready"] is True
+
+    payloads["/openapi.json"]["info"]["api_key"] = "leaked-api-key"
+    hostile = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=lambda base, path, timeout: (200, "text/html", "SAB Swagger UI"),
+        now=datetime(2026, 7, 26, 0, 2, tzinfo=timezone.utc),
+    )
+    assert hostile["preflight"]["public_payloads_safe"] is False
+    assert hostile["preflight"]["passed"] is False
+    assert "leaked-api-key" not in json.dumps(hostile)
+
+
 def test_sensitive_public_payload_keys_block_readiness_and_are_redacted():
     module = load_module()
     payloads = {
