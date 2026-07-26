@@ -490,10 +490,34 @@ def probe_live_surface(
         now=effective_now,
         max_age_seconds=max_head_age_seconds,
     )
+    federation_operation = paths.get("/api/federation/health")
+    federation_get = (
+        federation_operation.get("get") if isinstance(federation_operation, dict) else None
+    )
+    federation_parameters = (
+        federation_get.get("parameters") if isinstance(federation_get, dict) else None
+    )
+    federation_auth_header_declared = isinstance(federation_parameters, list) and any(
+        isinstance(parameter, dict)
+        and parameter.get("name") == "X-SAB-Federation-Secret"
+        and parameter.get("in") == "header"
+        and parameter.get("required") is False
+        and isinstance(parameter.get("schema"), dict)
+        for parameter in federation_parameters
+    )
     federation_semantically_healthy = (
         federation_http == 200
         and isinstance(federation, dict)
         and str(federation.get("status", "")).lower() in {"healthy", "ok", "operational"}
+    )
+    federation_auth_protected = federation_http == 401 and federation_auth_header_declared
+    federation_probe_acceptable = federation_semantically_healthy or federation_auth_protected
+    federation_probe_mode = (
+        "open_healthy"
+        if federation_semantically_healthy
+        else "auth_protected"
+        if federation_auth_protected
+        else "invalid"
     )
     public_payloads_safe = all(
         not _contains_sensitive_public_key(payload)
@@ -520,7 +544,7 @@ def probe_live_surface(
             and posts_head_valid
             and witness_head_valid
             and heads_fresh
-            and federation_semantically_healthy
+            and federation_probe_acceptable
             and public_payloads_safe
             and public_payload_types_valid
         ),
@@ -532,6 +556,10 @@ def probe_live_surface(
         "witness_head_valid": witness_head_valid,
         "heads_fresh": heads_fresh,
         "federation_semantically_healthy": federation_semantically_healthy,
+        "federation_auth_header_declared": federation_auth_header_declared,
+        "federation_auth_protected": federation_auth_protected,
+        "federation_probe_acceptable": federation_probe_acceptable,
+        "federation_probe_mode": federation_probe_mode,
         "public_payloads_safe": public_payloads_safe,
         "public_payload_types_valid": public_payload_types_valid,
         "max_head_age_seconds": max_head_age_seconds,
@@ -624,6 +652,7 @@ def probe_live_surface(
         "recruitment_ready": recruitment_ready,
         "preflight": preflight,
         "federation_http": federation_http,
+        "federation_probe_mode": federation_probe_mode,
         "federation": _typed_summary(federation, FEDERATION_PUBLIC_SCHEMA),
         "blocker": blocker,
     }

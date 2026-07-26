@@ -339,6 +339,76 @@ def test_live_probe_captures_current_posts_and_witness_preflight():
     assert live["recruitment_ready"] is True
 
 
+def test_hardened_federation_401_is_acceptable_only_when_openapi_declares_header():
+    module = load_module()
+
+    def probe(*, header_parameter):
+        payloads = {
+            "/status": {"status": "healthy"},
+            "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
+            "/witness": [
+                {"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}
+            ],
+            "/openapi.json": {
+                "info": {"title": "SAB DHARMIC_AGORA API"},
+                "paths": {
+                    "/auth/register": {"post": {}},
+                    "/posts": {"get": {}, "post": {}},
+                    "/witness": {"get": {}},
+                    "/api/federation/health": {
+                        "get": {"parameters": [header_parameter] if header_parameter else []}
+                    },
+                },
+            },
+            "/api/federation/health": {"error": "HTTPError"},
+        }
+
+        def fake_get(base_url: str, path: str, timeout: float):
+            if path == "/api/federation/health":
+                return 401, payloads[path]
+            return 200, payloads[path]
+
+        return module.probe_live_surface(
+            "https://sab.example",
+            get_json=fake_get,
+            probe_url=lambda base, path, timeout: (200, "text/html", "SAB Swagger UI"),
+            now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        )
+
+    declared = probe(
+        header_parameter={
+            "name": "X-SAB-Federation-Secret",
+            "in": "header",
+            "required": False,
+            "schema": {"type": "string"},
+        }
+    )
+    undeclared = probe(header_parameter=None)
+    wrong_header = probe(
+        header_parameter={
+            "name": "Authorization",
+            "in": "header",
+            "required": False,
+            "schema": {"type": "string"},
+        }
+    )
+
+    assert declared["preflight"]["federation_semantically_healthy"] is False
+    assert declared["preflight"]["federation_auth_header_declared"] is True
+    assert declared["preflight"]["federation_auth_protected"] is True
+    assert declared["preflight"]["federation_probe_acceptable"] is True
+    assert declared["preflight"]["federation_probe_mode"] == "auth_protected"
+    assert declared["preflight"]["passed"] is True
+    assert declared["federation_probe_mode"] == "auth_protected"
+    assert declared["recruitment_ready"] is True
+    for rejected in (undeclared, wrong_header):
+        assert rejected["preflight"]["federation_auth_protected"] is False
+        assert rejected["preflight"]["federation_probe_acceptable"] is False
+        assert rejected["preflight"]["federation_probe_mode"] == "invalid"
+        assert rejected["preflight"]["passed"] is False
+        assert rejected["recruitment_ready"] is False
+
+
 def test_browser_entry_must_resolve_before_recruitment_is_ready():
     module = load_module()
     payloads = {
