@@ -639,6 +639,68 @@ def test_oversize_valid_shaped_fields_fail_and_never_reach_receipts(tmp_path):
         assert hostile not in persisted
 
 
+def test_semver_url_controls_and_browser_content_type_are_bounded():
+    module = load_module()
+    assert module._typed_scalar("0.3.1", "version") is True
+    assert module._typed_scalar("1.2.3-alpha.1+build.7", "version") is True
+    for invalid_version in (
+        "01.2.3",
+        "1.02.3",
+        "1.2.03",
+        "1.2.3-...",
+        "1.2.3-.",
+        "1.2.3+.",
+        "1.2.3-alpha..1",
+    ):
+        assert module._typed_scalar(invalid_version, "version") is False
+
+    for invalid_url in (
+        " https://sab.example",
+        "https://sab.example ",
+        "https://sab.example\n",
+        "https://sab.example\t",
+        "https://sab.example\x1b",
+        "https://sáb.example",
+    ):
+        assert module._normalized_endpoint_url(invalid_url) is None
+
+    payloads = {
+        "/status": {"status": "healthy", "version": "0.3.1"},
+        "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
+        "/witness": [
+            {
+                "id": 11,
+                "hash": "a" * 64,
+                "timestamp": "2026-07-26T00:01:00Z",
+            }
+        ],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": {}},
+                "/posts": {"get": {}, "post": {}},
+                "/witness": {"get": {}},
+            },
+        },
+        "/api/federation/health": {"status": "operational"},
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    hostile_content_type = "text/html" + ("X" * 5_000) + "CONTENT-TYPE-MARKER"
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=lambda base, path, timeout: (200, hostile_content_type, "SAB"),
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+    assert live["browser_entry_ready"] is False
+    assert live["recruitment_ready"] is False
+    assert live["browser_content_type"] == ""
+    assert "CONTENT-TYPE-MARKER" not in json.dumps(live)
+
+
 def test_malformed_openapi_paths_returns_diagnostic_instead_of_traceback():
     module = load_module()
     payloads = {

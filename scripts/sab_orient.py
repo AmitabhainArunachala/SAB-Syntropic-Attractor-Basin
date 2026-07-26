@@ -36,6 +36,13 @@ RFC3339_PATTERN = re.compile(
 MAX_PUBLIC_INTEGER = (1 << 63) - 1
 MAX_RFC3339_LENGTH = 40
 MAX_VERSION_LENGTH = 64
+MAX_CONTENT_TYPE_LENGTH = 128
+SEMVER_PATTERN = re.compile(
+    r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 MISSING = object()
 
 
@@ -182,7 +189,7 @@ def _probe_url(base_url: str, path: str, timeout: float) -> tuple[int | None, st
         with _open_url(request, timeout) as response:
             if _url_origin(response.geturl()) != _url_origin(request_url):
                 return None, "", "cross_origin_redirect"
-            content_type = response.headers.get_content_type()
+            content_type = _bounded_content_type(response.headers.get_content_type())
             body = response.read(65_537)
             if len(body) > 65_536:
                 return None, content_type, "response_too_large"
@@ -195,8 +202,24 @@ def _probe_url(base_url: str, path: str, timeout: float) -> tuple[int | None, st
         return None, "", type(exc).__name__
 
 
+def _bounded_content_type(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not (0 < len(value) <= MAX_CONTENT_TYPE_LENGTH)
+        or any(ord(character) < 0x20 or ord(character) > 0x7E for character in value)
+    ):
+        return ""
+    return value
+
+
 def _normalized_endpoint_url(value: object) -> str | None:
-    if not isinstance(value, str) or not (0 < len(value) <= 2_048):
+    if (
+        not isinstance(value, str)
+        or not (0 < len(value) <= 2_048)
+        or not value.isascii()
+        or value != value.strip()
+        or any(ord(character) < 0x21 or ord(character) == 0x7F for character in value)
+    ):
         return None
     try:
         parsed = urlparse(value)
@@ -301,7 +324,7 @@ def _typed_scalar(value: object, kind: str) -> bool:
         return (
             isinstance(value, str)
             and len(value) <= MAX_VERSION_LENGTH
-            and re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value) is not None
+            and SEMVER_PATTERN.fullmatch(value) is not None
         )
     return False
 
@@ -509,6 +532,7 @@ def probe_live_surface(
         browser_http, browser_content_type, browser_body = probe_url(
             base_url, browser_path, timeout
         )
+        browser_content_type = _bounded_content_type(browser_content_type)
     browser_marker_valid = (
         re.search(r"\bSAB\b", browser_body, flags=re.IGNORECASE) is not None
         or "DHARMIC" in browser_body.upper()
