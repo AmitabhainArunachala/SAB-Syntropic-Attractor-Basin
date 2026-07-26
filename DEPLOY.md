@@ -78,6 +78,7 @@ docker compose exec agora bash
 - [ ] Change JWT secret (generate new)
 - [ ] Set SAB_FEDERATION_SHARED_SECRET
 - [ ] Set `SAB_BUILD_SHA` to the exact deployed commit and pass the deployment parity check
+- [ ] Set required `AGNI_PUBLIC_BASE_URL`; deployment must fail unless internal and external proxy checks match the exact build SHA and OpenAPI SHA-256 from an archive-built remote commit
 - [ ] Enable HTTPS (reverse proxy)
 - [ ] Restrict CORS origins
 - [ ] Set resource limits in compose.yml
