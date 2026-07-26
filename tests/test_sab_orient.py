@@ -523,6 +523,62 @@ def test_sensitive_public_payload_keys_block_readiness_and_are_redacted():
     assert "leaked-api-key" not in rendered
 
 
+def test_camelcase_and_malformed_public_fields_never_leak_or_certify():
+    module = load_module()
+    payloads = {
+        "/status": {
+            "status": "healthy",
+            "version": "VERSION-MARKER",
+            "nested": {"privateKey": "PRIVATE-MARKER"},
+        },
+        "/posts": [
+            {
+                "id": {"secret": "POST-MARKER"},
+                "created_at": "2026-07-26T00:00:00Z",
+            }
+        ],
+        "/witness": [
+            {
+                "id": 11,
+                "hash": {"token": "WITNESS-MARKER"},
+                "timestamp": "2026-07-26T00:01:00Z",
+            }
+        ],
+        "/openapi.json": {
+            "info": {"title": {"apiKey": "TITLE-MARKER"}},
+            "paths": {},
+        },
+        "/api/federation/health": {
+            "status": "operational",
+            "registered_agents": "COUNTER-MARKER",
+        },
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+
+    rendered = json.dumps(live)
+    assert live["preflight"]["public_payloads_safe"] is False
+    assert live["preflight"]["public_payload_types_valid"] is False
+    assert live["preflight"]["passed"] is False
+    assert live["recruitment_ready"] is False
+    for marker in (
+        "PRIVATE-MARKER",
+        "VERSION-MARKER",
+        "POST-MARKER",
+        "WITNESS-MARKER",
+        "TITLE-MARKER",
+        "COUNTER-MARKER",
+    ):
+        assert marker not in rendered
+
+
 def test_malformed_openapi_paths_returns_diagnostic_instead_of_traceback():
     module = load_module()
     payloads = {
@@ -571,6 +627,53 @@ def test_malformed_manifest_root_still_emits_source_orientation(tmp_path):
     assert packet["instance"]["verified"] is False
     assert "invalid_root" in packet["instance"]["problems"]
     assert len(packet["canonical_file_map"]) == 8
+
+
+def test_manifest_urls_reject_userinfo_and_wrong_types_without_disclosure(tmp_path):
+    cases = (
+        (123, "TYPE-MARKER"),
+        ("https://agent:URL-PASSWORD-MARKER@sab.example", "URL-PASSWORD-MARKER"),
+        ("https://sab.example/?token=QUERY-MARKER", "QUERY-MARKER"),
+    )
+    for index, (canonical_url, marker) in enumerate(cases):
+        manifest = tmp_path / f"manifest-{index}.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": "dharma.sab.instance_manifest.v1",
+                    "instance_id": "sab_agni_prod_157_245_193_15",
+                    "canonical_url": canonical_url,
+                    "required_preflight": [
+                        "GET /status",
+                        "GET /posts",
+                        "GET /witness",
+                    ],
+                }
+            )
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--json",
+                "--no-live",
+                "--instance-manifest",
+                str(manifest),
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "Traceback" not in result.stderr
+        assert marker not in result.stdout
+        packet = json.loads(result.stdout)
+        assert packet["instance"]["verified"] is False
+        assert packet["instance"]["canonical_url"] is None
+        assert "canonical_url" in packet["instance"]["problems"]
 
 
 def test_instance_manifest_binds_exact_instance_and_url(tmp_path):

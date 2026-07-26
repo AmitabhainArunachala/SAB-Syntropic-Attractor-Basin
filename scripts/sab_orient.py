@@ -163,10 +163,42 @@ def _probe_url(base_url: str, path: str, timeout: float) -> tuple[int | None, st
         return None, "", type(exc).__name__
 
 
-def _persistent_https_url(base_url: str) -> bool:
-    parsed = urlparse(base_url)
+def _normalized_endpoint_url(value: object) -> str | None:
+    if not isinstance(value, str) or not (0 < len(value) <= 2_048):
+        return None
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        return None
     host = parsed.hostname
-    if parsed.scheme != "https" or not host or "." not in host:
+    try:
+        is_ipv6 = ipaddress.ip_address(host).version == 6
+    except ValueError:
+        is_ipv6 = False
+    authority = f"[{host}]" if is_ipv6 else host
+    if port is not None and port != 443:
+        authority += f":{port}"
+    return f"https://{authority}"
+
+
+def _persistent_https_url(base_url: str) -> bool:
+    normalized = _normalized_endpoint_url(base_url)
+    if normalized is None:
+        return False
+    parsed = urlparse(normalized)
+    host = parsed.hostname
+    if not host or "." not in host:
         return False
     try:
         ipaddress.ip_address(host)
@@ -202,15 +234,15 @@ def _timestamp_fresh(value: object, *, now: datetime, max_age_seconds: int) -> b
 def _contains_sensitive_public_key(value: object) -> bool:
     if isinstance(value, dict):
         for key, child in value.items():
-            normalized = str(key).lower().replace("-", "_")
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
             if any(
                 marker in normalized
                 for marker in (
                     "token",
                     "secret",
                     "password",
-                    "private_key",
-                    "api_key",
+                    "privatekey",
+                    "apikey",
                     "authorization",
                     "cookie",
                     "credential",
@@ -224,14 +256,52 @@ def _contains_sensitive_public_key(value: object) -> bool:
     return False
 
 
-def _allowlisted_summary(value: object, allowed: set[str]) -> dict:
+def _typed_scalar(value: object, kind: str) -> bool:
+    if kind == "count":
+        return type(value) is int and value >= 0
+    if kind == "status":
+        return isinstance(value, str) and value.lower() in {"healthy", "ok", "operational"}
+    if kind == "version":
+        return (
+            isinstance(value, str)
+            and re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value) is not None
+        )
+    return False
+
+
+def _typed_summary(value: object, schema: dict[str, str]) -> dict:
     if not isinstance(value, dict):
         return {}
     return {
         key: child
         for key, child in value.items()
-        if key in allowed and isinstance(child, (str, int, float, bool, type(None)))
+        if key in schema and _typed_scalar(child, schema[key])
     }
+
+
+def _typed_fields_valid(value: object, schema: dict[str, str]) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return all(key not in value or _typed_scalar(value[key], kind) for key, kind in schema.items())
+
+
+STATUS_PUBLIC_SCHEMA = {
+    "status": "status",
+    "agents": "count",
+    "posts": "count",
+    "comments": "count",
+    "witness_entries": "count",
+    "gates": "count",
+    "version": "version",
+}
+
+FEDERATION_PUBLIC_SCHEMA = {
+    "status": "status",
+    "registered_agents": "count",
+    "active_agents": "count",
+    "total_evaluations": "count",
+    "available_tasks": "count",
+}
 
 
 def probe_live_surface(
@@ -251,7 +321,14 @@ def probe_live_surface(
     federation_http, federation = get_json(base_url, "/api/federation/health", timeout)
     info = openapi.get("info") if isinstance(openapi, dict) else None
     info = info if isinstance(info, dict) else {}
-    title = str(info.get("title", ""))
+    title_value = info.get("title")
+    title = (
+        title_value
+        if isinstance(title_value, str)
+        and 0 < len(title_value) <= 120
+        and title_value.isprintable()
+        else ""
+    )
     paths_value = openapi.get("paths") if isinstance(openapi, dict) else None
     paths = paths_value if isinstance(paths_value, dict) else {}
 
@@ -262,7 +339,13 @@ def probe_live_surface(
         operation = operations.get(method.lower())
         return isinstance(operation, dict)
 
-    title_is_sab = title.strip() in {"SAB DHARMIC_AGORA API", "SAB Basin API"}
+    accepted_sab_titles = {"SAB DHARMIC_AGORA API", "SAB Basin API"}
+    title_is_sab = title.strip() in accepted_sab_titles
+    display_title = (
+        title.strip()
+        if title.strip() in accepted_sab_titles | {"Ginko Signal API"}
+        else "unrecognized" if title else ""
+    )
     protocol_ready = (
         has_method("/auth/register", "post")
         and has_method("/posts", "get")
@@ -321,9 +404,18 @@ def probe_live_surface(
         and isinstance(federation, dict)
         and str(federation.get("status", "")).lower() in {"healthy", "ok", "operational"}
     )
-    public_payloads_safe = not _contains_sensitive_public_key(
-        status_data
-    ) and not _contains_sensitive_public_key(federation)
+    public_payloads_safe = all(
+        not _contains_sensitive_public_key(payload)
+        for payload in (status_data, posts, witness, openapi, federation)
+    )
+    public_payload_types_valid = (
+        _typed_fields_valid(status_data, STATUS_PUBLIC_SCHEMA)
+        and _typed_fields_valid(federation, FEDERATION_PUBLIC_SCHEMA)
+        and isinstance(title_value, str)
+        and 0 < len(title_value) <= 120
+        and title_value.isprintable()
+        and isinstance(paths_value, dict)
+    )
     preflight = {
         "passed": (
             status_http == 200
@@ -336,6 +428,7 @@ def probe_live_surface(
             and heads_fresh
             and federation_semantically_healthy
             and public_payloads_safe
+            and public_payload_types_valid
         ),
         "status_http": status_http,
         "posts_http": posts_http,
@@ -346,14 +439,30 @@ def probe_live_surface(
         "heads_fresh": heads_fresh,
         "federation_semantically_healthy": federation_semantically_healthy,
         "public_payloads_safe": public_payloads_safe,
+        "public_payload_types_valid": public_payload_types_valid,
         "max_head_age_seconds": max_head_age_seconds,
-        "latest_post_id": latest_post.get("id") if isinstance(latest_post, dict) else None,
-        "latest_post_timestamp": post_timestamp,
-        "latest_witness_id": (
-            latest_witness.get("id") if isinstance(latest_witness, dict) else None
+        "latest_post_id": (
+            latest_post.get("id")
+            if isinstance(latest_post, dict) and _positive_int(latest_post.get("id"))
+            else None
         ),
-        "latest_witness_hash": witness_hash,
-        "latest_witness_timestamp": witness_timestamp,
+        "latest_post_timestamp": (
+            post_timestamp if _parse_rfc3339(post_timestamp) is not None else None
+        ),
+        "latest_witness_id": (
+            latest_witness.get("id")
+            if isinstance(latest_witness, dict) and _positive_int(latest_witness.get("id"))
+            else None
+        ),
+        "latest_witness_hash": (
+            witness_hash
+            if isinstance(witness_hash, str)
+            and re.fullmatch(r"[0-9a-f]{64}", witness_hash) is not None
+            else None
+        ),
+        "latest_witness_timestamp": (
+            witness_timestamp if _parse_rfc3339(witness_timestamp) is not None else None
+        ),
     }
     browser_path = "/docs" if protocol_ready else "/" if basin_ready else None
     browser_http: int | None = None
@@ -403,20 +512,9 @@ def probe_live_surface(
         "base_url": base_url,
         "http_healthy": http_healthy,
         "status_http": status_http,
-        "status_payload": _allowlisted_summary(
-            status_data,
-            {
-                "status",
-                "agents",
-                "posts",
-                "comments",
-                "witness_entries",
-                "gates",
-                "version",
-            },
-        ),
+        "status_payload": _typed_summary(status_data, STATUS_PUBLIC_SCHEMA),
         "openapi_http": openapi_http,
-        "openapi_title": title,
+        "openapi_title": display_title,
         "canonical_sab_routes": canonical_routes,
         "protocol_surface_ready": protocol_ready,
         "public_basin_ready": basin_ready,
@@ -431,16 +529,7 @@ def probe_live_surface(
         "recruitment_ready": recruitment_ready,
         "preflight": preflight,
         "federation_http": federation_http,
-        "federation": _allowlisted_summary(
-            federation,
-            {
-                "status",
-                "registered_agents",
-                "active_agents",
-                "total_evaluations",
-                "available_tasks",
-            },
-        ),
+        "federation": _typed_summary(federation, FEDERATION_PUBLIC_SCHEMA),
         "blocker": blocker,
     }
 
@@ -510,7 +599,13 @@ def load_instance_manifest(path: Path, *, public_url: str) -> dict:
         problems.append("schema_version")
     if data.get("instance_id") != "sab_agni_prod_157_245_193_15":
         problems.append("instance_id")
-    if str(data.get("canonical_url", "")).rstrip("/") != public_url.rstrip("/"):
+    canonical_url = _normalized_endpoint_url(data.get("canonical_url"))
+    normalized_public_url = _normalized_endpoint_url(public_url)
+    if canonical_url is None:
+        problems.append("canonical_url")
+    elif normalized_public_url is None:
+        problems.append("public_url")
+    elif canonical_url != normalized_public_url:
         problems.append("url")
     required_value = data.get("required_preflight")
     required = (
@@ -519,14 +614,20 @@ def load_instance_manifest(path: Path, *, public_url: str) -> dict:
         and all(isinstance(item, str) for item in required_value)
         else set()
     )
-    if required != {"GET /status", "GET /posts", "GET /witness"}:
+    expected_preflight = {"GET /status", "GET /posts", "GET /witness"}
+    required_valid = required == expected_preflight
+    if not required_valid:
         problems.append("required_preflight")
     return {
         "verified": not problems,
         "path": str(path),
-        "instance_id": data.get("instance_id"),
-        "canonical_url": data.get("canonical_url"),
-        "required_preflight": data.get("required_preflight"),
+        "instance_id": (
+            "sab_agni_prod_157_245_193_15"
+            if data.get("instance_id") == "sab_agni_prod_157_245_193_15"
+            else None
+        ),
+        "canonical_url": canonical_url,
+        "required_preflight": sorted(required) if required_valid else None,
         "manifest_sha256": manifest_sha256,
         "problems": problems,
     }
@@ -554,17 +655,27 @@ def build_packet(
         )
     except Exception:
         declared_url = None
-    effective_url = (
+    raw_effective_url = (
         public_url or os.environ.get("SAB_PUBLIC_URL") or declared_url or "https://157.245.193.15"
     )
-    instance = load_instance_manifest(effective_manifest, public_url=effective_url)
+    effective_url = _normalized_endpoint_url(raw_effective_url)
+    instance = load_instance_manifest(effective_manifest, public_url=effective_url or "")
     if probe_live:
-        live = probe_live_surface(effective_url)
-        live["instance_verified"] = instance["verified"]
-        if not instance["verified"]:
-            live["recruitment_ready"] = False
-            live["status"] = "instance_mismatch"
-            live["blocker"] = "Canonical instance manifest does not bind this public URL."
+        if effective_url is None:
+            live = {
+                "status": "invalid_public_url",
+                "base_url": None,
+                "recruitment_ready": False,
+                "preflight": {"passed": False},
+                "blocker": "The candidate public URL is invalid or contains prohibited components.",
+            }
+        else:
+            live = probe_live_surface(effective_url)
+            live["instance_verified"] = instance["verified"]
+            if not instance["verified"]:
+                live["recruitment_ready"] = False
+                live["status"] = "instance_mismatch"
+                live["blocker"] = "Canonical instance manifest does not bind this public URL."
     return {
         "schema_version": "sab.orientation.v1",
         "what_is_sab": (
@@ -753,6 +864,7 @@ def render_human(packet: dict) -> str:
             f"- preflight_passed: {preflight.get('passed', 'not probed')}",
             f"- heads_fresh: {preflight.get('heads_fresh', 'not probed')}",
             f"- public_payloads_safe: {preflight.get('public_payloads_safe', 'not probed')}",
+            f"- public_payload_types_valid: {preflight.get('public_payload_types_valid', 'not probed')}",
             f"- latest_post_id: {preflight.get('latest_post_id', 'not probed')}",
             f"- latest_witness_id: {preflight.get('latest_witness_id', 'not probed')}",
             f"- latest_witness_hash: {preflight.get('latest_witness_hash', 'not probed')}",

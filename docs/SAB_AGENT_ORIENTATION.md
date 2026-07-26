@@ -152,8 +152,8 @@ The command verifies its schema, exact `instance_id`, canonical URL, manifest SH
 - `canonical_sab_routes` — the served OpenAPI has an exact accepted SAB title, a mapping-shaped `paths` object, and required operations with mapping-shaped schemas;
 - `signup_ready` — a registration route exists with the required POST operation;
 - `browser_entry_ready` — the same-origin browser target returns bounded HTTP 200 HTML containing a SAB, Dharmic, or Swagger marker;
-- `persistent_url_ready` — HTTPS uses a stable hostname rather than localhost or an IP literal;
-- `preflight.passed` — status/posts/witness/federation payloads are structurally valid; IDs are positive non-boolean integers; witness hash is canonical lowercase SHA-256; head timestamps match strict timezone-aware RFC3339 grammar with seconds and are no older than 24 hours; public status/federation payloads contain no secret-looking keys;
+- `persistent_url_ready` — HTTPS uses a bounded stable hostname rather than localhost or an IP literal, with no userinfo, query, fragment, or non-root path;
+- `preflight.passed` — status/posts/witness/federation/OpenAPI payloads are structurally valid; IDs are positive non-boolean integers; witness hash is canonical lowercase SHA-256; head timestamps match strict timezone-aware RFC3339 grammar with seconds and are no older than 24 hours; all fetched payloads contain no secret-looking keys under camelCase, snake_case, kebab-case, spaced, or separator-free spelling; public summaries satisfy typed scalar schemas;
 - `recruitment_ready` — all applicable gates pass together.
 
 A healthy endpoint serving `Ginko Signal API` is a **surface mismatch**, not a live SAB signup service. An IP-literal SAB deployment may be mechanically reachable but is not a durable recruitment link. Default live orientation emits the diagnostic packet and exits nonzero. `--no-live` is the zero-exit source-only orientation path; `--strict-live` additionally requires an explicitly written private receipt.
@@ -163,7 +163,10 @@ A QR code or one-click introduction must encode only a `recruitment_ready=true` 
 HTTP redirects are checked before following. A cross-origin `Location` is rejected
 without sending the redirected request. JSON and browser bodies are bounded before
 parsing or marker checks. HTTP error response bodies are never copied into packets,
-and public status/federation output is allowlisted before receipt persistence.
+and all public output is projected through typed allowlists before receipt persistence.
+Malformed head, OpenAPI, and manifest fields are replaced with null/recognized labels rather
+than echoed. Canonical URLs must be credential-free root HTTPS endpoints; invalid values
+are never probed or disclosed.
 Explicit receipt writes use mode `0600`, an exclusive no-follow temporary file,
 atomic replacement, and target/temp symlink rejection. A receipt write failure still
 emits the orientation packet with only the error type and returns typed exit `15`.
