@@ -31,8 +31,12 @@ CANONICAL_ANCHORS = [
 ]
 
 RFC3339_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"
 )
+MAX_PUBLIC_INTEGER = (1 << 63) - 1
+MAX_RFC3339_LENGTH = 40
+MAX_VERSION_LENGTH = 64
+MISSING = object()
 
 
 def canonical_file_map(repo_root: Path) -> list[dict[str, object]]:
@@ -236,11 +240,15 @@ def _persistent_https_url(base_url: str) -> bool:
 
 
 def _positive_int(value: object) -> bool:
-    return type(value) is int and value > 0
+    return type(value) is int and 0 < value <= MAX_PUBLIC_INTEGER
 
 
 def _parse_rfc3339(value: object) -> datetime | None:
-    if not isinstance(value, str) or RFC3339_PATTERN.fullmatch(value) is None:
+    if (
+        not isinstance(value, str)
+        or len(value) > MAX_RFC3339_LENGTH
+        or RFC3339_PATTERN.fullmatch(value) is None
+    ):
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -286,12 +294,13 @@ def _contains_sensitive_public_key(value: object) -> bool:
 
 def _typed_scalar(value: object, kind: str) -> bool:
     if kind == "count":
-        return type(value) is int and value >= 0
+        return type(value) is int and 0 <= value <= MAX_PUBLIC_INTEGER
     if kind == "status":
         return isinstance(value, str) and value.lower() in {"healthy", "ok", "operational"}
     if kind == "version":
         return (
             isinstance(value, str)
+            and len(value) <= MAX_VERSION_LENGTH
             and re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value) is not None
         )
     return False
@@ -676,16 +685,24 @@ def build_packet(
             "/home/openclaw/.dharma/sab/CANONICAL_SAB_INSTANCE.json",
         )
     )
-    try:
-        declared_manifest = json.loads(effective_manifest.read_text())
-        declared_url = (
-            declared_manifest.get("canonical_url") if isinstance(declared_manifest, dict) else None
-        )
-    except Exception:
+    declared_url: object = MISSING
+    if effective_manifest.is_file():
         declared_url = None
-    raw_effective_url = (
-        public_url or os.environ.get("SAB_PUBLIC_URL") or declared_url or "https://157.245.193.15"
-    )
+        try:
+            declared_manifest = json.loads(effective_manifest.read_text())
+            if isinstance(declared_manifest, dict) and "canonical_url" in declared_manifest:
+                declared_url = declared_manifest["canonical_url"]
+        except Exception:
+            pass
+
+    if public_url is not None:
+        raw_effective_url: object = public_url
+    elif "SAB_PUBLIC_URL" in os.environ:
+        raw_effective_url = os.environ["SAB_PUBLIC_URL"]
+    elif declared_url is not MISSING:
+        raw_effective_url = declared_url
+    else:
+        raw_effective_url = "https://157.245.193.15"
     effective_url = _normalized_endpoint_url(raw_effective_url)
     instance = load_instance_manifest(effective_manifest, public_url=effective_url or "")
     if probe_live:

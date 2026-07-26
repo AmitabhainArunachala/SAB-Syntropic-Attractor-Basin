@@ -580,6 +580,65 @@ def test_camelcase_and_malformed_public_fields_never_leak_or_certify():
         assert marker not in rendered
 
 
+def test_oversize_valid_shaped_fields_fail_and_never_reach_receipts(tmp_path):
+    module = load_module()
+    long_version = "1.2.3+" + ("A" * 5_000) + "VERSION-MARKER"
+    long_timestamp = "2026-07-26T00:00:00." + ("1" * 5_000) + "Z"
+    huge_integer = 10**100
+    payloads = {
+        "/status": {"status": "healthy", "version": long_version},
+        "/posts": [{"id": huge_integer, "created_at": long_timestamp}],
+        "/witness": [
+            {
+                "id": huge_integer,
+                "hash": "a" * 64,
+                "timestamp": long_timestamp,
+            }
+        ],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": {}},
+                "/posts": {"get": {}, "post": {}},
+                "/witness": {"get": {}},
+            },
+        },
+        "/api/federation/health": {
+            "status": "operational",
+            "registered_agents": huge_integer,
+        },
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=lambda base, path, timeout: (200, "text/html", "SAB"),
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+
+    packet = {"artifact": module._artifact_identity(REPO), "live": live}
+    receipt = tmp_path / "bounded-receipt.json"
+    module.write_orientation_receipt(packet, receipt)
+    rendered = json.dumps(packet)
+    persisted = receipt.read_text()
+
+    assert live["preflight"]["public_payload_types_valid"] is False
+    assert live["preflight"]["posts_head_valid"] is False
+    assert live["preflight"]["witness_head_valid"] is False
+    assert live["preflight"]["passed"] is False
+    assert live["recruitment_ready"] is False
+    assert live["preflight"]["latest_post_id"] is None
+    assert live["preflight"]["latest_post_timestamp"] is None
+    assert live["preflight"]["latest_witness_id"] is None
+    assert live["preflight"]["latest_witness_timestamp"] is None
+    for hostile in (long_version, long_timestamp, str(huge_integer)):
+        assert hostile not in rendered
+        assert hostile not in persisted
+
+
 def test_malformed_openapi_paths_returns_diagnostic_instead_of_traceback():
     module = load_module()
     payloads = {
@@ -675,6 +734,74 @@ def test_manifest_urls_reject_userinfo_and_wrong_types_without_disclosure(tmp_pa
         assert packet["instance"]["verified"] is False
         assert packet["instance"]["canonical_url"] is None
         assert "canonical_url" in packet["instance"]["problems"]
+
+
+def test_falsey_declared_urls_never_fall_back_to_a_network_probe(tmp_path, monkeypatch):
+    module = load_module()
+    calls = []
+
+    def forbidden_probe(base_url: str):
+        calls.append(base_url)
+        raise AssertionError("invalid declared URL triggered a live probe")
+
+    monkeypatch.setattr(module, "probe_live_surface", forbidden_probe)
+    for index, canonical_url in enumerate((False, 0, [], {}, "", None)):
+        manifest = tmp_path / f"falsey-{index}.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": "dharma.sab.instance_manifest.v1",
+                    "instance_id": "sab_agni_prod_157_245_193_15",
+                    "canonical_url": canonical_url,
+                    "required_preflight": [
+                        "GET /status",
+                        "GET /posts",
+                        "GET /witness",
+                    ],
+                }
+            )
+        )
+
+        packet = module.build_packet(
+            REPO,
+            probe_live=True,
+            instance_manifest_path=manifest,
+        )
+
+        assert packet["live"]["status"] == "invalid_public_url"
+        assert packet["live"]["base_url"] is None
+        assert packet["live"]["recruitment_ready"] is False
+        assert packet["instance"]["verified"] is False
+        assert packet["instance"]["canonical_url"] is None
+
+    valid_manifest = tmp_path / "valid.json"
+    valid_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "dharma.sab.instance_manifest.v1",
+                "instance_id": "sab_agni_prod_157_245_193_15",
+                "canonical_url": "https://sab.example",
+                "required_preflight": ["GET /status", "GET /posts", "GET /witness"],
+            }
+        )
+    )
+    cli_packet = module.build_packet(
+        REPO,
+        probe_live=True,
+        public_url="",
+        instance_manifest_path=valid_manifest,
+    )
+    assert cli_packet["live"]["status"] == "invalid_public_url"
+
+    monkeypatch.setenv("SAB_PUBLIC_URL", "")
+    env_packet = module.build_packet(
+        REPO,
+        probe_live=True,
+        instance_manifest_path=valid_manifest,
+    )
+    assert env_packet["live"]["status"] == "invalid_public_url"
+
+    assert calls == []
 
 
 def test_instance_manifest_binds_exact_instance_and_url(tmp_path):
