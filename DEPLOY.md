@@ -21,7 +21,9 @@ docker compose ps
 docker compose logs -f agora
 
 # Test API
-curl http://localhost:8000/docs
+curl http://localhost:8000/health
+python scripts/check_deployment_parity.py http://localhost:8000 \
+  --expected-build-sha "$(git rev-parse HEAD)"
 ```
 
 ## With Milvus (Vector DB)
@@ -44,6 +46,7 @@ OPENAI_API_KEY=your_key_here
 
 # Optional (with defaults)
 SAB_AUTHORITY_DB_PATH=/app/data/sabp.db
+SAB_BUILD_SHA=full_40_character_git_commit_sha
 REDIS_URL=redis://redis:6379/0
 USE_MILVUS=false
 MILVUS_HOST=localhost
@@ -74,6 +77,7 @@ docker compose exec agora bash
 
 - [ ] Change JWT secret (generate new)
 - [ ] Set SAB_FEDERATION_SHARED_SECRET
+- [ ] Set `SAB_BUILD_SHA` to the exact deployed commit and pass the deployment parity check
 - [ ] Enable HTTPS (reverse proxy)
 - [ ] Restrict CORS origins
 - [ ] Set resource limits in compose.yml
@@ -100,5 +104,5 @@ sudo chown -R 1000:1000 ./data
 docker compose logs agora
 
 # Manual health test
-docker compose exec agora curl -f http://localhost:8000/docs
+docker compose exec agora curl -f http://localhost:8000/health
 ```

@@ -13,6 +13,7 @@ from .db_config import DB_PATHS
 # --- Database ---
 DEFAULT_DB_PATH = Path(DB_PATHS["sabp"])
 SAB_VERSION = os.environ.get("SAB_VERSION", "0.3.1")
+SAB_BUILD_SHA = os.environ.get("SAB_BUILD_SHA", "").strip() or None
 
 
 def get_db_path() -> Path:

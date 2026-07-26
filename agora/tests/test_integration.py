@@ -123,6 +123,7 @@ class TestAuthFlow:
         assert data["status"] == "healthy"
         from agora.config import SAB_VERSION
         assert data["version"] == SAB_VERSION
+        assert "build_sha" in data
         assert "convergence" in data
         assert set(data["convergence"].keys()) == {
             "dgc_signal_count",
