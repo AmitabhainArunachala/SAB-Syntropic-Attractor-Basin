@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -408,6 +409,54 @@ def test_stale_heads_never_become_recruitment_ready():
     assert module.live_exit_code({"instance": {"verified": True}, "live": live}) != 0
 
 
+def test_noncanonical_timestamp_forms_and_uppercase_hash_fail_closed():
+    module = load_module()
+    invalid_timestamps = (
+        "2026-07-26 00:00:00+00:00",
+        "2026-W30-7T00:00:00+00:00",
+        "2026-07-26T00:00+00:00",
+    )
+
+    def probe(post_timestamp: str, witness_timestamp: str, witness_hash: str):
+        payloads = {
+            "/status": {"status": "healthy"},
+            "/posts": [{"id": 9, "created_at": post_timestamp}],
+            "/witness": [{"id": 11, "hash": witness_hash, "timestamp": witness_timestamp}],
+            "/openapi.json": {
+                "info": {"title": "SAB DHARMIC_AGORA API"},
+                "paths": {
+                    "/auth/register": {"post": {}},
+                    "/posts": {"get": {}, "post": {}},
+                    "/witness": {"get": {}},
+                },
+            },
+            "/api/federation/health": {"status": "operational"},
+        }
+
+        def fake_get(base_url: str, path: str, timeout: float):
+            return 200, payloads[path]
+
+        return module.probe_live_surface(
+            "https://sab.example",
+            get_json=fake_get,
+            probe_url=lambda base, path, timeout: (200, "text/html", "SAB"),
+            now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        )
+
+    for invalid in invalid_timestamps:
+        live = probe(invalid, invalid, "a" * 64)
+        assert live["preflight"]["passed"] is False
+        assert live["recruitment_ready"] is False
+
+    uppercase_hash = probe(
+        "2026-07-26T00:00:00Z",
+        "2026-07-26T00:00:01Z",
+        "A" * 64,
+    )
+    assert uppercase_hash["preflight"]["witness_head_valid"] is False
+    assert uppercase_hash["recruitment_ready"] is False
+
+
 def test_type_invalid_heads_and_null_openapi_operations_fail_closed():
     module = load_module()
     payloads = {
@@ -566,6 +615,61 @@ def test_strict_readiness_requires_private_durable_receipt(tmp_path):
     assert data["schema_version"] == "sab.orientation.receipt.v1"
     assert data["packet_sha256"]
     assert module.strict_exit_code(packet, receipt_written=True) == 0
+
+
+def test_receipt_writer_rejects_target_and_temp_symlinks(tmp_path):
+    module = load_module()
+    victim = tmp_path / "victim.txt"
+    victim.write_text("do-not-touch")
+
+    target_link = tmp_path / "target-receipt.json"
+    target_link.symlink_to(victim)
+    try:
+        module.write_orientation_receipt({}, target_link)
+        raise AssertionError("target symlink was accepted")
+    except ValueError:
+        pass
+    assert victim.read_text() == "do-not-touch"
+
+    receipt = tmp_path / "receipt.json"
+    temp_link = tmp_path / f".{receipt.name}.{os.getpid()}.tmp"
+    temp_link.symlink_to(victim)
+    try:
+        module.write_orientation_receipt({}, receipt)
+        raise AssertionError("temporary symlink was accepted")
+    except OSError:
+        pass
+    assert victim.read_text() == "do-not-touch"
+    assert not receipt.exists()
+    assert temp_link.is_symlink()
+
+
+def test_cli_receipt_write_failure_still_emits_diagnostic_packet(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("do-not-touch")
+    receipt_link = tmp_path / "receipt.json"
+    receipt_link.symlink_to(victim)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--json",
+            "--no-live",
+            "--write-receipt",
+            str(receipt_link),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 15
+    assert "Traceback" not in result.stderr
+    packet = json.loads(result.stdout)
+    assert packet["receipt_write"] == {"written": False, "error": "ValueError"}
+    assert victim.read_text() == "do-not-touch"
 
 
 def test_onboarding_links_exist_only_when_recruitment_is_ready():

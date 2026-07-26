@@ -29,6 +29,10 @@ CANONICAL_ANCHORS = [
     "Dharmic/Jain Epistemics and Ethics",
 ]
 
+RFC3339_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
+
 
 def canonical_file_map(repo_root: Path) -> list[dict[str, object]]:
     """Return the bounded canonical files a new SAB agent should read first."""
@@ -176,7 +180,7 @@ def _positive_int(value: object) -> bool:
 
 
 def _parse_rfc3339(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or RFC3339_PATTERN.fullmatch(value) is None:
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -300,7 +304,7 @@ def probe_live_surface(
         isinstance(latest_witness, dict)
         and _positive_int(latest_witness.get("id"))
         and isinstance(witness_hash, str)
-        and re.fullmatch(r"[0-9a-fA-F]{64}", witness_hash) is not None
+        and re.fullmatch(r"[0-9a-f]{64}", witness_hash) is not None
         and _parse_rfc3339(witness_timestamp) is not None
     )
     heads_fresh = _timestamp_fresh(
@@ -769,6 +773,16 @@ def render_human(packet: dict) -> str:
     )
     if onboarding.get("blocker"):
         lines.append(f"- blocker: {onboarding['blocker']}")
+    receipt_write = packet.get("receipt_write")
+    if isinstance(receipt_write, dict):
+        lines.extend(
+            [
+                "",
+                "RECEIPT WRITE",
+                f"- written: {receipt_write.get('written')}",
+                f"- error: {receipt_write.get('error')}",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -787,17 +801,22 @@ def write_orientation_receipt(packet: dict, path: Path) -> Path:
     }
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    descriptor = os.open(tmp, flags, 0o600)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    created_tmp = False
     try:
+        descriptor = os.open(tmp, flags, 0o600)
+        created_tmp = True
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
             json.dump(receipt, handle, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
-        os.chmod(path, 0o600)
+        created_tmp = False
     finally:
-        if tmp.exists():
+        if created_tmp and tmp.exists():
             tmp.unlink()
     return path
 
@@ -848,13 +867,23 @@ def main() -> int:
         instance_manifest_path=args.instance_manifest,
     )
     receipt_written = False
+    receipt_write_failed = False
     if args.write_receipt:
-        write_orientation_receipt(packet, args.write_receipt)
-        receipt_written = True
+        try:
+            write_orientation_receipt(packet, args.write_receipt)
+            receipt_written = True
+        except (OSError, ValueError) as exc:
+            receipt_write_failed = True
+            packet["receipt_write"] = {
+                "written": False,
+                "error": type(exc).__name__,
+            }
     if args.json:
         print(json.dumps(packet, indent=2, sort_keys=True))
     else:
         print(render_human(packet), end="")
+    if receipt_write_failed:
+        return 15
     if args.strict_live:
         return strict_exit_code(packet, receipt_written=receipt_written)
     if not args.no_live:
