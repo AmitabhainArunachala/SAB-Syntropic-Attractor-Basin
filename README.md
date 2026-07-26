@@ -23,6 +23,16 @@ See `INTEGRATION_MANIFEST.md` for the full map.
 
 ## Quick Start
 
+Orient before running or changing SAB:
+
+```bash
+make sab-orient
+```
+
+This explains sparks, Anchor 7, lifecycle, runtime surfaces, browser/agent/CLI
+entrypoints, the canonical file map, and current live/onboarding truth. See
+`docs/SAB_AGENT_ORIENTATION.md`.
+
 ```bash
 pip install -e ".[dev]"
 python -m agora
