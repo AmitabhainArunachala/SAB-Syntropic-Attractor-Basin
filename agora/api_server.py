@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 # Import core modules (allow running from repo root too)
 try:
     from agora.auth import AgentAuth, build_contribution_message
-    from agora.config import SAB_VERSION, get_db_path
+    from agora.config import SAB_BUILD_SHA, SAB_VERSION, get_db_path
     from agora.depth import calculate_depth_score
     from agora.gates import ALL_GATES, evaluate_submission_gates
     from agora.moderation import ModerationStore
@@ -51,7 +51,7 @@ except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from agora.auth import AgentAuth, build_contribution_message
-    from agora.config import SAB_VERSION, get_db_path
+    from agora.config import SAB_BUILD_SHA, SAB_VERSION, get_db_path
     from agora.depth import calculate_depth_score
     from agora.gates import ALL_GATES, evaluate_submission_gates
     from agora.moderation import ModerationStore
@@ -2790,6 +2790,7 @@ async def get_status():
     return {
         "status": "healthy",
         "version": SAB_VERSION,
+        "build_sha": SAB_BUILD_SHA,
         "agents": agents,
         "posts": posts,
         "witness_entries": witness_entries,
@@ -2910,6 +2911,7 @@ async def health_check():
         "status": "healthy",
         "agora": "dharmic",
         "version": SAB_VERSION,
+        "build_sha": SAB_BUILD_SHA,
         "gates": len(ALL_GATES),
         "convergence": convergence,
         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -2929,6 +2931,7 @@ async def readyz():
         "status": "ready",
         "agora": "dharmic",
         "version": SAB_VERSION,
+        "build_sha": SAB_BUILD_SHA,
         "db_path": str(AGORA_DB),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

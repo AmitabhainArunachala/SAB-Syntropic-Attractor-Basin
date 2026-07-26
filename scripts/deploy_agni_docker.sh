@@ -24,8 +24,9 @@ Environment variables:
   AGNI_DATA_DIR           Host data dir mount (default: /home/openclaw/dharmic-agora-data)
   AGNI_DB_PATH            In-container SAB authority DB path (default: /app/data/sabp.db)
   AGNI_LOG_DIR            Host log dir mount (default: /home/openclaw/dharmic-agora-logs)
-  AGNI_HEALTH_PATH        Health path (default: /api/node/status)
+  AGNI_HEALTH_PATH        Canonical health path (default: /health)
   AGNI_ROOT_PATH          Root probe path (default: /)
+  AGNI_PUBLIC_BASE_URL    Optional public origin for proxy/OpenAPI parity verification
   AGNI_TIMEOUT_SECONDS    Wait timeout for health (default: 90)
   AGNI_RESTORE_BRANCH     Restore remote branch after deploy: 1/0 (default: 1)
 USAGE
@@ -63,8 +64,9 @@ AGNI_CONTAINER_PORT="${AGNI_CONTAINER_PORT:-8000}"
 AGNI_DATA_DIR="${AGNI_DATA_DIR:-/home/openclaw/dharmic-agora-data}"
 AGNI_DB_PATH="${AGNI_DB_PATH:-/app/data/sabp.db}"
 AGNI_LOG_DIR="${AGNI_LOG_DIR:-/home/openclaw/dharmic-agora-logs}"
-AGNI_HEALTH_PATH="${AGNI_HEALTH_PATH:-/api/node/status}"
+AGNI_HEALTH_PATH="${AGNI_HEALTH_PATH:-/health}"
 AGNI_ROOT_PATH="${AGNI_ROOT_PATH:-/}"
+AGNI_PUBLIC_BASE_URL="${AGNI_PUBLIC_BASE_URL:-}"
 AGNI_TIMEOUT_SECONDS="${AGNI_TIMEOUT_SECONDS:-90}"
 AGNI_RESTORE_BRANCH="${AGNI_RESTORE_BRANCH:-1}"
 
@@ -84,6 +86,7 @@ echo "  container=${AGNI_CONTAINER_NAME}"
 echo "  port=${AGNI_HOST_PORT}->${AGNI_CONTAINER_PORT}"
 echo "  db_path=${AGNI_DB_PATH}"
 echo "  health_path=${AGNI_HEALTH_PATH}"
+echo "  public_base_url=${AGNI_PUBLIC_BASE_URL:-<not-set>}"
 echo "  no_build=${NO_BUILD}"
 
 ssh "${AGNI_SSH_TARGET}" bash -s -- \
@@ -100,7 +103,8 @@ ssh "${AGNI_SSH_TARGET}" bash -s -- \
   "${AGNI_ROOT_PATH}" \
   "${AGNI_TIMEOUT_SECONDS}" \
   "${AGNI_RESTORE_BRANCH}" \
-  "${NO_BUILD}" <<'REMOTE'
+  "${NO_BUILD}" \
+  "${AGNI_PUBLIC_BASE_URL}" <<'REMOTE'
 set -euo pipefail
 
 REPO_PATH="$1"
@@ -117,6 +121,7 @@ ROOT_PATH="${11}"
 TIMEOUT_SECONDS="${12}"
 RESTORE_BRANCH="${13}"
 NO_BUILD="${14}"
+PUBLIC_BASE_URL="${15}"
 
 cd "${REPO_PATH}"
 PREV_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -130,13 +135,23 @@ trap restore_branch EXIT
 git fetch origin
 git checkout "${TARGET_BRANCH}"
 git pull --ff-only origin "${TARGET_BRANCH}"
-DEPLOY_SHA="$(git rev-parse --short HEAD)"
+DEPLOY_SHA="$(git rev-parse HEAD)"
 echo "deploy_sha=${DEPLOY_SHA}"
 
 if [[ "${NO_BUILD}" == "1" ]]; then
   echo "skip_build=1"
 else
-  docker build -t "${IMAGE_NAME}" .
+  docker build --build-arg "SAB_BUILD_SHA=${DEPLOY_SHA}" -t "${IMAGE_NAME}" .
+fi
+
+IMAGE_SHA="$(docker image inspect "${IMAGE_NAME}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+if [[ ! "${IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: image is missing a full Git revision label" >&2
+  exit 1
+fi
+if [[ "${IMAGE_SHA}" != "${DEPLOY_SHA}" ]]; then
+  echo "ERROR: image revision ${IMAGE_SHA} does not match checkout ${DEPLOY_SHA}" >&2
+  exit 1
 fi
 
 mkdir -p "${DATA_DIR}" "${LOG_DIR}"
@@ -146,6 +161,7 @@ docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 docker run -d --name "${CONTAINER_NAME}" --restart unless-stopped \
   -p "${HOST_PORT}:${CONTAINER_PORT}" \
   -e "SAB_AUTHORITY_DB_PATH=${DB_PATH}" \
+  -e "SAB_BUILD_SHA=${IMAGE_SHA}" \
   -v "${DATA_DIR}:/app/data" \
   -v "${LOG_DIR}:/app/logs" \
   "${IMAGE_NAME}" >/tmp/"${CONTAINER_NAME}".cid
@@ -161,5 +177,13 @@ ROOT_CODE="$(curl -fsS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${HOST_P
 STATUS_CODE="$(curl -fsS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${HOST_PORT}${HEALTH_PATH}")"
 echo "root_code=${ROOT_CODE}"
 echo "status_code=${STATUS_CODE}"
+python3 scripts/check_deployment_parity.py \
+  "http://127.0.0.1:${HOST_PORT}" \
+  --expected-build-sha "${IMAGE_SHA}"
+if [[ -n "${PUBLIC_BASE_URL}" ]]; then
+  python3 scripts/check_deployment_parity.py \
+    "${PUBLIC_BASE_URL}" \
+    --expected-build-sha "${IMAGE_SHA}"
+fi
 docker ps --filter "name=${CONTAINER_NAME}" --format "container={{.Names}} image={{.Image}} ports={{.Ports}} status={{.Status}}"
 REMOTE
