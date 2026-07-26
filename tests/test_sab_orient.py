@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -70,7 +71,7 @@ def test_json_cli_orients_agents_without_network_access():
     assert packet["recruitment"]["agni"]["moltbook_display"] == "DHARMIC_AGORA_Bridge"
     assert packet["recruitment"]["agni"]["internal_identity"] == "SETU"
     assert packet["recruitment"]["agni"]["moltbook_handle"] == "DHARMIC_AGORA_Bridge"
-    assert packet["recruitment"]["agni"]["public_profile_verified"] is True
+    assert packet["recruitment"]["agni"]["public_profile_observed"] is True
     assert packet["recruitment"]["agni"]["public_profile_url"] == (
         "https://www.moltbook.com/u/DHARMIC_AGORA_Bridge"
     )
@@ -702,10 +703,12 @@ def test_instance_manifest_binds_exact_instance_and_url(tmp_path):
 
 def test_strict_readiness_requires_private_durable_receipt(tmp_path):
     module = load_module()
-    packet = {
-        "schema_version": "sab.orientation.v1",
-        "instance": {"verified": True},
-        "live": {"status": "ready", "recruitment_ready": True, "preflight": {"passed": True}},
+    packet = module.build_packet(REPO, probe_live=False)
+    packet["instance"] = {"verified": True}
+    packet["live"] = {
+        "status": "ready",
+        "recruitment_ready": True,
+        "preflight": {"passed": True},
     }
     receipt = tmp_path / "orient-receipt.json"
 
@@ -717,6 +720,10 @@ def test_strict_readiness_requires_private_durable_receipt(tmp_path):
     data = json.loads(receipt.read_text())
     assert data["schema_version"] == "sab.orientation.receipt.v1"
     assert data["packet_sha256"]
+    assert data["artifact"] == packet["artifact"]
+    assert re.fullmatch(r"[0-9a-f]{40,64}", data["artifact"]["commit_sha"])
+    assert re.fullmatch(r"[0-9a-f]{40,64}", data["artifact"]["tree_sha"])
+    assert re.fullmatch(r"[0-9a-f]{64}", data["artifact"]["script_sha256"])
     assert module.strict_exit_code(packet, receipt_written=True) == 0
 
 
@@ -893,8 +900,13 @@ def test_make_targets_invoke_the_same_read_only_orientation():
 
     assert direct.returncode == 0, direct.stderr
     assert alias.returncode == 0, alias.stderr
-    assert json.loads(direct.stdout) == json.loads(alias.stdout)
-    assert json.loads(direct.stdout)["schema_version"] == "sab.orientation.v1"
+    packet = json.loads(direct.stdout)
+    assert packet == json.loads(alias.stdout)
+    assert packet["schema_version"] == "sab.orientation.v1"
+    assert re.fullmatch(r"[0-9a-f]{40,64}", packet["artifact"]["commit_sha"])
+    assert re.fullmatch(r"[0-9a-f]{40,64}", packet["artifact"]["tree_sha"])
+    assert re.fullmatch(r"[0-9a-f]{64}", packet["artifact"]["script_sha256"])
+    assert packet["live"]["status"] == "not_probed"
 
 
 def test_default_live_command_fails_when_surface_is_unreachable_or_unbound():

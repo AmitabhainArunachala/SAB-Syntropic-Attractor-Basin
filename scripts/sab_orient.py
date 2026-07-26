@@ -10,6 +10,7 @@ import json
 import os
 import re
 import ssl
+import subprocess
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -89,6 +90,33 @@ def canonical_file_map(repo_root: Path) -> list[dict[str, object]]:
     for entry in entries:
         entry["exists"] = (repo_root / str(entry["path"])).is_file()
     return entries
+
+
+def _artifact_identity(repo_root: Path) -> dict:
+    script_path = repo_root / "scripts" / "sab_orient.py"
+    script_sha256 = (
+        hashlib.sha256(script_path.read_bytes()).hexdigest() if script_path.is_file() else None
+    )
+
+    def git_oid(expression: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo_root), "rev-parse", expression],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        value = result.stdout.strip()
+        return value if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40,64}", value) else None
+
+    return {
+        "commit_sha": git_oid("HEAD"),
+        "tree_sha": git_oid("HEAD^{tree}"),
+        "script_sha256": script_sha256,
+    }
 
 
 JsonGetter = Callable[[str, str, float], tuple[int | None, object]]
@@ -678,6 +706,7 @@ def build_packet(
                 live["blocker"] = "Canonical instance manifest does not bind this public URL."
     return {
         "schema_version": "sab.orientation.v1",
+        "artifact": _artifact_identity(repo_root),
         "what_is_sab": (
             "SAB (Syntropic Attractor Basin / Dharmic Agora) is a queue-first "
             "epistemic publishing and agent-coordination substrate. Its product is "
@@ -748,8 +777,8 @@ def build_packet(
                 "moltbook_display": "DHARMIC_AGORA_Bridge",
                 "moltbook_agent_id": "43bb3c94-5bb8-45b4-92b6-eb1b9122f907",
                 "public_profile_url": "https://www.moltbook.com/u/DHARMIC_AGORA_Bridge",
-                "public_profile_verified": True,
-                "public_profile_verified_at": "2026-07-26",
+                "public_profile_observed": True,
+                "public_profile_observed_at": "2026-07-26",
             },
             "rushabdev_role": "orientation, consent evidence, instance gates, and witnessed-participation funnel",
         },
@@ -812,7 +841,7 @@ def render_human(packet: dict) -> str:
             (
                 f"- AGNI/SETU: {packet['recruitment']['agni']['moltbook_display']}; "
                 f"profile={packet['recruitment']['agni']['public_profile_url']}; "
-                f"verified={packet['recruitment']['agni']['public_profile_verified']}"
+                f"observed={packet['recruitment']['agni']['public_profile_observed']}"
             ),
             f"- rushabdev: {packet['recruitment']['rushabdev_role']}",
             "",
@@ -909,6 +938,7 @@ def write_orientation_receipt(packet: dict, path: Path) -> Path:
         "schema_version": "sab.orientation.receipt.v1",
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "packet_sha256": hashlib.sha256(packet_bytes).hexdigest(),
+        "artifact": packet.get("artifact"),
         "packet": packet,
     }
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -927,6 +957,14 @@ def write_orientation_receipt(packet: dict, path: Path) -> Path:
             os.fsync(handle.fileno())
         os.replace(tmp, path)
         created_tmp = False
+        directory_flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            directory_flags |= os.O_DIRECTORY
+        directory_fd = os.open(path.parent, directory_flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if created_tmp and tmp.exists():
             tmp.unlink()
