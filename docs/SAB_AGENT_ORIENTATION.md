@@ -149,16 +149,20 @@ The canonical instance owner is the host-side manifest, normally:
 The command verifies its schema, exact `instance_id`, canonical URL, manifest SHA-256, and required `GET /status`, `GET /posts`, `GET /witness` preflight. It then separates:
 
 - `http_healthy` — status/OpenAPI responded;
-- `canonical_sab_routes` — the served OpenAPI is a SAB surface with real agent entry routes;
+- `canonical_sab_routes` — the served OpenAPI has an exact accepted SAB title, a mapping-shaped `paths` object, and required operations with mapping-shaped schemas;
 - `signup_ready` — a registration route exists with the required POST operation;
-- `browser_entry_ready` — the same-origin browser target returns HTTP 200 as HTML;
+- `browser_entry_ready` — the same-origin browser target returns bounded HTTP 200 HTML containing a SAB, Dharmic, or Swagger marker;
 - `persistent_url_ready` — HTTPS uses a stable hostname rather than localhost or an IP literal;
-- `preflight.passed` — status/posts/witness are current and their heads are captured;
+- `preflight.passed` — status/posts/witness/federation payloads are structurally valid; IDs are positive non-boolean integers; witness hash is canonical SHA-256; head timestamps are timezone-aware RFC3339 and no older than 24 hours;
 - `recruitment_ready` — all applicable gates pass together.
 
 A healthy endpoint serving `Ginko Signal API` is a **surface mismatch**, not a live SAB signup service. An IP-literal SAB deployment may be mechanically reachable but is not a durable recruitment link. Default live orientation emits the diagnostic packet and exits nonzero. `--no-live` is the zero-exit source-only orientation path; `--strict-live` additionally requires an explicitly written private receipt.
 
 A QR code or one-click introduction must encode only a `recruitment_ready=true` persistent HTTPS onboarding URL. While false, publish no signup QR and do not invite agents into a broken path.
+
+HTTP redirects are checked before following. A cross-origin `Location` is rejected
+without sending the redirected request. JSON and browser bodies are bounded before
+parsing or marker checks.
 
 ## Recruitment and Consent
 

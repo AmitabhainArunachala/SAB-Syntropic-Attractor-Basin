@@ -4,6 +4,9 @@ import importlib.util
 import json
 import subprocess
 import sys
+import threading
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -96,12 +99,64 @@ def test_get_json_rejects_cross_origin_redirect(monkeypatch):
         def read(self, amount=-1):
             return b'{"status":"healthy"}'
 
-    monkeypatch.setattr(module.urllib.request, "urlopen", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(module, "_open_url", lambda *args, **kwargs: FakeResponse())
 
     status, body = module._get_json("https://sab.example", "/status", 1.0)
 
     assert status is None
     assert body["error"] == "cross_origin_redirect"
+
+
+def test_get_json_never_sends_cross_origin_redirect_target_request():
+    module = load_module()
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        hits = 0
+
+        def do_GET(self):
+            type(self).hits += 1
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"healthy"}')
+
+        def log_message(self, format, *args):
+            pass
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+
+    class SourceHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                f"http://127.0.0.1:{target.server_address[1]}/stolen",
+            )
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    source = ThreadingHTTPServer(("127.0.0.1", 0), SourceHandler)
+    threads = [
+        threading.Thread(target=server.serve_forever, daemon=True) for server in (target, source)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        status, body = module._get_json(
+            f"http://127.0.0.1:{source.server_address[1]}", "/status", 2.0
+        )
+    finally:
+        for server in (source, target):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
+
+    assert status is None
+    assert body["error"] == "cross_origin_redirect"
+    assert TargetHandler.hits == 0
 
 
 def test_live_probe_fails_closed_when_openapi_is_not_sab():
@@ -219,7 +274,7 @@ def test_live_probe_captures_current_posts_and_witness_preflight():
     payloads = {
         "/status": {"status": "healthy", "posts": 9, "witness_entries": 11},
         "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
-        "/witness": [{"id": 11, "hash": "w11", "timestamp": "2026-07-26T00:01:00Z"}],
+        "/witness": [{"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}],
         "/openapi.json": {
             "info": {"title": "SAB DHARMIC_AGORA API"},
             "paths": {
@@ -237,13 +292,14 @@ def test_live_probe_captures_current_posts_and_witness_preflight():
     live = module.probe_live_surface(
         "https://sab.example",
         get_json=fake_get,
-        probe_url=lambda base, path, timeout: (200, "text/html"),
+        probe_url=lambda base, path, timeout: (200, "text/html", "SAB Swagger UI"),
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
     )
 
     assert live["preflight"]["passed"] is True
     assert live["preflight"]["latest_post_id"] == 9
     assert live["preflight"]["latest_witness_id"] == 11
-    assert live["preflight"]["latest_witness_hash"] == "w11"
+    assert live["preflight"]["latest_witness_hash"] == "a" * 64
     assert live["recruitment_ready"] is True
 
 
@@ -251,8 +307,8 @@ def test_browser_entry_must_resolve_before_recruitment_is_ready():
     module = load_module()
     payloads = {
         "/status": {"status": "healthy"},
-        "/posts": [{"id": 9}],
-        "/witness": [{"id": 11, "hash": "w11"}],
+        "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
+        "/witness": [{"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}],
         "/openapi.json": {
             "info": {"title": "SAB DHARMIC_AGORA API"},
             "paths": {
@@ -270,12 +326,130 @@ def test_browser_entry_must_resolve_before_recruitment_is_ready():
     live = module.probe_live_surface(
         "https://sab.example",
         get_json=fake_get,
-        probe_url=lambda base, path, timeout: (404, "text/html"),
+        probe_url=lambda base, path, timeout: (200, "text/html", "Generic portal"),
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
     )
 
     assert live["browser_entry_ready"] is False
     assert live["recruitment_ready"] is False
     assert live["status"] == "browser_entry_failed"
+
+
+def test_stale_heads_never_become_recruitment_ready():
+    module = load_module()
+    payloads = {
+        "/status": {"status": "healthy"},
+        "/posts": [{"id": 9, "created_at": "2010-01-01T00:00:00Z"}],
+        "/witness": [
+            {
+                "id": 11,
+                "hash": "a" * 64,
+                "timestamp": "2010-01-01T00:00:00Z",
+            }
+        ],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": {}},
+                "/posts": {"get": {}, "post": {}},
+                "/witness": {"get": {}},
+            },
+        },
+        "/api/federation/health": {"status": "operational"},
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=lambda base, path, timeout: (200, "text/html", "SAB"),
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+
+    assert live["preflight"]["passed"] is False
+    assert live["preflight"]["heads_fresh"] is False
+    assert live["recruitment_ready"] is False
+    assert module.live_exit_code({"instance": {"verified": True}, "live": live}) != 0
+
+
+def test_type_invalid_heads_and_null_openapi_operations_fail_closed():
+    module = load_module()
+    payloads = {
+        "/status": {"status": "healthy"},
+        "/posts": [{"id": True, "created_at": "2026-07-26T00:00:00Z"}],
+        "/witness": [{"id": True, "hash": "a", "timestamp": None}],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": None},
+                "/posts": {"get": None, "post": None},
+                "/witness": {"get": None},
+            },
+        },
+        "/api/federation/health": {"status": "operational"},
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    live = module.probe_live_surface("https://sab.example", get_json=fake_get)
+
+    assert live["canonical_sab_routes"] is False
+    assert live["preflight"]["passed"] is False
+    assert live["recruitment_ready"] is False
+    assert module.onboarding_links(live, instance_verified=True)["registration_url"] is None
+
+
+def test_malformed_openapi_paths_returns_diagnostic_instead_of_traceback():
+    module = load_module()
+    payloads = {
+        "/status": {"status": "healthy"},
+        "/posts": [],
+        "/witness": [],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": [],
+        },
+        "/api/federation/health": {"status": "operational"},
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    live = module.probe_live_surface("https://sab.example", get_json=fake_get)
+
+    assert live["status"] == "surface_mismatch"
+    assert live["canonical_sab_routes"] is False
+    assert live["recruitment_ready"] is False
+
+
+def test_malformed_manifest_root_still_emits_source_orientation(tmp_path):
+    manifest = tmp_path / "CANONICAL_SAB_INSTANCE.json"
+    manifest.write_text("[]")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--json",
+            "--no-live",
+            "--instance-manifest",
+            str(manifest),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Traceback" not in result.stderr
+    packet = json.loads(result.stdout)
+    assert packet["instance"]["verified"] is False
+    assert "invalid_root" in packet["instance"]["problems"]
+    assert len(packet["canonical_file_map"]) == 8
 
 
 def test_instance_manifest_binds_exact_instance_and_url(tmp_path):

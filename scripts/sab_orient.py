@@ -8,13 +8,14 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import ssl
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -86,8 +87,20 @@ def canonical_file_map(repo_root: Path) -> list[dict[str, object]]:
     return entries
 
 
-JsonGetter = Callable[[str, str, float], tuple[int | None, dict]]
-UrlProbe = Callable[[str, str, float], tuple[int | None, str]]
+JsonGetter = Callable[[str, str, float], tuple[int | None, object]]
+UrlProbe = Callable[[str, str, float], tuple[int | None, str, str]]
+
+
+class _CrossOriginRedirectError(Exception):
+    pass
+
+
+class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urljoin(req.full_url, newurl)
+        if _url_origin(target) != _url_origin(req.full_url):
+            raise _CrossOriginRedirectError(target)
+        return super().redirect_request(req, fp, code, msg, headers, target)
 
 
 def _url_origin(value: str) -> tuple[str, str | None, int | None]:
@@ -98,21 +111,28 @@ def _url_origin(value: str) -> tuple[str, str | None, int | None]:
     return parsed.scheme.lower(), parsed.hostname, port
 
 
-def _get_json(base_url: str, path: str, timeout: float) -> tuple[int | None, dict]:
+def _open_url(request: urllib.request.Request, timeout: float):
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+        _SameOriginRedirectHandler(),
+    )
+    return opener.open(request, timeout=timeout)
+
+
+def _get_json(base_url: str, path: str, timeout: float) -> tuple[int | None, object]:
     request_url = base_url.rstrip("/") + path
     request = urllib.request.Request(request_url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(
-            request,
-            context=ssl.create_default_context(),
-            timeout=timeout,
-        ) as response:
+        with _open_url(request, timeout) as response:
             if _url_origin(response.geturl()) != _url_origin(request_url):
                 return None, {"error": "cross_origin_redirect", "detail": response.geturl()}
             raw = response.read(2_000_001)
             if len(raw) > 2_000_000:
                 return None, {"error": "response_too_large"}
             return response.status, json.loads(raw.decode("utf-8"))
+    except _CrossOriginRedirectError as exc:
+        return None, {"error": "cross_origin_redirect", "detail": str(exc)}
     except urllib.error.HTTPError as exc:
         try:
             body = json.loads(exc.read().decode("utf-8"))
@@ -123,23 +143,24 @@ def _get_json(base_url: str, path: str, timeout: float) -> tuple[int | None, dic
         return None, {"error": type(exc).__name__, "detail": str(exc)[:240]}
 
 
-def _probe_url(base_url: str, path: str, timeout: float) -> tuple[int | None, str]:
+def _probe_url(base_url: str, path: str, timeout: float) -> tuple[int | None, str, str]:
     request_url = base_url.rstrip("/") + path
     request = urllib.request.Request(request_url, headers={"Accept": "text/html"})
     try:
-        with urllib.request.urlopen(
-            request,
-            context=ssl.create_default_context(),
-            timeout=timeout,
-        ) as response:
+        with _open_url(request, timeout) as response:
             if _url_origin(response.geturl()) != _url_origin(request_url):
-                return None, "cross_origin_redirect"
+                return None, "", "cross_origin_redirect"
             content_type = response.headers.get_content_type()
-            return response.status, content_type
+            body = response.read(65_537)
+            if len(body) > 65_536:
+                return None, content_type, "response_too_large"
+            return response.status, content_type, body.decode("utf-8", errors="replace")
+    except _CrossOriginRedirectError:
+        return None, "", "cross_origin_redirect"
     except urllib.error.HTTPError as exc:
-        return exc.code, ""
+        return exc.code, "", ""
     except Exception as exc:
-        return None, type(exc).__name__
+        return None, "", type(exc).__name__
 
 
 def _persistent_https_url(base_url: str) -> bool:
@@ -154,12 +175,38 @@ def _persistent_https_url(base_url: str) -> bool:
         return True
 
 
+def _positive_int(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def _parse_rfc3339(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _timestamp_fresh(value: object, *, now: datetime, max_age_seconds: int) -> bool:
+    parsed = _parse_rfc3339(value)
+    if parsed is None:
+        return False
+    age = (now - parsed).total_seconds()
+    return -300 <= age <= max_age_seconds
+
+
 def probe_live_surface(
     base_url: str,
     *,
     get_json: JsonGetter = _get_json,
     probe_url: UrlProbe = _probe_url,
     timeout: float = 10.0,
+    now: datetime | None = None,
+    max_head_age_seconds: int = 86_400,
 ) -> dict:
     """Classify live HTTP health separately from canonical SAB readiness."""
     status_http, status_data = get_json(base_url, "/status", timeout)
@@ -167,14 +214,18 @@ def probe_live_surface(
     witness_http, witness = get_json(base_url, "/witness", timeout)
     openapi_http, openapi = get_json(base_url, "/openapi.json", timeout)
     federation_http, federation = get_json(base_url, "/api/federation/health", timeout)
-    title = str((openapi.get("info") or {}).get("title", "")) if isinstance(openapi, dict) else ""
-    paths = openapi.get("paths", {}) if isinstance(openapi, dict) else {}
+    info = openapi.get("info") if isinstance(openapi, dict) else None
+    info = info if isinstance(info, dict) else {}
+    title = str(info.get("title", ""))
+    paths_value = openapi.get("paths") if isinstance(openapi, dict) else None
+    paths = paths_value if isinstance(paths_value, dict) else {}
 
     def has_method(path: str, method: str) -> bool:
         operations = paths.get(path)
-        return isinstance(operations, dict) and method.lower() in {
-            str(key).lower() for key in operations
-        }
+        if not isinstance(operations, dict):
+            return False
+        operation = operations.get(method.lower())
+        return isinstance(operation, dict)
 
     title_is_sab = title.strip() in {"SAB DHARMIC_AGORA API", "SAB Basin API"}
     protocol_ready = (
@@ -196,40 +247,91 @@ def probe_live_surface(
     latest_witness = (
         witness[0] if witness_http == 200 and isinstance(witness, list) and witness else {}
     )
+    effective_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    post_timestamp = (
+        latest_post.get("created_at") or latest_post.get("timestamp")
+        if isinstance(latest_post, dict)
+        else None
+    )
+    witness_timestamp = (
+        latest_witness.get("timestamp") if isinstance(latest_witness, dict) else None
+    )
     status_semantically_healthy = isinstance(status_data, dict) and str(
         status_data.get("status", "")
     ).lower() in {"healthy", "ok"}
-    posts_head_valid = isinstance(latest_post, dict) and latest_post.get("id") is not None
+    posts_head_valid = (
+        isinstance(latest_post, dict)
+        and _positive_int(latest_post.get("id"))
+        and _parse_rfc3339(post_timestamp) is not None
+    )
+    witness_hash = latest_witness.get("hash") if isinstance(latest_witness, dict) else None
     witness_head_valid = (
         isinstance(latest_witness, dict)
-        and latest_witness.get("id") is not None
-        and bool(latest_witness.get("hash"))
+        and _positive_int(latest_witness.get("id"))
+        and isinstance(witness_hash, str)
+        and re.fullmatch(r"[0-9a-fA-F]{64}", witness_hash) is not None
+        and _parse_rfc3339(witness_timestamp) is not None
+    )
+    heads_fresh = _timestamp_fresh(
+        post_timestamp,
+        now=effective_now,
+        max_age_seconds=max_head_age_seconds,
+    ) and _timestamp_fresh(
+        witness_timestamp,
+        now=effective_now,
+        max_age_seconds=max_head_age_seconds,
+    )
+    federation_semantically_healthy = (
+        federation_http == 200
+        and isinstance(federation, dict)
+        and str(federation.get("status", "")).lower() in {"healthy", "ok", "operational"}
     )
     preflight = {
         "passed": (
             status_http == 200
             and posts_http == 200
             and witness_http == 200
+            and openapi_http == 200
             and status_semantically_healthy
             and posts_head_valid
             and witness_head_valid
+            and heads_fresh
+            and federation_semantically_healthy
         ),
         "status_http": status_http,
         "posts_http": posts_http,
         "witness_http": witness_http,
-        "latest_post_id": latest_post.get("id"),
-        "latest_post_timestamp": latest_post.get("created_at") or latest_post.get("timestamp"),
-        "latest_witness_id": latest_witness.get("id"),
-        "latest_witness_hash": latest_witness.get("hash"),
-        "latest_witness_timestamp": latest_witness.get("timestamp"),
+        "status_semantically_healthy": status_semantically_healthy,
+        "posts_head_valid": posts_head_valid,
+        "witness_head_valid": witness_head_valid,
+        "heads_fresh": heads_fresh,
+        "federation_semantically_healthy": federation_semantically_healthy,
+        "max_head_age_seconds": max_head_age_seconds,
+        "latest_post_id": latest_post.get("id") if isinstance(latest_post, dict) else None,
+        "latest_post_timestamp": post_timestamp,
+        "latest_witness_id": (
+            latest_witness.get("id") if isinstance(latest_witness, dict) else None
+        ),
+        "latest_witness_hash": witness_hash,
+        "latest_witness_timestamp": witness_timestamp,
     }
     browser_path = "/docs" if protocol_ready else "/" if basin_ready else None
     browser_http: int | None = None
     browser_content_type = ""
+    browser_body = ""
     if signup_ready and persistent_url_ready and preflight["passed"] and browser_path:
-        browser_http, browser_content_type = probe_url(base_url, browser_path, timeout)
-    browser_entry_ready = browser_http == 200 and browser_content_type.lower().startswith(
-        "text/html"
+        browser_http, browser_content_type, browser_body = probe_url(
+            base_url, browser_path, timeout
+        )
+    browser_marker_valid = (
+        re.search(r"\bSAB\b", browser_body, flags=re.IGNORECASE) is not None
+        or "DHARMIC" in browser_body.upper()
+        or "SWAGGER UI" in browser_body.upper()
+    )
+    browser_entry_ready = (
+        browser_http == 200
+        and browser_content_type.lower().startswith("text/html")
+        and browser_marker_valid
     )
     recruitment_ready = (
         signup_ready and persistent_url_ready and preflight["passed"] and browser_entry_ready
@@ -273,6 +375,7 @@ def probe_live_surface(
         "browser_path": browser_path,
         "browser_http": browser_http,
         "browser_content_type": browser_content_type,
+        "browser_marker_valid": browser_marker_valid,
         "persistent_url_ready": persistent_url_ready,
         "recruitment_ready": recruitment_ready,
         "preflight": preflight,
@@ -321,15 +424,27 @@ def load_instance_manifest(path: Path, *, public_url: str) -> dict:
             "manifest_sha256": None,
             "problems": ["missing"],
         }
+    raw = path.read_bytes()
+    manifest_sha256 = hashlib.sha256(raw).hexdigest()
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(raw.decode("utf-8"))
     except Exception as exc:
         return {
             "verified": False,
             "path": str(path),
             "instance_id": None,
-            "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "manifest_sha256": manifest_sha256,
             "problems": [f"invalid_json:{type(exc).__name__}"],
+        }
+    if not isinstance(data, dict):
+        return {
+            "verified": False,
+            "path": str(path),
+            "instance_id": None,
+            "canonical_url": None,
+            "required_preflight": None,
+            "manifest_sha256": manifest_sha256,
+            "problems": ["invalid_root"],
         }
     if data.get("schema_version") != "dharma.sab.instance_manifest.v1":
         problems.append("schema_version")
@@ -337,7 +452,13 @@ def load_instance_manifest(path: Path, *, public_url: str) -> dict:
         problems.append("instance_id")
     if str(data.get("canonical_url", "")).rstrip("/") != public_url.rstrip("/"):
         problems.append("url")
-    required = set(data.get("required_preflight") or [])
+    required_value = data.get("required_preflight")
+    required = (
+        set(required_value)
+        if isinstance(required_value, list)
+        and all(isinstance(item, str) for item in required_value)
+        else set()
+    )
     if required != {"GET /status", "GET /posts", "GET /witness"}:
         problems.append("required_preflight")
     return {
@@ -346,7 +467,7 @@ def load_instance_manifest(path: Path, *, public_url: str) -> dict:
         "instance_id": data.get("instance_id"),
         "canonical_url": data.get("canonical_url"),
         "required_preflight": data.get("required_preflight"),
-        "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "manifest_sha256": manifest_sha256,
         "problems": problems,
     }
 
@@ -367,7 +488,10 @@ def build_packet(
         )
     )
     try:
-        declared_url = json.loads(effective_manifest.read_text()).get("canonical_url")
+        declared_manifest = json.loads(effective_manifest.read_text())
+        declared_url = (
+            declared_manifest.get("canonical_url") if isinstance(declared_manifest, dict) else None
+        )
     except Exception:
         declared_url = None
     effective_url = (
@@ -543,6 +667,8 @@ def render_human(packet: dict) -> str:
         )
     live = packet["live"]
     instance = packet["instance"]
+    preflight = live.get("preflight") if isinstance(live, dict) else None
+    preflight = preflight if isinstance(preflight, dict) else {}
     lines.extend(
         [
             "",
@@ -564,6 +690,11 @@ def render_human(packet: dict) -> str:
             f"- browser_http: {live.get('browser_http', 'not probed')}",
             f"- persistent_url_ready: {live.get('persistent_url_ready', 'not probed')}",
             f"- recruitment_ready: {live.get('recruitment_ready', 'not probed')}",
+            f"- preflight_passed: {preflight.get('passed', 'not probed')}",
+            f"- heads_fresh: {preflight.get('heads_fresh', 'not probed')}",
+            f"- latest_post_id: {preflight.get('latest_post_id', 'not probed')}",
+            f"- latest_witness_id: {preflight.get('latest_witness_id', 'not probed')}",
+            f"- latest_witness_hash: {preflight.get('latest_witness_hash', 'not probed')}",
         ]
     )
     if live.get("blocker"):
