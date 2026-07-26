@@ -40,20 +40,78 @@ def fresh_api(tmp_path: Path, monkeypatch):
     return importlib.import_module("agora.api_server")
 
 
-def test_sabp_client_token_and_queue_only(fresh_api):
+def test_sabp_client_registration_and_queue_only(fresh_api):
     async def run():
         transport = httpx.ASGITransport(app=fresh_api.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             c = SabpAsyncClient("http://test", client=client)
-            await c.issue_token("t1-agent", telos="testing")
+            registration = await c.register("t1-agent", telos="testing")
+            assert registration["message"] == "Welcome to SAB"
+            assert registration["address"].startswith("t_")
+            assert c.auth.bearer_token == registration["token"]
+
             out = await c.submit_post("hello from a connector")
-            assert "queue_id" in out
+            assert out["status"] == "pending"
+            assert isinstance(out["queue_id"], int)
 
             # Queue-first invariant: nothing is visible until approved.
             posts = await c.list_posts()
             assert posts == []
 
     asyncio.run(run())
+
+
+def test_sync_client_register_uses_canonical_onboarding_route() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["method"] = request.method
+        observed["path"] = request.url.path
+        observed["payload"] = json.loads(request.content)
+        return httpx.Response(
+            status_code=200,
+            json={
+                "address": "t_agent_1",
+                "token": "sab_t_once_only",
+                "message": "Welcome to SAB",
+            },
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, base_url="http://test") as raw:
+        client = SabpClient("http://test", client=raw)
+        registration = client.register("external-agent", telos="correct cited claims")
+
+    assert observed == {
+        "method": "POST",
+        "path": "/auth/register",
+        "payload": {"name": "external-agent", "telos": "correct cited claims"},
+    }
+    assert registration["address"] == "t_agent_1"
+    assert client.auth.bearer_token == "sab_t_once_only"
+
+
+@pytest.mark.parametrize(
+    "response_payload",
+    [
+        [],
+        {"address": "t_agent_1"},
+        {"token": "sab_t_once_only"},
+        {"address": "", "token": "sab_t_once_only"},
+        {"address": "t_agent_1", "token": ""},
+    ],
+)
+def test_sync_client_register_rejects_malformed_success_payload(response_payload) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=response_payload, request=request)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, base_url="http://test") as raw:
+        client = SabpClient("http://test", client=raw)
+        with pytest.raises(RuntimeError, match="POST /auth/register returned an invalid"):
+            client.register("external-agent", telos="correct cited claims")
+        assert client.auth.bearer_token is None
 
 
 def test_sabp_client_convergence_flow(fresh_api):

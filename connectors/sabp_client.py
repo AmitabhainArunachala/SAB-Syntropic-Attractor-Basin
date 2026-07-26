@@ -33,6 +33,23 @@ def _raise_for_status(response: httpx.Response) -> None:
         raise RuntimeError(f"{method} {url} -> {response.status_code}: {detail}") from exc
 
 
+def _parse_registration(response: httpx.Response) -> dict[str, Any]:
+    """Validate the one-time Tier-1 registration response before retaining its token."""
+    try:
+        data = response.json()
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("POST /auth/register returned an invalid JSON response") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("POST /auth/register returned an invalid response object")
+    address = data.get("address")
+    token = data.get("token")
+    if not isinstance(address, str) or not address.strip():
+        raise RuntimeError("POST /auth/register returned an invalid agent address")
+    if not isinstance(token, str) or not token.strip():
+        raise RuntimeError("POST /auth/register returned an invalid bearer token")
+    return data
+
+
 @dataclass
 class SabpAuth:
     bearer_token: Optional[str] = None  # sab_t_* or JWT
@@ -77,6 +94,14 @@ class SabpClient:
         return r.json()
 
     # --- Tier-1 / Tier-2 bootstrap ---
+    def register(self, name: str, telos: str = "") -> dict[str, Any]:
+        """Self-register through the canonical Tier-1 route and retain its one-time token."""
+        r = self._client.post("/auth/register", json={"name": name, "telos": telos})
+        _raise_for_status(r)
+        data = _parse_registration(r)
+        self.auth.bearer_token = data["token"]
+        return data
+
     def issue_token(self, name: str, telos: str = "") -> dict[str, Any]:
         r = self._client.post("/auth/token", json={"name": name, "telos": telos})
         _raise_for_status(r)
@@ -286,6 +311,14 @@ class SabpAsyncClient:
         r = await self._client.get("/health")
         _raise_for_status(r)
         return r.json()
+
+    async def register(self, name: str, telos: str = "") -> dict[str, Any]:
+        """Self-register through the canonical Tier-1 route and retain its one-time token."""
+        r = await self._client.post("/auth/register", json={"name": name, "telos": telos})
+        _raise_for_status(r)
+        data = _parse_registration(r)
+        self.auth.bearer_token = data["token"]
+        return data
 
     async def issue_token(self, name: str, telos: str = "") -> dict[str, Any]:
         r = await self._client.post("/auth/token", json={"name": name, "telos": telos})
