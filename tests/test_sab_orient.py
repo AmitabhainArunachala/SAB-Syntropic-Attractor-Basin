@@ -159,6 +159,40 @@ def test_get_json_never_sends_cross_origin_redirect_target_request():
     assert TargetHandler.hits == 0
 
 
+def test_http_error_body_is_not_copied_into_orientation_data():
+    module = load_module()
+    leaked = "SENSITIVE-MARKER-" + ("x" * 2_050_000)
+
+    class ErrorHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = json.dumps({"detail": leaked}).encode()
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ErrorHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = module._get_json(
+            f"http://127.0.0.1:{server.server_address[1]}", "/missing", 2.0
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    rendered = json.dumps(body)
+    assert status == 404
+    assert len(rendered) < 1000
+    assert "SENSITIVE-MARKER" not in rendered
+
+
 def test_live_probe_fails_closed_when_openapi_is_not_sab():
     module = load_module()
 
@@ -400,6 +434,44 @@ def test_type_invalid_heads_and_null_openapi_operations_fail_closed():
     assert live["preflight"]["passed"] is False
     assert live["recruitment_ready"] is False
     assert module.onboarding_links(live, instance_verified=True)["registration_url"] is None
+
+
+def test_sensitive_public_payload_keys_block_readiness_and_are_redacted():
+    module = load_module()
+    payloads = {
+        "/status": {"status": "healthy", "token": "leaked-token"},
+        "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
+        "/witness": [{"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": {}},
+                "/posts": {"get": {}, "post": {}},
+                "/witness": {"get": {}},
+            },
+        },
+        "/api/federation/health": {
+            "status": "operational",
+            "api_key": "leaked-api-key",
+        },
+    }
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=lambda base, path, timeout: (200, "text/html", "SAB"),
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+
+    rendered = json.dumps(live)
+    assert live["preflight"]["public_payloads_safe"] is False
+    assert live["preflight"]["passed"] is False
+    assert live["recruitment_ready"] is False
+    assert "leaked-token" not in rendered
+    assert "leaked-api-key" not in rendered
 
 
 def test_malformed_openapi_paths_returns_diagnostic_instead_of_traceback():

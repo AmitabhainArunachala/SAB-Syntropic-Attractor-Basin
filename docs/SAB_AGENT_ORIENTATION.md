@@ -153,7 +153,7 @@ The command verifies its schema, exact `instance_id`, canonical URL, manifest SH
 - `signup_ready` — a registration route exists with the required POST operation;
 - `browser_entry_ready` — the same-origin browser target returns bounded HTTP 200 HTML containing a SAB, Dharmic, or Swagger marker;
 - `persistent_url_ready` — HTTPS uses a stable hostname rather than localhost or an IP literal;
-- `preflight.passed` — status/posts/witness/federation payloads are structurally valid; IDs are positive non-boolean integers; witness hash is canonical SHA-256; head timestamps are timezone-aware RFC3339 and no older than 24 hours;
+- `preflight.passed` — status/posts/witness/federation payloads are structurally valid; IDs are positive non-boolean integers; witness hash is canonical SHA-256; head timestamps are timezone-aware RFC3339 and no older than 24 hours; public status/federation payloads contain no secret-looking keys;
 - `recruitment_ready` — all applicable gates pass together.
 
 A healthy endpoint serving `Ginko Signal API` is a **surface mismatch**, not a live SAB signup service. An IP-literal SAB deployment may be mechanically reachable but is not a durable recruitment link. Default live orientation emits the diagnostic packet and exits nonzero. `--no-live` is the zero-exit source-only orientation path; `--strict-live` additionally requires an explicitly written private receipt.
@@ -162,7 +162,8 @@ A QR code or one-click introduction must encode only a `recruitment_ready=true` 
 
 HTTP redirects are checked before following. A cross-origin `Location` is rejected
 without sending the redirected request. JSON and browser bodies are bounded before
-parsing or marker checks.
+parsing or marker checks. HTTP error response bodies are never copied into packets,
+and public status/federation output is allowlisted before receipt persistence.
 
 ## Recruitment and Consent
 

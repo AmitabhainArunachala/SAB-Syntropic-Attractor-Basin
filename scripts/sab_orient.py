@@ -134,11 +134,7 @@ def _get_json(base_url: str, path: str, timeout: float) -> tuple[int | None, obj
     except _CrossOriginRedirectError as exc:
         return None, {"error": "cross_origin_redirect", "detail": str(exc)}
     except urllib.error.HTTPError as exc:
-        try:
-            body = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            body = {"error": "HTTPError", "detail": str(exc)}
-        return exc.code, body
+        return exc.code, {"error": "HTTPError", "detail": str(exc)[:240]}
     except Exception as exc:
         return None, {"error": type(exc).__name__, "detail": str(exc)[:240]}
 
@@ -197,6 +193,41 @@ def _timestamp_fresh(value: object, *, now: datetime, max_age_seconds: int) -> b
         return False
     age = (now - parsed).total_seconds()
     return -300 <= age <= max_age_seconds
+
+
+def _contains_sensitive_public_key(value: object) -> bool:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if any(
+                marker in normalized
+                for marker in (
+                    "token",
+                    "secret",
+                    "password",
+                    "private_key",
+                    "api_key",
+                    "authorization",
+                    "cookie",
+                    "credential",
+                )
+            ):
+                return True
+            if _contains_sensitive_public_key(child):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_sensitive_public_key(item) for item in value)
+    return False
+
+
+def _allowlisted_summary(value: object, allowed: set[str]) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: child
+        for key, child in value.items()
+        if key in allowed and isinstance(child, (str, int, float, bool, type(None)))
+    }
 
 
 def probe_live_surface(
@@ -286,6 +317,9 @@ def probe_live_surface(
         and isinstance(federation, dict)
         and str(federation.get("status", "")).lower() in {"healthy", "ok", "operational"}
     )
+    public_payloads_safe = not _contains_sensitive_public_key(
+        status_data
+    ) and not _contains_sensitive_public_key(federation)
     preflight = {
         "passed": (
             status_http == 200
@@ -297,6 +331,7 @@ def probe_live_surface(
             and witness_head_valid
             and heads_fresh
             and federation_semantically_healthy
+            and public_payloads_safe
         ),
         "status_http": status_http,
         "posts_http": posts_http,
@@ -306,6 +341,7 @@ def probe_live_surface(
         "witness_head_valid": witness_head_valid,
         "heads_fresh": heads_fresh,
         "federation_semantically_healthy": federation_semantically_healthy,
+        "public_payloads_safe": public_payloads_safe,
         "max_head_age_seconds": max_head_age_seconds,
         "latest_post_id": latest_post.get("id") if isinstance(latest_post, dict) else None,
         "latest_post_timestamp": post_timestamp,
@@ -363,7 +399,18 @@ def probe_live_surface(
         "base_url": base_url,
         "http_healthy": http_healthy,
         "status_http": status_http,
-        "status_payload": status_data,
+        "status_payload": _allowlisted_summary(
+            status_data,
+            {
+                "status",
+                "agents",
+                "posts",
+                "comments",
+                "witness_entries",
+                "gates",
+                "version",
+            },
+        ),
         "openapi_http": openapi_http,
         "openapi_title": title,
         "canonical_sab_routes": canonical_routes,
@@ -380,7 +427,16 @@ def probe_live_surface(
         "recruitment_ready": recruitment_ready,
         "preflight": preflight,
         "federation_http": federation_http,
-        "federation": federation,
+        "federation": _allowlisted_summary(
+            federation,
+            {
+                "status",
+                "registered_agents",
+                "active_agents",
+                "total_evaluations",
+                "available_tasks",
+            },
+        ),
         "blocker": blocker,
     }
 
@@ -692,6 +748,7 @@ def render_human(packet: dict) -> str:
             f"- recruitment_ready: {live.get('recruitment_ready', 'not probed')}",
             f"- preflight_passed: {preflight.get('passed', 'not probed')}",
             f"- heads_fresh: {preflight.get('heads_fresh', 'not probed')}",
+            f"- public_payloads_safe: {preflight.get('public_payloads_safe', 'not probed')}",
             f"- latest_post_id: {preflight.get('latest_post_id', 'not probed')}",
             f"- latest_witness_id: {preflight.get('latest_witness_id', 'not probed')}",
             f"- latest_witness_hash: {preflight.get('latest_witness_hash', 'not probed')}",
