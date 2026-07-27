@@ -440,6 +440,53 @@ def test_resume_rejects_rewritten_persisted_receipt(
     assert "schema" in error["detail"]
 
 
+def test_resume_rederives_request_digest_instead_of_trusting_rewritten_row(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _, copied, _, arguments = _prepared_cli(tmp_path)
+    assert main(arguments) == 0
+    capsys.readouterr()
+    with sqlite3.connect(copied) as conn:
+        trigger_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='sab_first_verdict_idempotency_v1_reject_update'"
+        ).fetchone()[0]
+        conn.execute("DROP TRIGGER sab_first_verdict_idempotency_v1_reject_update")
+        row = conn.execute(
+            "SELECT response_json FROM sab_first_verdict_idempotency_v1 "
+            "WHERE operation=? AND idempotency_key=?",
+            (ACTIVATION_OPERATION, IDEMPOTENCY_KEY),
+        ).fetchone()
+        assert row is not None
+        receipt = json.loads(str(row[0]))
+        forged_request_sha256 = "d" * 64
+        receipt["request_sha256"] = forged_request_sha256
+        unsigned = {
+            key: value for key, value in receipt.items() if key != "receipt_sha256"
+        }
+        receipt["receipt_sha256"] = canonical_json_sha256(unsigned)
+        response_json = canonical_json(receipt)
+        conn.execute(
+            "UPDATE sab_first_verdict_idempotency_v1 "
+            "SET request_sha256=?, response_json=?, response_sha256=? "
+            "WHERE operation=? AND idempotency_key=?",
+            (
+                forged_request_sha256,
+                response_json,
+                hashlib.sha256(response_json.encode()).hexdigest(),
+                ACTIVATION_OPERATION,
+                IDEMPOTENCY_KEY,
+            ),
+        )
+        conn.execute(str(trigger_sql))
+        conn.commit()
+
+    assert main(arguments) == 2
+    error = json.loads(capsys.readouterr().out)
+    assert error["error"] == "request_rederivation_mismatch"
+
+
 @pytest.mark.parametrize(
     ("tamper", "error_code"),
     (

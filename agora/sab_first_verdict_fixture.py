@@ -47,6 +47,7 @@ from .sab_first_verdict_lifecycle import (
     FROZEN_EFFECTS,
     MUTATION_BOUNDARIES,
     FixtureExecutionContext,
+    RehearsalLifecycleRequestV1,
     apply_rehearsal_lifecycle,
     build_effect_payload,
     build_lifecycle_event_payload,
@@ -949,6 +950,290 @@ def _validated_receipt(
     return parsed
 
 
+def _one_rederivation_row(
+    conn: sqlite3.Connection,
+    query: str,
+    parameters: tuple[Any, ...],
+    *,
+    label: str,
+) -> sqlite3.Row:
+    rows = conn.execute(query, parameters).fetchall()
+    if len(rows) != 1:
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            f"resume needs exactly one {label} row",
+        )
+    return rows[0]
+
+
+def _canonical_object(value: Any, *, label: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            f"persisted {label} is not valid JSON",
+        ) from exc
+    if not isinstance(parsed, dict) or canonical_json_text(parsed) != str(value):
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            f"persisted {label} is not one canonical object",
+        )
+    return parsed
+
+
+def _signed_evidence_component(
+    conn: sqlite3.Connection,
+    *,
+    artifact_type: str,
+    artifact_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    row = _one_rederivation_row(
+        conn,
+        "SELECT signer, public_key, payload_json, payload_sha256, "
+        "canonicalization, signature "
+        "FROM sab_first_verdict_signature_evidence_v1 "
+        "WHERE artifact_type=? AND artifact_id=?",
+        (artifact_type, artifact_id),
+        label=f"{artifact_type} signature evidence",
+    )
+    payload = _canonical_object(row[2], label=f"{artifact_type} signed payload")
+    if canonical_json_sha256(payload) != str(row[3]):
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            f"persisted {artifact_type} signed-payload digest differs",
+        )
+    return payload, {
+        "alg": "ed25519",
+        "signer": str(row[0]),
+        "public_key": str(row[1]),
+        "signature": str(row[5]),
+        "signed_payload_sha256": str(row[3]),
+        "canonicalization": str(row[4]),
+    }
+
+
+def _rederive_persisted_request_sha256(conn: sqlite3.Connection) -> str:
+    """Rebuild the lifecycle request only from verified persisted components.
+
+    The idempotency row and its receipt deliberately do not participate in this
+    derivation.  A same-operator rewrite of both therefore cannot manufacture a
+    new request proof merely by recomputing their ordinary hashes.
+    """
+
+    policy_payload, policy_signature = _signed_evidence_component(
+        conn,
+        artifact_type="policy",
+        artifact_id="sab_policy_fixture_first_verdict",
+    )
+    countersign_payload, countersign_signature = _signed_evidence_component(
+        conn,
+        artifact_type="countersign",
+        artifact_id=COUNTERSIGN_ID,
+    )
+    supersession_payload, supersession_signature = _signed_evidence_component(
+        conn,
+        artifact_type="lineage",
+        artifact_id=LINEAGE_ID,
+    )
+    successor_packet, successor_signature = _signed_evidence_component(
+        conn,
+        artifact_type="successor",
+        artifact_id=SUCCESSOR_ID,
+    )
+    event_payload, event_signature = _signed_evidence_component(
+        conn,
+        artifact_type="lifecycle_event",
+        artifact_id=EVENT_ID,
+    )
+    try:
+        policy = SignedDispositionPolicyV1.model_validate(
+            {**policy_payload, "signature": policy_signature}
+        )
+        countersign = OperatorCountersignV1.model_validate(
+            {**countersign_payload, "signature": countersign_signature}
+        )
+        supersession = SeedSupersessionV1.model_validate(
+            {**supersession_payload, "claimant_signature": supersession_signature}
+        )
+    except Exception as exc:
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "persisted signed request components do not satisfy their contracts",
+        ) from exc
+
+    countersign_row = _one_rederivation_row(
+        conn,
+        "SELECT countersign_json, countersign_sha256 "
+        "FROM sab_operator_countersigns_v1 WHERE countersign_id=?",
+        (COUNTERSIGN_ID,),
+        label="operational countersign",
+    )
+    operational_countersign = _canonical_object(
+        countersign_row[0], label="operational countersign"
+    )
+    countersign_canonical = countersign.canonical_payload()
+    countersign_sha256 = canonical_json_sha256(countersign_canonical)
+    if (
+        operational_countersign != countersign_canonical
+        or str(countersign_row[1]) != countersign_sha256
+    ):
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "operational countersign differs from verified signed evidence",
+        )
+
+    target_row = _one_rederivation_row(
+        conn,
+        "SELECT artifact_json, artifact_sha256 FROM sab_rehearsal_artifacts_v1 "
+        "WHERE artifact_id=?",
+        (TARGET_ID,),
+        label="target artifact",
+    )
+    target = _canonical_object(target_row[0], label="target artifact")
+    target_packet = target.get("packet")
+    if not isinstance(target_packet, dict) or not (
+        target.get("artifact_id") == policy.artifact_id == TARGET_ID
+        and target.get("packet_sha256")
+        == canonical_json_sha256(target_packet)
+        == policy.artifact_sha256
+        == supersession.predecessor_packet_sha256
+        and str(target_row[1]) == canonical_json_sha256(target)
+    ):
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "target artifact does not bind the signed request target",
+        )
+
+    successor_row = _one_rederivation_row(
+        conn,
+        "SELECT artifact_json, artifact_sha256 FROM sab_rehearsal_artifacts_v1 "
+        "WHERE artifact_id=?",
+        (SUCCESSOR_ID,),
+        label="successor artifact",
+    )
+    successor = _canonical_object(successor_row[0], label="successor artifact")
+    successor_sha256 = canonical_json_sha256(successor)
+    if not (
+        successor.get("artifact_id") == supersession.successor_seed_id == SUCCESSOR_ID
+        and successor.get("packet") == successor_packet
+        and successor.get("packet_signature") == successor_signature
+        and successor.get("packet_sha256")
+        == canonical_json_sha256(successor_packet)
+        == supersession.successor_packet_sha256
+        and str(successor_row[1]) == successor_sha256
+        and countersign.successor_envelope_sha256 == successor_sha256
+    ):
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "successor artifact differs from its signed request bindings",
+        )
+
+    disposition_row = _one_rederivation_row(
+        conn,
+        "SELECT disposition_json, disposition_sha256 "
+        "FROM sab_rehearsal_dispositions_v1 WHERE disposition_id=?",
+        (DISPOSITION_ID,),
+        label="rehearsal disposition",
+    )
+    disposition_payload = _canonical_object(
+        disposition_row[0], label="rehearsal disposition"
+    )
+    try:
+        disposition = RehearsalDispositionV1.model_validate(disposition_payload)
+    except Exception as exc:
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "persisted disposition does not satisfy its contract",
+        ) from exc
+    disposition_canonical = disposition.canonical_payload()
+    disposition_sha256 = canonical_json_sha256(disposition_canonical)
+    if str(disposition_row[1]) != disposition_sha256:
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "persisted disposition digest differs",
+        )
+
+    edge_row = _one_rederivation_row(
+        conn,
+        "SELECT edge_json, edge_sha256 FROM sab_seed_lineage_edges_v1 WHERE edge_id=?",
+        (LINEAGE_ID,),
+        label="lineage edge",
+    )
+    expected_edge = {
+        "edge_id": LINEAGE_ID,
+        **supersession.canonical_payload(),
+        "disposition_id": DISPOSITION_ID,
+        "disposition_sha256": disposition_sha256,
+    }
+    lineage_sha256 = canonical_json_sha256(expected_edge)
+    if (
+        _canonical_object(edge_row[0], label="lineage edge") != expected_edge
+        or str(edge_row[1]) != lineage_sha256
+    ):
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "lineage edge differs from verified signed evidence",
+        )
+
+    event_row = _one_rederivation_row(
+        conn,
+        "SELECT event_type, signer, public_key, payload_json, payload_sha256, "
+        "signature FROM sab_first_verdict_signed_events_v1 WHERE event_id=?",
+        (EVENT_ID,),
+        label="signed lifecycle event",
+    )
+    if not (
+        str(event_row[0]) == "rehearsal_supersession_committed"
+        and str(event_row[1]) == event_signature["signer"]
+        and str(event_row[2]) == event_signature["public_key"]
+        and _canonical_object(event_row[3], label="signed lifecycle event")
+        == event_payload
+        and str(event_row[4]) == canonical_json_sha256(event_payload)
+        and str(event_row[5]) == event_signature["signature"]
+        and event_payload.get("countersign_sha256") == countersign_sha256
+        and event_payload.get("disposition_sha256") == disposition_sha256
+        and event_payload.get("lineage_sha256") == lineage_sha256
+    ):
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "signed lifecycle event differs from verified request components",
+        )
+    signed_event = {
+        "artifact_type": "lifecycle_event",
+        "artifact_id": EVENT_ID,
+        "signer_kind": "fixture_ephemeral",
+        "signed_payload": event_payload,
+        "signature": event_signature,
+    }
+    request = {
+        "schema_version": "sab.rehearsal_lifecycle_request.v1",
+        "idempotency_key": IDEMPOTENCY_KEY,
+        "code_sha": countersign.code_sha,
+        "artifact_id": policy.artifact_id,
+        "artifact_sha256": policy.artifact_sha256,
+        "evaluated_state_hash": policy.evaluated_state_hash,
+        "requested_effects": list(policy.permitted_effects),
+        "signed_policy": policy.canonical_payload(),
+        "countersign": countersign_canonical,
+        "disposition": disposition_canonical,
+        "successor_artifact": successor,
+        "lineage_edge_id": LINEAGE_ID,
+        "supersession": supersession.canonical_payload(),
+        "signed_event": signed_event,
+    }
+    try:
+        canonical_request = RehearsalLifecycleRequestV1.model_validate(
+            request
+        ).canonical_payload()
+    except Exception as exc:
+        raise FixtureRunnerError(
+            "request_rederivation_mismatch",
+            "reconstructed lifecycle request does not satisfy its contract",
+        ) from exc
+    return canonical_json_sha256(canonical_request)
+
+
 def verify_completed_rehearsal(
     attestation: CopyDatabaseAttestation,
     receipt: Mapping[str, Any],
@@ -997,10 +1282,15 @@ def verify_completed_rehearsal(
                 "receipt_missing_after_reopen",
                 "canonical lifecycle receipt is not persisted",
             )
-        if str(row[0]) != expected_receipt["request_sha256"]:
+        rederived_request_sha256 = _rederive_persisted_request_sha256(conn)
+        if not (
+            str(row[0])
+            == expected_receipt["request_sha256"]
+            == rederived_request_sha256
+        ):
             raise FixtureRunnerError(
-                "request_binding_mismatch",
-                "idempotency request digest differs from the receipt",
+                "request_rederivation_mismatch",
+                "idempotency and receipt request digests differ from signed state",
             )
         response_json = str(row[1])
         if hashlib.sha256(response_json.encode("utf-8")).hexdigest() != str(
