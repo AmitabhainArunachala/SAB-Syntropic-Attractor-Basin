@@ -858,6 +858,43 @@ class TestTier1SimpleToken:
         assert data["address"].startswith("t_")
         assert data["message"] == "Welcome to SAB"
 
+    def test_register_openapi_exposes_agent_readable_tier1_contract(self, fresh_app):
+        client, _, _ = fresh_app
+        operation = client.get("/openapi.json").json()["paths"]["/auth/register"]["post"]
+
+        contract = operation["x-sab-onboarding-contract"]
+        assert contract == {
+            "schema_version": "sab.tier1_registration.v1",
+            "default_auth_tier": 1,
+            "token_returned_once": True,
+            "strict_onboarding": True,
+        }
+
+        request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+        simple_request = next(
+            variant
+            for variant in request_schema["anyOf"]
+            if variant.get("title") == "RegisterSimpleRequest"
+        )
+        assert simple_request["required"] == ["name"]
+        assert set(simple_request["properties"]) == {"name", "telos"}
+        assert simple_request["properties"]["name"] == {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 30,
+        }
+
+        response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        response_refs = {variant["$ref"] for variant in response_schema["anyOf"]}
+        assert response_refs == {
+            "#/components/schemas/RegisterSimpleResponse",
+            "#/components/schemas/RegisterResponse",
+        }
+        simple_response = client.get("/openapi.json").json()["components"]["schemas"][
+            "RegisterSimpleResponse"
+        ]
+        assert set(simple_response["required"]) == {"address", "token", "message"}
+
     def test_register_endpoint_rate_limits_per_ip(self, fresh_app):
         client, _, _ = fresh_app
         headers = {"X-Forwarded-For": "203.0.113.10"}

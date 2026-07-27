@@ -25,6 +25,75 @@ REQUIRED_OPERATIONS: dict[str, set[str]] = {
     "/admin/appeal/{queue_id}": {"post"},
 }
 _FULL_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+REGISTRATION_CONTRACT_VERSION = "sab.tier1_registration.v1"
+
+
+def _registration_contract_is_agent_readable(operation: Mapping[str, Any]) -> bool:
+    """Return whether OpenAPI fully describes the default Tier-1 exchange."""
+    contract_value = operation.get("x-sab-onboarding-contract")
+    contract = contract_value if isinstance(contract_value, Mapping) else {}
+    if contract != {
+        "schema_version": REGISTRATION_CONTRACT_VERSION,
+        "default_auth_tier": 1,
+        "token_returned_once": True,
+        "strict_onboarding": True,
+    }:
+        return False
+
+    request_body_value = operation.get("requestBody")
+    request_body = request_body_value if isinstance(request_body_value, Mapping) else {}
+    request_content_value = request_body.get("content")
+    request_content = request_content_value if isinstance(request_content_value, Mapping) else {}
+    request_media_value = request_content.get("application/json")
+    request_media = request_media_value if isinstance(request_media_value, Mapping) else {}
+    request_schema_value = request_media.get("schema")
+    request_schema = request_schema_value if isinstance(request_schema_value, Mapping) else {}
+    request_variants_value = request_schema.get("anyOf")
+    request_variants = request_variants_value if isinstance(request_variants_value, list) else []
+    simple_request = next(
+        (
+            variant
+            for variant in request_variants
+            if isinstance(variant, Mapping) and variant.get("title") == "RegisterSimpleRequest"
+        ),
+        {},
+    )
+    properties_value = simple_request.get("properties")
+    properties = properties_value if isinstance(properties_value, Mapping) else {}
+    name_value = properties.get("name")
+    name = name_value if isinstance(name_value, Mapping) else {}
+    telos_value = properties.get("telos")
+    telos = telos_value if isinstance(telos_value, Mapping) else {}
+    if (
+        simple_request.get("required") != ["name"]
+        or set(properties) != {"name", "telos"}
+        or name.get("type") != "string"
+        or name.get("minLength") != 3
+        or name.get("maxLength") != 30
+        or telos.get("type") != "string"
+        or telos.get("maxLength") != 2000
+    ):
+        return False
+
+    responses_value = operation.get("responses")
+    responses = responses_value if isinstance(responses_value, Mapping) else {}
+    success_value = responses.get("200")
+    success = success_value if isinstance(success_value, Mapping) else {}
+    response_content_value = success.get("content")
+    response_content = response_content_value if isinstance(response_content_value, Mapping) else {}
+    response_media_value = response_content.get("application/json")
+    response_media = response_media_value if isinstance(response_media_value, Mapping) else {}
+    response_schema_value = response_media.get("schema")
+    response_schema = response_schema_value if isinstance(response_schema_value, Mapping) else {}
+    response_variants_value = response_schema.get("anyOf")
+    response_variants = response_variants_value if isinstance(response_variants_value, list) else []
+    response_refs = {
+        variant.get("$ref") for variant in response_variants if isinstance(variant, Mapping)
+    }
+    return response_refs == {
+        "#/components/schemas/RegisterSimpleResponse",
+        "#/components/schemas/RegisterResponse",
+    }
 
 
 def assess_deployment(
@@ -75,6 +144,19 @@ def assess_deployment(
             "OpenAPI is missing canonical operations: " + ", ".join(missing_operations)
         )
 
+    registration_value = paths.get("/auth/register")
+    registration = registration_value if isinstance(registration_value, Mapping) else {}
+    registration_post_value = registration.get("post")
+    registration_post = (
+        registration_post_value if isinstance(registration_post_value, Mapping) else {}
+    )
+    registration_contract_ready = _registration_contract_is_agent_readable(registration_post)
+    if not registration_contract_ready:
+        problems.append(
+            "OpenAPI POST /auth/register does not expose the agent-readable "
+            f"{REGISTRATION_CONTRACT_VERSION} request/response contract"
+        )
+
     return {
         "healthy": not problems,
         "status": service_status,
@@ -82,6 +164,10 @@ def assess_deployment(
         "build_sha": build_sha or None,
         "openapi_title": title,
         "openapi_version": info.get("version"),
+        "registration_contract_version": (
+            REGISTRATION_CONTRACT_VERSION if registration_contract_ready else None
+        ),
+        "registration_contract_ready": registration_contract_ready,
         "required_operation_count": sum(len(methods) for methods in REQUIRED_OPERATIONS.values()),
         "missing_operations": missing_operations,
         "problems": problems,

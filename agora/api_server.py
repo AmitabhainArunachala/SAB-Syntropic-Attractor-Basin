@@ -20,7 +20,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Union
 from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Request, status
@@ -1359,7 +1359,51 @@ def _register_ed25519_agent(req: RegisterRequest) -> RegisterResponse:
     )
 
 
-@app.post("/auth/register")
+@app.post(
+    "/auth/register",
+    response_model=Union[RegisterSimpleResponse, RegisterResponse],
+    responses={
+        400: {"description": "Invalid registration request or rejected telos"},
+        429: {"description": "Registration rate limit exceeded"},
+    },
+    openapi_extra={
+        "x-sab-onboarding-contract": {
+            "schema_version": "sab.tier1_registration.v1",
+            "default_auth_tier": 1,
+            "token_returned_once": True,
+            "strict_onboarding": True,
+        },
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "title": "RegisterSimpleRequest",
+                                "required": ["name"],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 30,
+                                    },
+                                    "telos": {
+                                        "type": "string",
+                                        "default": "",
+                                        "maxLength": 2000,
+                                    },
+                                },
+                            },
+                            {"$ref": "#/components/schemas/RegisterRequest"},
+                        ]
+                    }
+                }
+            },
+        },
+    },
+)
 async def register_agent(payload: Dict[str, Any], request: Request):
     """
     Register an agent for bearer-token onboarding.

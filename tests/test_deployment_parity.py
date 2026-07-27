@@ -24,13 +24,58 @@ REQUIRED_OPERATIONS = {
 
 
 def _canonical_openapi() -> dict:
-    return {
+    openapi = {
         "info": {"title": EXPECTED_TITLE, "version": "0.3.1"},
         "paths": {
             path: {method: {} for method in methods}
             for path, methods in REQUIRED_OPERATIONS.items()
         },
     }
+    openapi["paths"]["/auth/register"]["post"] = {
+        "x-sab-onboarding-contract": {
+            "schema_version": "sab.tier1_registration.v1",
+            "default_auth_tier": 1,
+            "token_returned_once": True,
+            "strict_onboarding": True,
+        },
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "anyOf": [
+                            {
+                                "title": "RegisterSimpleRequest",
+                                "required": ["name"],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 30,
+                                    },
+                                    "telos": {"type": "string", "maxLength": 2000},
+                                },
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        "responses": {
+            "200": {
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "anyOf": [
+                                {"$ref": "#/components/schemas/RegisterSimpleResponse"},
+                                {"$ref": "#/components/schemas/RegisterResponse"},
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+    }
+    return openapi
 
 
 def test_assessment_accepts_canonical_openapi_and_exact_build() -> None:
@@ -46,6 +91,45 @@ def test_assessment_accepts_canonical_openapi_and_exact_build() -> None:
 
     assert result["healthy"] is True
     assert result["problems"] == []
+    assert result["registration_contract_ready"] is True
+    assert result["registration_contract_version"] == "sab.tier1_registration.v1"
+
+
+def test_canonical_server_openapi_passes_agent_readable_registration_gate() -> None:
+    from agora.api_server import app
+
+    result = assess_deployment(
+        status_payload={
+            "status": "healthy",
+            "version": "0.3.1",
+            "build_sha": "a" * 40,
+        },
+        openapi_payload=app.openapi(),
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["healthy"] is True, result["problems"]
+    assert result["registration_contract_ready"] is True
+
+
+def test_assessment_rejects_untyped_registration_operation() -> None:
+    openapi = _canonical_openapi()
+    openapi["paths"]["/auth/register"]["post"] = {}
+
+    result = assess_deployment(
+        status_payload={
+            "status": "healthy",
+            "version": "0.3.1",
+            "build_sha": "a" * 40,
+        },
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["healthy"] is False
+    assert result["registration_contract_ready"] is False
+    assert result["registration_contract_version"] is None
+    assert any("sab.tier1_registration.v1" in problem for problem in result["problems"])
 
 
 def test_assessment_rejects_foreign_openapi_and_missing_build_binding() -> None:
