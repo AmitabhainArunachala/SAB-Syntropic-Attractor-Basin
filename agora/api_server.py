@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 # Import core modules (allow running from repo root too)
 try:
@@ -431,6 +431,8 @@ class NamedAgentRequest(BaseModel):
 
 
 class RegisterSimpleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., min_length=3, max_length=30)
     telos: str = Field("", max_length=2000)
 

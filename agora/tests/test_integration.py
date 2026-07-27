@@ -858,6 +858,17 @@ class TestTier1SimpleToken:
         assert data["address"].startswith("t_")
         assert data["message"] == "Welcome to SAB"
 
+    def test_register_endpoint_rejects_undocumented_tier1_fields(self, fresh_app):
+        client, _, _ = fresh_app
+        resp = client.post("/auth/register", json={
+            "name": "strict-agent", "telos": "research", "unexpected": "ignored-before"
+        })
+        assert resp.status_code == 400
+        assert any(
+            error["type"] == "extra_forbidden" and error["loc"] == ["unexpected"]
+            for error in resp.json()["detail"]
+        )
+
     def test_register_openapi_exposes_agent_readable_tier1_contract(self, fresh_app):
         client, _, _ = fresh_app
         openapi = client.get("/openapi.json").json()
