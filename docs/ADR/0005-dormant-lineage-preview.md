@@ -22,9 +22,18 @@ prohibition; it does not answer them or design Build B.
 
 ## Decision
 
-Build A produces this ADR as its only lineage deliverable. It must not create
-lineage models, policy, storage, migrations, schemas, fixtures, APIs, CLIs,
-routes, activation logic, or a Build B implementation plan.
+Build A produces this ADR as its only deliverable for the deferred multi-file
+lineage preview. It must not create that preview's lineage models, policy,
+storage, migrations, schemas, fixtures, APIs, CLIs, routes, activation logic,
+or a Build B implementation plan.
+
+This prohibition does not erase the smaller, explicitly required Build A
+rehearsal mechanics in the controlling goal: the strict
+`SeedSupersessionV1` contract, one immutable copy-scoped lineage edge, the
+read-only `GET /api/v1/seeds/{seed_id}/lineage` maintenance route, and the
+synthetic fixture used to prove their atomic rollback. Those mechanics are
+confined to an attested copied database, cannot create or activate a live
+child, and confer no identity, standing, rank, capability, or live lineage.
 
 The following questions remain deferred:
 
@@ -55,7 +64,8 @@ The following questions remain deferred:
 7. **Successor revival:** What a revival means without rewriting immutable
    compost history, which authority may approve it, how continuity is proven,
    and what standing survives remain unresolved. Build A creates no revival or
-   live-successor effect.
+   live-successor effect. Its synthetic copy-scoped successor is test evidence,
+   not a revival or live effect.
 8. **Multi-file lineage preview:** Whether the v1 lineage substrate should be
    built at all, who ratifies its open policy, and which exact file manifest is
    intended remain unresolved. The controlling Build A goal calls it the
@@ -107,9 +117,11 @@ build_b = not_run_authority_unresolved
 ## Consequences
 
 Build A can close without provider availability or Build B authority. The cost
-is intentional: no lineage substrate or activation capability is created, and
-all attended, live, batch, revival, and reproduction questions remain open for
-a separately authorized future decision.
+is intentional: no deferred or live lineage substrate and no activation
+capability is created. The minimal copied-database rehearsal records described
+above remain non-live proof artifacts, while all attended, live, batch,
+revival, and reproduction questions remain open for a separately authorized
+future decision.
 
 This ADR records a boundary, not approval of the v1 Phase B design. A later ADR
 may supersede it only after the relevant authority and policy questions are
