@@ -22,6 +22,15 @@ from agora.sab_first_verdict_evidence import (  # noqa: E402
     snapshot_database,
     validate_checkpoint_chain,
 )
+from agora.sab_first_verdict_fixture import (  # noqa: E402
+    FixtureRunnerError,
+    run_copied_database_rehearsal,
+)
+from agora.sab_first_verdict_lifecycle import LifecycleError  # noqa: E402
+from agora.sab_first_verdict_storage import (  # noqa: E402
+    CopyDatabaseAttestation,
+    FirstVerdictStorageError,
+)
 
 
 def _load_json(path: Path) -> Any:
@@ -31,6 +40,17 @@ def _load_json(path: Path) -> Any:
 
 def _print_json(payload: Any) -> None:
     print(json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False))
+
+
+def _print_canonical_json(payload: Any) -> None:
+    print(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,6 +89,35 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoints.add_argument("--expected-tree-sha")
     checkpoints.add_argument("--expected-database-sha256")
     checkpoints.add_argument("--expected-lifecycle-fingerprint")
+
+    rehearsal = subcommands.add_parser(
+        "run-rehearsal",
+        help=(
+            "run the signed nine-seat lifecycle only on an explicitly attested "
+            "A0 copied database"
+        ),
+    )
+    rehearsal.add_argument("--copy-database", type=Path, required=True)
+    rehearsal.add_argument(
+        "--forbidden-source-database",
+        type=Path,
+        required=True,
+        help="explicit source path which the runner must never write",
+    )
+    rehearsal.add_argument("--a0-copy-receipt", type=Path, required=True)
+    rehearsal.add_argument(
+        "--a0-copy-receipt-sha256",
+        required=True,
+        help="externally anchored SHA-256 from the A0 checkpoint chain",
+    )
+    rehearsal.add_argument("--source-backup-sha256", required=True)
+    rehearsal.add_argument("--expected-lifecycle-fingerprint", required=True)
+    rehearsal.add_argument("--code-sha", required=True)
+    rehearsal.add_argument(
+        "--verify-exact-retry",
+        action="store_true",
+        help="replay the same in-memory signed request and require byte identity",
+    )
     return parser
 
 
@@ -83,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             result = preview_database_readonly(args.database)
             if args.contract_only:
                 result = preview_contract_payload(result)
-        else:
+        elif args.command == "validate-checkpoints":
             result = validate_checkpoint_chain(
                 [_load_json(path) for path in args.checkpoints],
                 expected_head=args.expected_head,
@@ -91,7 +140,32 @@ def main(argv: list[str] | None = None) -> int:
                 expected_database_sha256=args.expected_database_sha256,
                 expected_lifecycle_fingerprint=args.expected_lifecycle_fingerprint,
             )
-    except (EvidenceValidationError, OSError, sqlite3.Error) as exc:
+        else:
+            receipt_path = args.a0_copy_receipt
+            attestation = CopyDatabaseAttestation(
+                proof_class="copied_live_db_rehearsal",
+                database_path=args.copy_database,
+                source_database_path=args.forbidden_source_database,
+                source_backup_sha256=args.source_backup_sha256,
+                expected_lifecycle_fingerprint=args.expected_lifecycle_fingerprint,
+                copy_receipt_sha256=args.a0_copy_receipt_sha256,
+                copy_receipt_path=receipt_path,
+            )
+            result = run_copied_database_rehearsal(
+                attestation,
+                code_sha=args.code_sha,
+                verify_exact_retry=args.verify_exact_retry,
+            )
+            _print_canonical_json(result)
+            return 0
+    except (
+        EvidenceValidationError,
+        FirstVerdictStorageError,
+        FixtureRunnerError,
+        LifecycleError,
+        OSError,
+        sqlite3.Error,
+    ) as exc:
         code = getattr(exc, "code", "evidence_error")
         _print_json({"ok": False, "error": code, "detail": str(exc)})
         return 2
