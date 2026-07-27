@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.check_deployment_parity import _fetch_json, assess_deployment
+from scripts.check_deployment_parity import MAX_JSON_BYTES, _fetch_json, assess_deployment
 
 
 EXPECTED_TITLE = "SAB DHARMIC_AGORA API"
@@ -195,6 +195,54 @@ def test_deployment_probe_rejects_redirect_without_contacting_target() -> None:
         target.server_close()
         source_thread.join(timeout=2)
         target_thread.join(timeout=2)
+
+
+def test_deployment_probe_rejects_non_json_content_type() -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            body = b"{}"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(RuntimeError, match="JSON Content-Type"):
+            _fetch_json(f"http://127.0.0.1:{server.server_port}", "/status", 2.0)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_deployment_probe_rejects_announced_oversized_body_before_reading() -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(MAX_JSON_BYTES + 1))
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(RuntimeError, match="JSON size limit"):
+            _fetch_json(f"http://127.0.0.1:{server.server_port}", "/openapi.json", 2.0)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_agni_deploy_requires_public_origin_before_ssh(tmp_path: Path) -> None:

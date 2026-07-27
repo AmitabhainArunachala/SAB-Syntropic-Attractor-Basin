@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 
 EXPECTED_OPENAPI_TITLE = "SAB DHARMIC_AGORA API"
+MAX_JSON_BYTES = 2_000_000
 REQUIRED_OPERATIONS: dict[str, set[str]] = {
     "/auth/register": {"post"},
     "/posts": {"get", "post"},
@@ -132,7 +133,32 @@ def _fetch_json(base_url: str, path: str, timeout: float) -> dict[str, Any]:
     with opener.open(request, timeout=timeout) as response:
         if response.status != 200:
             raise RuntimeError(f"GET {path} returned HTTP {response.status}")
-        payload = json.load(response)
+        content_type = response.headers.get("Content-Type", "")
+        try:
+            content_type.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise RuntimeError(f"GET {path} returned a non-ASCII Content-Type") from exc
+        if len(content_type) > 128:
+            raise RuntimeError(f"GET {path} returned an overlong Content-Type")
+        media_type = content_type.split(";", 1)[0].strip().lower()
+        if media_type != "application/json" and not (
+            media_type.startswith("application/") and media_type.endswith("+json")
+        ):
+            raise RuntimeError(f"GET {path} did not return a JSON Content-Type")
+
+        content_length = response.headers.get("Content-Length")
+        if content_length is not None:
+            try:
+                announced_size = int(content_length, 10)
+            except ValueError as exc:
+                raise RuntimeError(f"GET {path} returned an invalid Content-Length") from exc
+            if announced_size < 0 or announced_size > MAX_JSON_BYTES:
+                raise RuntimeError(f"GET {path} response exceeds the JSON size limit")
+
+        body = response.read(MAX_JSON_BYTES + 1)
+        if len(body) > MAX_JSON_BYTES:
+            raise RuntimeError(f"GET {path} response exceeds the JSON size limit")
+        payload = json.loads(body)
     if not isinstance(payload, dict):
         raise RuntimeError(f"GET {path} did not return a JSON object")
     return payload
