@@ -10,6 +10,7 @@ from agora.sab_first_verdict_evidence import (
     checkpoint_sha256,
     seal_checkpoint,
     validate_checkpoint_chain,
+    validate_checkpoint_schema,
 )
 
 
@@ -100,6 +101,23 @@ def test_checkpoint_chain_accepts_canonical_hash_and_bound_current_state() -> No
     assert result["valid"] is True
     assert result["checkpoint_count"] == 2
     assert result["head_checkpoint_sha256"] == checkpoint_sha256(chain[-1])
+
+
+def test_checkpoint_schema_rejects_extra_nested_and_missing_required_fields() -> None:
+    checkpoint = _valid_chain()[0]
+    validate_checkpoint_schema(checkpoint)
+
+    extra = copy.deepcopy(checkpoint)
+    extra["worktree"]["undeclared"] = True
+    with pytest.raises(EvidenceValidationError) as raised:
+        validate_checkpoint_schema(extra)
+    assert raised.value.code == "checkpoint_schema_invalid"
+
+    missing = copy.deepcopy(checkpoint)
+    del missing["mutation_counters"]["providers"]
+    with pytest.raises(EvidenceValidationError) as raised:
+        validate_checkpoint_schema(missing)
+    assert raised.value.code == "checkpoint_schema_invalid"
 
 
 @pytest.mark.parametrize(

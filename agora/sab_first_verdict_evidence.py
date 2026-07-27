@@ -16,9 +16,21 @@ import sqlite3
 import stat
 from collections import Counter
 from contextlib import closing
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 from urllib.parse import quote
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from .sab_artifact_verdict import (
+    MASTER_VISION_CHALLENGE_ID,
+    MASTER_VISION_SEED_ID,
+    MASTER_VISION_SIGNER,
+    MasterVisionStateObservationV1,
+    _seal_master_vision_observation,
+    canonical_sha256 as contract_json_sha256,
+)
 
 
 GENESIS_HASH = "genesis"
@@ -581,6 +593,155 @@ def lifecycle_fingerprint(conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+def observe_master_vision_state(conn: sqlite3.Connection) -> Any:
+    """Derive the exact Master Vision state witness from the opened database.
+
+    This function is read-only.  API and lifecycle callers supply its result as
+    an out-of-band evaluator input; request JSON cannot claim these states.
+    """
+
+    required_tables = (
+        "sab_seed_packets_v1",
+        "sab_challenge_packets_v1",
+        "sab_witness_events_v1",
+        "sab_seed_lineage_edges_v1",
+        "sab_rehearsal_dispositions_v1",
+        "sab_first_verdict_schema_migrations_v1",
+        "web_agents",
+    )
+    missing = [table for table in required_tables if not _table_exists(conn, table)]
+    if missing:
+        raise EvidenceValidationError(
+            "master_vision_state_tables_missing",
+            "Master Vision state cannot be derived from this database",
+        )
+    # Absence of an effect ledger is not evidence of zero effects.  Require the
+    # exact additive migration that creates the disposition and lineage ledgers
+    # before their zero row counts can participate in the observation.
+    from .sab_first_verdict_storage import MIGRATION_DIGEST, MIGRATION_ID
+
+    migration_rows = conn.execute(
+        "SELECT migration_digest FROM sab_first_verdict_schema_migrations_v1 "
+        "WHERE migration_id = ?",
+        (MIGRATION_ID,),
+    ).fetchall()
+    if len(migration_rows) != 1 or str(migration_rows[0][0]) != MIGRATION_DIGEST:
+        raise EvidenceValidationError(
+            "master_vision_effect_ledger_unproven",
+            "Master Vision effect ledgers are not bound to the Build A migration",
+        )
+    seed_rows = conn.execute(
+        """
+        SELECT state, packet_json, packet_hash
+        FROM sab_seed_packets_v1
+        WHERE seed_id = ?
+        """,
+        (MASTER_VISION_SEED_ID,),
+    ).fetchall()
+    challenge_rows = conn.execute(
+        """
+        SELECT status, packet_json, packet_hash
+        FROM sab_challenge_packets_v1
+        WHERE challenge_id = ? AND target_seed_id = ?
+        """,
+        (MASTER_VISION_CHALLENGE_ID, MASTER_VISION_SEED_ID),
+    ).fetchall()
+    agent_rows = conn.execute(
+        "SELECT public_key FROM web_agents WHERE id = ?",
+        (MASTER_VISION_SIGNER,),
+    ).fetchall()
+    if len(seed_rows) != 1 or len(challenge_rows) != 1 or len(agent_rows) != 1:
+        raise EvidenceValidationError(
+            "master_vision_state_row_ambiguity",
+            "Master Vision state rows are missing or ambiguous",
+        )
+    seed_state, seed_json, seed_packet_sha256 = seed_rows[0]
+    challenge_state, challenge_json, challenge_packet_sha256 = challenge_rows[0]
+    try:
+        seed_packet = json.loads(str(seed_json))
+        challenge_packet = json.loads(str(challenge_json))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise EvidenceValidationError(
+            "master_vision_state_packet_invalid",
+            "Master Vision database packet JSON is invalid",
+        ) from exc
+    if not isinstance(seed_packet, Mapping) or not isinstance(
+        challenge_packet, Mapping
+    ):
+        raise EvidenceValidationError(
+            "master_vision_state_packet_invalid",
+            "Master Vision database packets must be objects",
+        )
+    witness_events = [
+        {
+            "event_id": str(row[0]),
+            "event_type": str(row[1]),
+            "event_hash": str(row[2]),
+        }
+        for row in conn.execute(
+            """
+            SELECT event_id, event_type, event_hash
+            FROM sab_witness_events_v1
+            WHERE subject_seed_id = ?
+            ORDER BY event_id
+            """,
+            (MASTER_VISION_SEED_ID,),
+        ).fetchall()
+    ]
+    witness_event_types = tuple(
+        sorted({event["event_type"] for event in witness_events})
+    )
+
+    def target_count(table: str, predicate: str, parameters: tuple[str, ...]) -> int:
+        return int(
+            conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {predicate}", parameters
+            ).fetchone()[0]
+        )
+
+    observation = {
+        "schema": "sab.master_vision_state_observation.v1",
+        "proof_class": "attested_copied_database_observation",
+        "database_lifecycle_fingerprint": lifecycle_fingerprint(conn)["sha256"],
+        "seed_id": MASTER_VISION_SEED_ID,
+        "seed_state": str(seed_state),
+        "seed_packet_sha256": str(seed_packet_sha256),
+        "seed_packet_json_sha256": contract_json_sha256(seed_packet),
+        "challenge_id": MASTER_VISION_CHALLENGE_ID,
+        "challenge_state": str(challenge_state),
+        "challenge_packet_sha256": str(challenge_packet_sha256),
+        "challenge_packet_json_sha256": contract_json_sha256(challenge_packet),
+        "signer": MASTER_VISION_SIGNER,
+        "signer_public_key": str(agent_rows[0][0]),
+        "witness_event_count": len(witness_events),
+        "witness_event_types": witness_event_types,
+        "witness_event_chain_sha256": contract_json_sha256(witness_events),
+        "terminal_witness_count": sum(
+            event["event_type"] not in {"submit", "challenge"}
+            for event in witness_events
+        ),
+        "supersession_edge_count": target_count(
+            "sab_seed_lineage_edges_v1",
+            "predecessor_seed_id = ? OR successor_seed_id = ?",
+            (MASTER_VISION_SEED_ID, MASTER_VISION_SEED_ID),
+        ),
+        "effective_disposition_count": target_count(
+            "sab_rehearsal_dispositions_v1",
+            "target_artifact_id = ?",
+            (MASTER_VISION_SEED_ID,),
+        ),
+    }
+    observation["observed_state_hash"] = contract_json_sha256(observation)
+    try:
+        validated = MasterVisionStateObservationV1.model_validate(observation)
+    except ValidationError as exc:
+        raise EvidenceValidationError(
+            "master_vision_state_not_frozen",
+            "Master Vision state differs from the signed challenged/pending prefix",
+        ) from exc
+    return _seal_master_vision_observation(validated)
+
+
 def snapshot_connection(conn: sqlite3.Connection) -> dict[str, Any]:
     integrity_rows = [
         str(row[0]) for row in conn.execute("PRAGMA integrity_check").fetchall()
@@ -908,26 +1069,63 @@ def preview_database_readonly(
     path: Path | str,
     *,
     actor_slots: Mapping[str, str] | None = None,
+    expected_file_identity: tuple[int, int] | None = None,
+    expected_lifecycle_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Run the preview through mode=ro and attach a file/head/fingerprint proof."""
 
-    candidate = Path(path).resolve(strict=True)
+    requested = Path(path)
+    if requested.is_symlink():
+        raise EvidenceValidationError(
+            "preview_database_symlink",
+            "read-only preview database must not be a symlink",
+        )
+    candidate = requested.resolve(strict=True)
     before_stat = candidate.stat()
+    if (
+        expected_file_identity is not None
+        and (
+            before_stat.st_dev,
+            before_stat.st_ino,
+        )
+        != expected_file_identity
+    ):
+        raise EvidenceValidationError(
+            "preview_database_identity_mismatch",
+            "read-only preview database identity differs from its runtime binding",
+        )
     before_sha = file_sha256(candidate)
     with closing(open_sqlite_readonly(candidate)) as conn:
         before_lifecycle = lifecycle_fingerprint(conn)
+        if (
+            expected_lifecycle_fingerprint is not None
+            and before_lifecycle["sha256"] != expected_lifecycle_fingerprint
+        ):
+            raise EvidenceValidationError(
+                "preview_database_lifecycle_mismatch",
+                "read-only preview database lifecycle differs from its attestation",
+            )
         before_heads = witness_forest_heads(conn)
         preview = preview_language_womb_generic_placeholders(
             conn, actor_slots=actor_slots
         )
         after_lifecycle = lifecycle_fingerprint(conn)
         after_heads = witness_forest_heads(conn)
+    if requested.is_symlink():
+        raise EvidenceValidationError(
+            "preview_database_replaced",
+            "read-only preview database became a symlink during evaluation",
+        )
     after_stat = candidate.stat()
     after_sha = file_sha256(candidate)
     proof = {
         "file_sha256_unchanged": before_sha == after_sha,
         "file_size_unchanged": before_stat.st_size == after_stat.st_size,
         "file_mtime_unchanged": before_stat.st_mtime_ns == after_stat.st_mtime_ns,
+        "file_identity_unchanged": (
+            before_stat.st_dev == after_stat.st_dev
+            and before_stat.st_ino == after_stat.st_ino
+        ),
         "witness_heads_unchanged": before_heads == after_heads,
         "lifecycle_fingerprint_unchanged": before_lifecycle["sha256"]
         == after_lifecycle["sha256"],
@@ -1002,6 +1200,167 @@ def checkpoint_sha256(checkpoint: Mapping[str, Any]) -> str:
     return canonical_sha256(unsigned)
 
 
+class _CheckpointModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class _CheckpointArtifactRef(_CheckpointModel):
+    path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    proof_class: str
+
+
+class _CheckpointDatabaseRef(_CheckpointModel):
+    present: bool
+    path_ref: str | None
+    sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    integrity: Literal["ok", "failed", "not_checked", "not_present"]
+    lifecycle_fingerprint: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class _CheckpointAcceptedBase(_CheckpointModel):
+    repo: str
+    source_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    source_tree_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    integration_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    integration_tree_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+
+
+class _CheckpointWorktree(_CheckpointModel):
+    path: str
+    branch: str
+    head: str = Field(pattern=r"^[0-9a-f]{40}$")
+    tree_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    porcelain_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class _CheckpointAuthority(_CheckpointModel):
+    implementation: Literal["authorized_local_build_a"]
+    live_effects: Literal["forbidden"]
+    authority_refs: tuple[str, ...]
+
+    @field_validator("authority_refs")
+    @classmethod
+    def unique_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("authority_refs must be unique")
+        return value
+
+
+class _CheckpointDispositionEvaluation(_CheckpointModel):
+    case_ref: str = Field(min_length=1)
+    artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    result: Literal["AuthorizedCopyOnly", "AdvisoryOnly", "NoJurisdiction"]
+    scope: Literal["Copy", "Live", "All"]
+    authority_refs: tuple[str, ...]
+    authority_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    allowed_effects: tuple[str, ...]
+    forbidden_effects: tuple[str, ...]
+    evaluated_state_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_artifact: _CheckpointArtifactRef
+
+    @field_validator("authority_refs", "allowed_effects", "forbidden_effects")
+    @classmethod
+    def unique_values(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("checkpoint disposition values must be unique")
+        return value
+
+
+class _CheckpointTestResult(_CheckpointModel):
+    command: str
+    exit_code: int
+    stdout_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    proof_class: str | None = None
+
+
+class _CheckpointMutationCounters(_CheckpointModel):
+    live_db: Literal[0]
+    services: Literal[0]
+    providers: Literal[0]
+    external: Literal[0]
+    source_checkout: Literal[0]
+    fixture_or_copy_db: int = Field(default=0, ge=0)
+
+
+class _CheckpointBlocker(_CheckpointModel):
+    code: str
+    evidence: tuple[_CheckpointArtifactRef, ...]
+    next_safe_action: str
+
+
+class BuildACheckpointV1(_CheckpointModel):
+    """Strict local mirror of the controlling CHECKPOINT_SCHEMA.json."""
+
+    schema_version: Literal["sab.build_a_checkpoint.v1"]
+    run_id: str = Field(min_length=1)
+    native_goal_id: str | None
+    checkpoint_seq: int = Field(ge=0)
+    checkpoint_id: str = Field(min_length=1)
+    dag_node: Literal[
+        "G0",
+        "A0",
+        "A1",
+        "A2",
+        "A3",
+        "A4",
+        "A5",
+        "A6",
+        "A7",
+        "C0",
+        "C1",
+        "C4",
+        "D0",
+        "I0",
+        "CLOSEOUT",
+    ]
+    status: Literal["pending", "running", "passed", "failed", "blocked", "skipped"]
+    started_at: datetime
+    completed_at: datetime | None
+    accepted_base: _CheckpointAcceptedBase
+    worktree: _CheckpointWorktree
+    authority: _CheckpointAuthority
+    disposition_evaluations: tuple[_CheckpointDispositionEvaluation, ...]
+    source_db: _CheckpointDatabaseRef
+    copy_db: _CheckpointDatabaseRef
+    inputs: tuple[_CheckpointArtifactRef, ...]
+    outputs: tuple[_CheckpointArtifactRef, ...]
+    tests: tuple[_CheckpointTestResult, ...]
+    commit_sha: str | None = Field(pattern=r"^[0-9a-f]{40}$")
+    mutation_counters: _CheckpointMutationCounters
+    blockers: tuple[_CheckpointBlocker, ...]
+    next_dag_nodes: tuple[str, ...]
+    next_safe_action: str = Field(min_length=1)
+    previous_checkpoint_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    checkpoint_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("started_at", "completed_at")
+    @classmethod
+    def timezone_aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("checkpoint timestamps must be timezone-aware")
+        return value
+
+    @field_validator("next_dag_nodes")
+    @classmethod
+    def unique_next_nodes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("next_dag_nodes must be unique")
+        return value
+
+
+def validate_checkpoint_schema(checkpoint: Mapping[str, Any]) -> None:
+    """Validate one checkpoint without relying on an optional JSON Schema CLI."""
+
+    try:
+        BuildACheckpointV1.model_validate(checkpoint)
+    except ValidationError as exc:
+        raise EvidenceValidationError(
+            "checkpoint_schema_invalid",
+            "checkpoint does not conform to CHECKPOINT_SCHEMA.json",
+        ) from exc
+
+
 def seal_checkpoint(checkpoint: Mapping[str, Any]) -> dict[str, Any]:
     sealed = dict(checkpoint)
     sealed["checkpoint_sha256"] = checkpoint_sha256(sealed)
@@ -1058,6 +1417,21 @@ def validate_checkpoint_chain(
     accepted_base: Any = None
     checkpoint_ids: set[str] = set()
     for index, checkpoint in enumerate(chain):
+        raw_counters = checkpoint.get("mutation_counters")
+        if isinstance(raw_counters, Mapping):
+            for counter in (
+                "live_db",
+                "services",
+                "providers",
+                "external",
+                "source_checkout",
+            ):
+                if counter in raw_counters and raw_counters[counter] != 0:
+                    raise EvidenceValidationError(
+                        "forbidden_mutation_recorded",
+                        f"checkpoint records nonzero {counter} effects",
+                    )
+        validate_checkpoint_schema(checkpoint)
         if int(checkpoint.get("checkpoint_seq", -1)) != index:
             raise EvidenceValidationError(
                 "non_monotonic_sequence",

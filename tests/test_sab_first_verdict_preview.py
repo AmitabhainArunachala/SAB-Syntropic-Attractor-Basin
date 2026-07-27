@@ -6,8 +6,11 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+import pytest
+
 from agora.sab_artifact_verdict import CompostBatchPreviewV1
 from agora.sab_first_verdict_evidence import (
+    EvidenceValidationError,
     GENERIC_CLAIM_TEMPLATE,
     GENERIC_CONTRIBUTION_TITLE,
     preview_contract_payload,
@@ -213,6 +216,18 @@ def test_preview_scans_all_67_and_selects_exact_59_plus_2_without_writes(
         preview_contract_payload(result)
     )
     assert strict_contract.selected_count == 61
+
+
+def test_preview_rejects_a_symlink_database_before_reading(tmp_path: Path) -> None:
+    database = tmp_path / "copy.sqlite"
+    alias = tmp_path / "copy-alias.sqlite"
+    _preview_database(database)
+    alias.symlink_to(database)
+
+    with pytest.raises(EvidenceValidationError) as raised:
+        preview_database_readonly(alias)
+
+    assert raised.value.code == "preview_database_symlink"
 
 
 def test_preview_records_exact_exclusion_reasons(tmp_path: Path) -> None:

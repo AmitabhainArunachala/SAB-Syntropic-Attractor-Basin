@@ -240,8 +240,11 @@ def test_backup_failure_does_not_leave_partial_destination(
     def fail_snapshot(_: Path) -> dict[str, object]:
         raise EvidenceValidationError("forced", "forced")
 
-    monkeypatch.setattr(
-        "agora.sab_first_verdict_evidence.snapshot_database", fail_snapshot
+    # Several legacy isolation tests deliberately evict every ``agora`` module
+    # from sys.modules.  Patch the collected function's actual globals so this
+    # failure injection remains deterministic across full-suite test order.
+    monkeypatch.setitem(
+        backup_database_readonly.__globals__, "snapshot_database", fail_snapshot
     )
     with pytest.raises(EvidenceValidationError):
         backup_database_readonly(source, destination)
