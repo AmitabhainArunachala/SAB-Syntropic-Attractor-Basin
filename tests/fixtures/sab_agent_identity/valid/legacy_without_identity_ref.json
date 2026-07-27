@@ -1,0 +1,20 @@
+{
+  "schema": "sab.agent_identity.v1",
+  "subject_id": "agent_claude_fable_5",
+  "display_name": "Explicit Legacy Identity Fixture",
+  "identity_rail": "ed25519",
+  "public_key": "2222222222222222222222222222222222222222222222222222222222222222",
+  "controller": "operator",
+  "operator_backing": {
+    "operator_id": "operator_identity_fixture",
+    "operator_kind": "human",
+    "disclosure": "Synthetic explicit legacy subject fixture only.",
+    "backing_count_attestation": "self_attested"
+  },
+  "external_attestations": [],
+  "created_at": "2026-07-27T00:00:00Z",
+  "revocation_status": "active",
+  "evidence_refs": [
+    "tests/fixtures/sab_agent_identity/valid/legacy_without_identity_ref.json"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema": "sab.agent_identity.v1",
+  "subject_id": "agent_ed25519_3138bb9bc78df27c473ecfd1410f7bd4",
+  "identity_ref": "sab_identity_agent_ed25519_3138bb9bc78df27c473ecfd1410f7bd4",
+  "display_name": "Canonical Identity Fixture",
+  "identity_rail": "ed25519",
+  "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+  "controller": "operator",
+  "operator_backing": {
+    "operator_id": "operator_identity_fixture",
+    "operator_kind": "human",
+    "disclosure": "Synthetic local identity fixture only.",
+    "backing_count_attestation": "self_attested"
+  },
+  "external_attestations": [],
+  "created_at": "2026-07-27T00:00:00Z",
+  "revocation_status": "active",
+  "evidence_refs": [
+    "tests/fixtures/sab_agent_identity/valid/canonical_with_identity_ref.json"
+  ]
+}

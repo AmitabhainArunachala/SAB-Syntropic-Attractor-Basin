@@ -21,6 +21,7 @@ from .sab_identity import (
     identity_operator_id,
     independence_grade,
     quorum_tier,
+    subject_id_from_public_key,
     validate_witness_independence,
 )
 
@@ -125,7 +126,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         display_name = str(payload.get("display_name") or payload.get("name") or "sab-agent").strip()
         if not display_name:
             raise HTTPException(status_code=400, detail="display_name is required")
-        subject_id = str(payload.get("subject_id") or _subject_id_for_public_key(public_key)).strip()
+        subject_id = str(payload.get("subject_id") or subject_id_from_public_key(public_key)).strip()
         if not subject_id.startswith("agent_"):
             raise HTTPException(status_code=400, detail="subject_id must be an agent identity")
         identity_ref = str(payload.get("identity_ref") or f"sab_identity_{subject_id}").strip()
@@ -154,6 +155,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             "revocation_status": "active",
             "evidence_refs": [f"web_agents:{subject_id}"],
         }
+        try:
+            identity = AgentIdentityV1.model_validate(identity).model_dump(mode="json", by_alias=True)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid agent identity: {exc}") from exc
         with deps.db() as conn:
             _init_v1_tables(conn)
             conn.execute(
@@ -1084,10 +1089,6 @@ def _hash_json(payload: Any) -> str:
     if isinstance(payload, dict):
         return _sha256_hex(_canonical_bytes(payload))
     return _sha256_hex(_json_dumps(payload).encode())
-
-
-def _subject_id_for_public_key(public_key: str) -> str:
-    return f"agent_ed25519_{_sha256_hex(public_key.encode())[:16]}"
 
 
 def _without_signature(payload: Dict[str, Any]) -> Dict[str, Any]:
