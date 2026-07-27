@@ -32,6 +32,19 @@ DEFAULT_ACTOR_SLOTS = {
     "dharma_cron": "agent_dharma_cron",
     "hermes_m5": "agent_hermes_m5",
 }
+SQLITE_LIFECYCLE_ALGORITHM = "sqlite_lifecycle_v1"
+SQLITE_LIFECYCLE_TABLES = (
+    "sab_agent_identities_v1",
+    "sab_challenge_packets_v1",
+    "sab_seed_events_v1",
+    "sab_seed_packets_v1",
+    "sab_standing_events_v1",
+    "sab_standing_leases_v1",
+    "sab_witness_events_v1",
+    "spark_challenges",
+    "spark_witness_chain",
+    "sparks",
+)
 
 
 class EvidenceValidationError(ValueError):
@@ -304,6 +317,22 @@ def table_content_digest(
     }
 
 
+def sqlite_lifecycle_table_digest(conn: sqlite3.Connection, table: str) -> str:
+    """Reproduce A0's deterministic full-table content digest exactly."""
+
+    columns = _table_columns(conn, table)
+    rows = [
+        [
+            {"bytes_hex": value.hex()} if isinstance(value, bytes) else value
+            for value in tuple(row)
+        ]
+        for row in conn.execute(
+            f"SELECT * FROM {_quote_identifier(table)} ORDER BY rowid"
+        )
+    ]
+    return canonical_sha256({"columns": columns, "rows": rows})
+
+
 def schema_manifest(conn: sqlite3.Connection) -> dict[str, Any]:
     tables: list[dict[str, Any]] = []
     rows = conn.execute(
@@ -477,7 +506,7 @@ def _migration_ids(conn: sqlite3.Connection) -> list[str]:
     return identifiers
 
 
-def lifecycle_fingerprint(conn: sqlite3.Connection) -> dict[str, Any]:
+def _lifecycle_semantic_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     seed_table = _authoritative_table(conn, ("sab_seed_packets_v1", "seed_packets"))
     challenge_table = _authoritative_table(
         conn, ("sab_challenge_packets_v1", "challenge_packets")
@@ -511,7 +540,7 @@ def lifecycle_fingerprint(conn: sqlite3.Connection) -> dict[str, Any]:
             )
         )
     heads = witness_forest_heads(conn)
-    material = {
+    return {
         "seed_count": _count(conn, seed_table),
         "seed_state_histogram": _histogram(conn, seed_table, state_column),
         "challenge_count": _count(conn, challenge_table),
@@ -526,7 +555,30 @@ def lifecycle_fingerprint(conn: sqlite3.Connection) -> dict[str, Any]:
         "seed_packet_hashes": seed_hashes,
         "migration_ids": _migration_ids(conn),
     }
-    return {"material": material, "sha256": canonical_sha256(material)}
+
+
+def lifecycle_fingerprint(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Return the A0-frozen ``sqlite_lifecycle_v1`` fingerprint.
+
+    Only lifecycle tables present in the database participate.  A0 hashes each
+    table's schema-ordered columns and rowid-ordered full rows, then hashes the
+    ordered name-to-content-digest mapping.  ``summary`` remains diagnostic and
+    is deliberately outside the fingerprint material.
+    """
+
+    table_content_sha256 = {
+        table: sqlite_lifecycle_table_digest(conn, table)
+        for table in SQLITE_LIFECYCLE_TABLES
+        if _table_exists(conn, table)
+    }
+    return {
+        "algorithm": SQLITE_LIFECYCLE_ALGORITHM,
+        "lifecycle_tables": list(table_content_sha256),
+        "table_content_sha256": table_content_sha256,
+        "material": table_content_sha256,
+        "sha256": canonical_sha256(table_content_sha256),
+        "summary": _lifecycle_semantic_summary(conn),
+    }
 
 
 def snapshot_connection(conn: sqlite3.Connection) -> dict[str, Any]:
