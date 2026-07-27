@@ -3,7 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -11,6 +14,7 @@ import pytest
 from nacl.encoding import HexEncoder
 from nacl.signing import SigningKey
 
+import agora.sab_first_verdict_storage as storage_module
 from agora.sab_artifact_verdict import canonical_json_bytes, canonical_sha256
 from agora.sab_first_verdict_storage import (
     CopyDatabaseAttestation,
@@ -33,6 +37,7 @@ from agora.sab_first_verdict_storage import (
     open_attested_copy_connection,
     record_idempotency,
     release_session_lease,
+    require_copy_or_fixture_connection,
     require_immutable_identity,
     store_artifact_ballot,
     store_artifact_case,
@@ -121,6 +126,58 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _write_copy_receipt(source: Path, copied: Path, receipt: Path) -> str:
+    source_stat = source.stat()
+    payload = {
+        "schema_version": "sab.build_a.a0_database_snapshot.v1",
+        "content_equal": True,
+        "source": {
+            "path_ref": str(source.resolve()),
+            "opened": "sqlite_uri_mode_ro",
+            "sha256": _file_sha256(source),
+            "device": source_stat.st_dev,
+            "inode": source_stat.st_ino,
+            "size": source_stat.st_size,
+        },
+        "copy": {
+            "path_ref": f"private:{copied.resolve()}",
+            "sha256": _file_sha256(copied),
+            "backup_method": "sqlite_online_backup_from_mode_ro_source",
+        },
+    }
+    receipt.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    return _file_sha256(receipt)
+
+
+def _build_attestation(
+    tmp_path: Path,
+) -> tuple[Path, Path, Path, CopyDatabaseAttestation]:
+    source = tmp_path / "source.db"
+    copied = tmp_path / "copied.db"
+    receipt = tmp_path / "copy-receipt.json"
+    with sqlite3.connect(source) as source_conn:
+        source_conn.execute("CREATE TABLE legacy (id INTEGER PRIMARY KEY, value TEXT)")
+        source_conn.execute("INSERT INTO legacy VALUES (1, 'preserved')")
+        source_conn.commit()
+        with sqlite3.connect(copied) as copied_conn:
+            source_conn.backup(copied_conn)
+    from agora.sab_first_verdict_evidence import lifecycle_fingerprint
+
+    with sqlite3.connect(f"file:{copied}?mode=ro", uri=True) as readonly:
+        lifecycle_sha = lifecycle_fingerprint(readonly)["sha256"]
+    receipt_sha = _write_copy_receipt(source, copied, receipt)
+    attestation = CopyDatabaseAttestation(
+        proof_class="copied_live_db_rehearsal",
+        database_path=copied,
+        source_database_path=source,
+        source_backup_sha256=_file_sha256(copied),
+        expected_lifecycle_fingerprint=lifecycle_sha,
+        copy_receipt_sha256=receipt_sha,
+        copy_receipt_path=receipt,
+    )
+    return source, copied, receipt, attestation
+
+
 def test_attested_copy_rejects_source_and_opens_existing_copy_rw(
     tmp_path: Path,
 ) -> None:
@@ -145,18 +202,28 @@ def test_attested_copy_rejects_source_and_opens_existing_copy_rw(
         expected_fingerprint = lifecycle_fingerprint(readonly)["sha256"]
     finally:
         readonly.close()
+    receipt = tmp_path / "copy-receipt.json"
+    receipt_sha256 = _write_copy_receipt(source, copied, receipt)
     attestation = CopyDatabaseAttestation(
         proof_class="copied_live_db_rehearsal",
         database_path=copied,
         source_database_path=source,
         source_backup_sha256=_file_sha256(copied),
         expected_lifecycle_fingerprint=expected_fingerprint,
-        copy_receipt_sha256=_digest("copy-receipt"),
+        copy_receipt_sha256=receipt_sha256,
+        copy_receipt_path=receipt,
     )
     guarded = open_attested_copy_connection(attestation, require_pristine_backup=True)
     try:
         assert guarded.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         init_first_verdict_storage(guarded, applied_at=_NOW)
+        attached = tmp_path / "attached.db"
+        with sqlite3.connect(attached) as attached_conn:
+            attached_conn.execute("CREATE TABLE marker (id INTEGER PRIMARY KEY)")
+        guarded.execute("ATTACH DATABASE ? AS external", (str(attached),))
+        with pytest.raises(DatabaseSafetyError, match="must not attach"):
+            init_first_verdict_storage(guarded, applied_at=_NOW)
+        guarded.execute("DETACH DATABASE external")
     finally:
         guarded.close()
 
@@ -205,6 +272,317 @@ def test_attested_copy_rejects_source_and_opens_existing_copy_rw(
     with pytest.raises(DatabaseSafetyError, match="non-symlink file"):
         open_attested_copy_connection(missing)
     assert not (tmp_path / "missing.db").exists()
+
+    bad_receipt = CopyDatabaseAttestation(
+        **{**attestation.__dict__, "copy_receipt_sha256": "0" * 64}
+    )
+    with pytest.raises(DatabaseSafetyError, match="receipt digest"):
+        open_attested_copy_connection(bad_receipt)
+
+
+def test_in_memory_fixture_rejects_attached_file_backing(tmp_path: Path) -> None:
+    attached = tmp_path / "attached.db"
+    with sqlite3.connect(attached) as attached_conn:
+        attached_conn.execute("CREATE TABLE marker (id INTEGER PRIMARY KEY)")
+    conn = _connect()
+    try:
+        conn.execute("ATTACH DATABASE ? AS external", (str(attached),))
+        with pytest.raises(DatabaseSafetyError, match="must not attach"):
+            init_first_verdict_storage(conn, applied_at=_NOW)
+    finally:
+        conn.close()
+
+
+def test_attested_open_rejects_inode_swap_between_binding_and_connect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.db"
+    copied = tmp_path / "copied.db"
+    replacement = tmp_path / "replacement.db"
+    with sqlite3.connect(source) as source_conn:
+        source_conn.execute("CREATE TABLE legacy (id INTEGER PRIMARY KEY)")
+        source_conn.execute("INSERT INTO legacy VALUES (1)")
+        source_conn.commit()
+        for destination in (copied, replacement):
+            destination_conn = sqlite3.connect(destination)
+            try:
+                source_conn.backup(destination_conn)
+                destination_conn.commit()
+            finally:
+                destination_conn.close()
+
+    from agora.sab_first_verdict_evidence import (
+        lifecycle_fingerprint,
+        open_sqlite_readonly,
+    )
+
+    with open_sqlite_readonly(copied) as readonly:
+        expected_fingerprint = lifecycle_fingerprint(readonly)["sha256"]
+    receipt = tmp_path / "copy-receipt.json"
+    receipt_sha256 = _write_copy_receipt(source, copied, receipt)
+    attestation = CopyDatabaseAttestation(
+        proof_class="copied_live_db_rehearsal",
+        database_path=copied,
+        source_database_path=source,
+        source_backup_sha256=_file_sha256(copied),
+        expected_lifecycle_fingerprint=expected_fingerprint,
+        copy_receipt_sha256=receipt_sha256,
+        copy_receipt_path=receipt,
+    )
+    bound_identity = (copied.stat().st_dev, copied.stat().st_ino)
+    real_connect = storage_module.sqlite3.connect
+
+    def swap_then_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+        replacement.replace(copied)
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(storage_module.sqlite3, "connect", swap_then_connect)
+    with pytest.raises(DatabaseSafetyError, match="attested copy descriptor"):
+        open_attested_copy_connection(
+            attestation, expected_file_identity=bound_identity
+        )
+
+    with pytest.raises(DatabaseSafetyError, match="bound application file"):
+        open_attested_copy_connection(
+            attestation, expected_file_identity=bound_identity
+        )
+
+
+def test_attested_open_aba_path_swap_cannot_redirect_sqlite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.db"
+    copied = tmp_path / "copied.db"
+    replacement = tmp_path / "replacement.db"
+    displaced = tmp_path / "displaced.db"
+    with sqlite3.connect(source) as source_conn:
+        source_conn.execute("CREATE TABLE expected_marker (id INTEGER PRIMARY KEY)")
+        source_conn.execute("INSERT INTO expected_marker VALUES (1)")
+        source_conn.commit()
+        with sqlite3.connect(copied) as copied_conn:
+            source_conn.backup(copied_conn)
+    with sqlite3.connect(replacement) as replacement_conn:
+        replacement_conn.execute(
+            "CREATE TABLE replacement_marker (id INTEGER PRIMARY KEY)"
+        )
+        replacement_conn.commit()
+
+    from agora.sab_first_verdict_evidence import (
+        lifecycle_fingerprint,
+        open_sqlite_readonly,
+    )
+
+    with open_sqlite_readonly(copied) as readonly:
+        expected_fingerprint = lifecycle_fingerprint(readonly)["sha256"]
+    receipt = tmp_path / "copy-receipt.json"
+    receipt_sha256 = _write_copy_receipt(source, copied, receipt)
+    attestation = CopyDatabaseAttestation(
+        proof_class="copied_live_db_rehearsal",
+        database_path=copied,
+        source_database_path=source,
+        source_backup_sha256=_file_sha256(copied),
+        expected_lifecycle_fingerprint=expected_fingerprint,
+        copy_receipt_sha256=receipt_sha256,
+        copy_receipt_path=receipt,
+    )
+    bound_identity = (copied.stat().st_dev, copied.stat().st_ino)
+    real_connect = storage_module.sqlite3.connect
+    observed_tables: list[str] = []
+
+    def swap_open_restore(*args: object, **kwargs: object) -> sqlite3.Connection:
+        copied.replace(displaced)
+        replacement.replace(copied)
+        connection = real_connect(*args, **kwargs)
+        observed_tables.extend(
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            )
+        )
+        copied.replace(replacement)
+        displaced.replace(copied)
+        return connection
+
+    monkeypatch.setattr(storage_module.sqlite3, "connect", swap_open_restore)
+    with pytest.raises(DatabaseSafetyError, match="attested copy descriptor"):
+        open_attested_copy_connection(
+            attestation, expected_file_identity=bound_identity
+        )
+    # The hook did redirect SQLite, but the pre-write lock challenge detected
+    # the mismatch after the path was restored and before any schema mutation.
+    assert observed_tables == ["replacement_marker"]
+    with real_connect(copied) as restored:
+        assert (
+            restored.execute("SELECT COUNT(*) FROM expected_marker").fetchone()[0] == 1
+        )
+
+
+def test_attested_receipt_rejects_unknown_schema(tmp_path: Path) -> None:
+    _, _, receipt, attestation = _build_attestation(tmp_path)
+    payload = json.loads(receipt.read_text())
+    payload["schema_version"] = "sab.caller_authored_unknown.v1"
+    receipt.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    altered = CopyDatabaseAttestation(
+        **{
+            **attestation.__dict__,
+            "copy_receipt_sha256": _file_sha256(receipt),
+        }
+    )
+    with pytest.raises(DatabaseSafetyError, match="schema is not an accepted"):
+        open_attested_copy_connection(altered)
+
+
+def test_online_backup_receipt_requires_complete_logical_equivalence(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.db"
+    copied = tmp_path / "copied.db"
+    receipt = tmp_path / "backup-receipt.json"
+    with sqlite3.connect(source) as conn:
+        conn.execute("CREATE TABLE legacy (id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO legacy VALUES (1)")
+        conn.commit()
+    from agora.sab_first_verdict_evidence import backup_database_readonly
+
+    payload = backup_database_readonly(source, copied)
+    lifecycle_sha = payload["copy_snapshot"]["lifecycle"]["sha256"]
+    payload["logical_equivalence"] = {}
+    receipt.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    attestation = CopyDatabaseAttestation(
+        proof_class="copied_live_db_rehearsal",
+        database_path=copied,
+        source_database_path=source,
+        source_backup_sha256=_file_sha256(copied),
+        expected_lifecycle_fingerprint=lifecycle_sha,
+        copy_receipt_sha256=_file_sha256(receipt),
+        copy_receipt_path=receipt,
+    )
+    with pytest.raises(DatabaseSafetyError, match="does not bind"):
+        open_attested_copy_connection(attestation)
+
+
+def test_mutation_guard_rechecks_durable_sqlite_settings(tmp_path: Path) -> None:
+    _, _, _, attestation = _build_attestation(tmp_path)
+    conn = open_attested_copy_connection(attestation, require_pristine_backup=True)
+    try:
+        assert conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        with pytest.raises(DatabaseSafetyError, match="DELETE journal"):
+            require_copy_or_fixture_connection(conn)
+        assert conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+        conn.execute("PRAGMA synchronous=OFF")
+        with pytest.raises(DatabaseSafetyError, match="FULL synchronization"):
+            require_copy_or_fixture_connection(conn)
+    finally:
+        conn.close()
+
+
+def test_attested_open_rejects_unauthorized_extra_schema(tmp_path: Path) -> None:
+    _, copied, _, attestation = _build_attestation(tmp_path)
+    with sqlite3.connect(copied) as conn:
+        conn.execute("CREATE TABLE caller_smuggled_table (id INTEGER PRIMARY KEY)")
+        conn.commit()
+    with pytest.raises(DatabaseSafetyError, match="outside the frozen additive"):
+        open_attested_copy_connection(attestation, require_pristine_backup=False)
+
+
+def test_attested_open_binds_source_fd_to_receipt_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, _, _, attestation = _build_attestation(tmp_path)
+    twin = tmp_path / "source-twin.db"
+    displaced = tmp_path / "source-displaced.db"
+    shutil.copyfile(source, twin)
+    real_open = storage_module.os.open
+
+    def swap_source_then_open(path: object, *args: object, **kwargs: object) -> int:
+        if Path(path) == source:
+            source.replace(displaced)
+            twin.replace(source)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(storage_module.os, "open", swap_source_then_open)
+    try:
+        with pytest.raises(DatabaseSafetyError, match="anchored A0 receipt"):
+            open_attested_copy_connection(attestation)
+    finally:
+        if displaced.exists():
+            if source.exists():
+                source.replace(twin)
+            displaced.replace(source)
+
+
+def test_attested_open_rejects_multilink_copy_and_concurrent_runner(
+    tmp_path: Path,
+) -> None:
+    _, copied, _, attestation = _build_attestation(tmp_path)
+    alias = tmp_path / "copy-alias.db"
+    os.link(copied, alias)
+    with pytest.raises(DatabaseSafetyError, match="single-link"):
+        open_attested_copy_connection(attestation)
+    alias.unlink()
+
+    first = open_attested_copy_connection(attestation)
+    try:
+        with pytest.raises(DatabaseSafetyError, match="another runner"):
+            open_attested_copy_connection(attestation)
+    finally:
+        first.close()
+    second = open_attested_copy_connection(attestation)
+    second.close()
+
+
+def test_attested_delete_journal_recovers_after_process_crash(
+    tmp_path: Path,
+) -> None:
+    source, copied, receipt, attestation = _build_attestation(tmp_path)
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os,sys; from pathlib import Path; "
+                "from agora.sab_first_verdict_storage import "
+                "CopyDatabaseAttestation,open_attested_copy_connection; "
+                "a=CopyDatabaseAttestation(proof_class='copied_live_db_rehearsal',"
+                "database_path=Path(sys.argv[1]),source_database_path=Path(sys.argv[2]),"
+                "source_backup_sha256=sys.argv[3],"
+                "expected_lifecycle_fingerprint=sys.argv[4],"
+                "copy_receipt_sha256=sys.argv[5],copy_receipt_path=Path(sys.argv[6])); "
+                "c=open_attested_copy_connection(a); c.execute('BEGIN IMMEDIATE'); "
+                "c.execute(\"UPDATE legacy SET value='uncommitted-crash' WHERE id=1\"); "
+                "os._exit(23)"
+            ),
+            str(copied),
+            str(source),
+            attestation.source_backup_sha256,
+            attestation.expected_lifecycle_fingerprint,
+            attestation.copy_receipt_sha256,
+            str(receipt),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parents[1],
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "LANG": "en_US.UTF-8",
+            "TMPDIR": "/private/tmp",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPYCACHEPREFIX": "/private/tmp/sab-storage-crash-pycache",
+        },
+    )
+    assert child.returncode == 23, child.stderr
+    journal = Path(f"{copied}-journal")
+    assert journal.is_file()
+
+    recovered = open_attested_copy_connection(attestation)
+    try:
+        assert recovered.execute("SELECT value FROM legacy WHERE id=1").fetchone()[0] == (
+            "preserved"
+        )
+    finally:
+        recovered.close()
 
 
 @pytest.fixture

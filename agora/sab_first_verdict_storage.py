@@ -9,14 +9,16 @@ database.
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import json
 import os
 import re
 import sqlite3
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 from urllib.parse import quote
 
 from .sab_artifact_verdict import (
@@ -32,6 +34,51 @@ from .sab_artifact_verdict import (
 
 
 MIGRATION_ID = "20260728_first_verdict_build_a_v1"
+SIGNATURE_EVIDENCE_MIGRATION_ID = "20260728_first_verdict_signature_evidence_v1"
+
+_SIGNATURE_EVIDENCE_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS sab_first_verdict_signature_evidence_v1 (
+        sequence_no INTEGER PRIMARY KEY CHECK (sequence_no >= 1),
+        record_id TEXT NOT NULL UNIQUE,
+        artifact_type TEXT NOT NULL CHECK (artifact_type IN
+            ('policy', 'lease', 'case', 'ballot', 'countersign',
+             'lineage', 'successor', 'lifecycle_event')),
+        artifact_id TEXT NOT NULL,
+        lifecycle_event_id TEXT NOT NULL,
+        signer TEXT NOT NULL,
+        public_key TEXT NOT NULL CHECK (length(public_key) = 64),
+        prev_hash TEXT CHECK (prev_hash IS NULL OR length(prev_hash) = 64),
+        payload_json TEXT NOT NULL,
+        payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+        canonicalization TEXT NOT NULL CHECK (canonicalization IN
+            ('canonical_json_v1', 'json-sort-keys-compact-v1')),
+        signature TEXT NOT NULL CHECK (length(signature) = 128),
+        record_hash TEXT NOT NULL UNIQUE CHECK (length(record_hash) = 64),
+        created_at TEXT NOT NULL,
+        UNIQUE (artifact_type, artifact_id)
+    )
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS sab_first_verdict_signature_evidence_v1_no_update
+    BEFORE UPDATE ON sab_first_verdict_signature_evidence_v1
+    BEGIN
+        SELECT RAISE(ABORT, 'signature evidence is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS sab_first_verdict_signature_evidence_v1_no_delete
+    BEFORE DELETE ON sab_first_verdict_signature_evidence_v1
+    BEGIN
+        SELECT RAISE(ABORT, 'signature evidence is immutable');
+    END
+    """,
+)
+SIGNATURE_EVIDENCE_MIGRATION_DIGEST = hashlib.sha256(
+    "\n".join(
+        statement.strip() for statement in _SIGNATURE_EVIDENCE_STATEMENTS
+    ).encode()
+).hexdigest()
 
 FROZEN_METHOD_PATHS = frozenset(
     {
@@ -106,6 +153,7 @@ class CopyDatabaseAttestation:
     source_backup_sha256: str
     expected_lifecycle_fingerprint: str
     copy_receipt_sha256: str
+    copy_receipt_path: Path | None = None
 
     def validate(self, *, require_pristine_backup: bool) -> Path:
         if self.proof_class not in {
@@ -148,6 +196,95 @@ class CopyDatabaseAttestation:
             source, resolved
         ):
             raise DatabaseSafetyError("copy database is the forbidden source file")
+        if self.proof_class == "copied_live_db_rehearsal":
+            if self.copy_receipt_path is None:
+                raise DatabaseSafetyError(
+                    "copied-live proof requires the frozen A0 copy receipt"
+                )
+            receipt_path = Path(self.copy_receipt_path)
+            if (
+                not receipt_path.is_absolute()
+                or receipt_path.is_symlink()
+                or not receipt_path.is_file()
+            ):
+                raise DatabaseSafetyError(
+                    "copy receipt must be an explicit absolute non-symlink file"
+                )
+            receipt_bytes = receipt_path.read_bytes()
+            if hashlib.sha256(receipt_bytes).hexdigest() != self.copy_receipt_sha256:
+                raise DatabaseSafetyError("copy receipt digest does not verify")
+            try:
+                receipt = json.loads(receipt_bytes)
+                receipt_source = receipt["source"]
+                receipt_schema = receipt.get("schema_version")
+                if receipt_schema == "sab.sqlite_online_backup_receipt.v1":
+                    receipt_copy = receipt["destination"]
+                    logical_equivalence = receipt.get("logical_equivalence")
+                    content_equal = bool(
+                        receipt.get("source_unchanged") is True
+                        and isinstance(logical_equivalence, dict)
+                        and set(logical_equivalence)
+                        == {
+                            "schema_manifest",
+                            "preexisting_table_digests",
+                            "lifecycle_fingerprint",
+                        }
+                        and all(value is True for value in logical_equivalence.values())
+                    )
+                    backup_method = receipt.get("backup_method")
+                    source_opened = "sqlite_uri_mode_ro"
+                    expected_source_ref = (
+                        "private-local:sha256:"
+                        + hashlib.sha256(
+                            str(source.resolve(strict=True)).encode()
+                        ).hexdigest()
+                    )
+                    expected_copy_refs = {
+                        "private-local:sha256:"
+                        + hashlib.sha256(str(resolved).encode()).hexdigest()
+                    }
+                elif receipt_schema == "sab.build_a.a0_database_snapshot.v1":
+                    receipt_copy = receipt["copy"]
+                    content_equal = receipt.get("content_equal") is True
+                    backup_method = receipt_copy.get("backup_method")
+                    source_opened = receipt_source.get("opened")
+                    expected_source_ref = str(source.resolve(strict=True))
+                    expected_copy_refs = {str(resolved), f"private:{resolved}"}
+                else:
+                    raise DatabaseSafetyError(
+                        "copy receipt schema is not an accepted A0 receipt"
+                    )
+                if not isinstance(receipt_source, dict) or not isinstance(
+                    receipt_copy, dict
+                ):
+                    raise TypeError("receipt source/copy fields must be objects")
+            except (
+                AttributeError,
+                KeyError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                raise DatabaseSafetyError(
+                    "copy receipt does not satisfy the A0 evidence contract"
+                ) from exc
+            copy_path_ref = str(receipt_copy.get("path_ref", ""))
+            source_path_ref = str(receipt_source.get("path_ref", ""))
+            source_sha256 = hashlib.sha256(
+                source.resolve(strict=True).read_bytes()
+            ).hexdigest()
+            if (
+                not content_equal
+                or backup_method != "sqlite_online_backup_from_mode_ro_source"
+                or source_opened != "sqlite_uri_mode_ro"
+                or str(receipt_source.get("sha256", "")) != source_sha256
+                or str(receipt_copy.get("sha256", "")) != self.source_backup_sha256
+                or copy_path_ref not in expected_copy_refs
+                or source_path_ref != expected_source_ref
+            ):
+                raise DatabaseSafetyError(
+                    "copy receipt does not bind the explicit source and destination"
+                )
         if require_pristine_backup:
             digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
             if digest != self.source_backup_sha256:
@@ -157,21 +294,232 @@ class CopyDatabaseAttestation:
         return resolved
 
 
+def _anchored_source_binding(
+    attestation: CopyDatabaseAttestation,
+) -> tuple[str, int, int, int] | None:
+    """Return source SHA/device/inode/size from the anchored receipt."""
+
+    if attestation.proof_class != "copied_live_db_rehearsal":
+        return None
+    receipt_path = attestation.copy_receipt_path
+    if receipt_path is None:
+        raise DatabaseSafetyError("copied-live receipt is missing")
+    try:
+        receipt = json.loads(Path(receipt_path).read_bytes())
+        source = receipt["source"]
+        sha256 = str(source["sha256"])
+        device = int(source["device"])
+        inode = int(source["inode"])
+        size = int(source["size"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise DatabaseSafetyError(
+            "copy receipt lacks the exact source file identity"
+        ) from exc
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256) or size < 0:
+        raise DatabaseSafetyError("copy receipt source identity is invalid")
+    return sha256, device, inode, size
+
+
+def _fd_sha256(fd: int) -> str:
+    digest = hashlib.sha256()
+    offset = 0
+    while True:
+        block = os.pread(fd, 1024 * 1024, offset)
+        if not block:
+            break
+        digest.update(block)
+        offset += len(block)
+    return digest.hexdigest()
+
+
 class AttestedSQLiteConnection(sqlite3.Connection):
     """SQLite connection carrying an out-of-band copy attestation."""
 
     sab_copy_attestation: CopyDatabaseAttestation
+    sab_open_file_identity: tuple[int, int]
+    sab_open_fd: int | None
+    sab_source_fd: int | None
+    sab_lock_fd: int | None
+    sab_lock_identity: tuple[int, int]
+    sab_parent_identity: tuple[int, int]
+
+    def close(self) -> None:
+        """Close SQLite before releasing the inode-binding file descriptor."""
+
+        open_fd = getattr(self, "sab_open_fd", None)
+        source_fd = getattr(self, "sab_source_fd", None)
+        lock_fd = getattr(self, "sab_lock_fd", None)
+        errors: list[BaseException] = []
+        try:
+            super().close()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            for attribute, descriptor in (
+                ("sab_open_fd", open_fd),
+                ("sab_source_fd", source_fd),
+            ):
+                if descriptor is not None:
+                    setattr(self, attribute, None)
+                    try:
+                        os.close(descriptor)
+                    except BaseException as exc:
+                        errors.append(exc)
+            if lock_fd is not None:
+                self.sab_lock_fd = None
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                except BaseException as exc:
+                    errors.append(exc)
+                try:
+                    os.close(lock_fd)
+                except BaseException as exc:
+                    errors.append(exc)
+        if errors:
+            raise errors[0]
+
+
+def _regular_file_identity(path: Path) -> tuple[int, int]:
+    """Return a no-follow identity for an existing regular database file."""
+
+    try:
+        file_stat = os.lstat(path)
+    except OSError as exc:
+        raise DatabaseSafetyError("copy database identity cannot be read") from exc
+    if not stat.S_ISREG(file_stat.st_mode):
+        raise DatabaseSafetyError("copy database must remain a regular file")
+    return (int(file_stat.st_dev), int(file_stat.st_ino))
+
+
+def _regular_fd_identity(fd: int) -> tuple[int, int]:
+    try:
+        file_stat = os.fstat(fd)
+    except OSError as exc:
+        raise DatabaseSafetyError("copy database file descriptor is invalid") from exc
+    if not stat.S_ISREG(file_stat.st_mode):
+        raise DatabaseSafetyError("copy database descriptor must name a regular file")
+    return (int(file_stat.st_dev), int(file_stat.st_ino))
+
+
+def _require_private_parent(path: Path) -> None:
+    """Require a same-user private directory for SQLite and its sidecars."""
+
+    parent = path.parent
+    try:
+        parent_stat = os.lstat(parent)
+    except OSError as exc:
+        raise DatabaseSafetyError("copy database parent cannot be read") from exc
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or parent.is_symlink()
+        or parent_stat.st_uid != os.geteuid()
+        or stat.S_IMODE(parent_stat.st_mode) & 0o077
+    ):
+        raise DatabaseSafetyError(
+            "copy database parent must be a same-user private directory"
+        )
+
+
+def _private_parent_identity(path: Path) -> tuple[int, int]:
+    _require_private_parent(path)
+    parent_stat = os.lstat(path.parent)
+    return int(parent_stat.st_dev), int(parent_stat.st_ino)
+
+
+def _acquire_runner_lock(path: Path) -> int:
+    lock_path = path.parent / ".sab-first-verdict.lock"
+    flags = (
+        os.O_RDWR
+        | os.O_CREAT
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        lock_fd = os.open(lock_path, flags, 0o600)
+        lock_stat = os.fstat(lock_fd)
+        if (
+            not stat.S_ISREG(lock_stat.st_mode)
+            or lock_stat.st_uid != os.geteuid()
+            or lock_stat.st_nlink != 1
+        ):
+            raise DatabaseSafetyError("runner lock is not a private regular file")
+        os.fchmod(lock_fd, 0o600)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, DatabaseSafetyError) as exc:
+        if "lock_fd" in locals():
+            os.close(lock_fd)
+        raise DatabaseSafetyError(
+            "another runner holds or replaced the private database lock"
+        ) from exc
+    return lock_fd
+
+
+_RAW_SQLITE_CONNECT = sqlite3.connect
+
+
+def _prove_connection_matches_descriptor(
+    conn: sqlite3.Connection,
+    open_fd: int,
+) -> None:
+    """Check the main/fd lock domain under the cooperative-runner boundary.
+
+    The primary connection takes a RESERVED lock.  A second connection opened
+    through the already-bound descriptor must then be unable to take the same
+    lock.  A successful second lock means the pathname was redirected during
+    connect and fails closed before any schema or data write.  A conflicting
+    third-party lock can cause a false positive, so the owner-only directory is
+    the security boundary; this check is defense in depth, not protection from
+    arbitrary same-process or same-UID code.
+    """
+
+    conn.execute("PRAGMA busy_timeout=0")
+    verifier: sqlite3.Connection | None = None
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        descriptor_path = f"/dev/fd/{open_fd}"
+        uri = f"file:{quote(descriptor_path, safe='/')}?mode=rw"
+        verifier = _RAW_SQLITE_CONNECT(uri, uri=True, timeout=0)
+        verifier.execute("PRAGMA busy_timeout=0")
+        try:
+            verifier.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise DatabaseSafetyError(
+                    "could not verify the attested database lock identity"
+                ) from exc
+        else:
+            verifier.rollback()
+            raise DatabaseSafetyError(
+                "SQLite connection differs from the attested copy descriptor"
+            )
+    finally:
+        conn.rollback()
+        if verifier is not None:
+            verifier.close()
 
 
 def require_copy_or_fixture_connection(conn: sqlite3.Connection) -> None:
     """Permit in-memory fixtures or a connection opened by the attested opener."""
 
     database_rows = conn.execute("PRAGMA database_list").fetchall()
+    file_backed = [
+        (str(row[1]), str(row[2]))
+        for row in database_rows
+        if str(row[2]) and str(row[1]) != "temp"
+    ]
     main_path = next(
         (str(row[2]) for row in database_rows if str(row[1]) == "main"), ""
     )
     if not main_path:
+        if file_backed:
+            raise DatabaseSafetyError(
+                "in-memory fixtures must not attach a file-backed database"
+            )
         return
+    if any(name != "main" for name, _ in file_backed):
+        raise DatabaseSafetyError(
+            "attested copy connections must not attach another file-backed database"
+        )
     if not isinstance(conn, AttestedSQLiteConnection) or not hasattr(
         conn, "sab_copy_attestation"
     ):
@@ -180,32 +528,180 @@ def require_copy_or_fixture_connection(conn: sqlite3.Connection) -> None:
         )
     attestation = conn.sab_copy_attestation
     expected = attestation.validate(require_pristine_backup=False)
-    actual = Path(main_path).resolve(strict=True)
-    if not os.path.samefile(actual, expected):
+    opened_identity = getattr(conn, "sab_open_file_identity", None)
+    open_fd = getattr(conn, "sab_open_fd", None)
+    source_fd = getattr(conn, "sab_source_fd", None)
+    lock_fd = getattr(conn, "sab_lock_fd", None)
+    if opened_identity is None or _regular_file_identity(expected) != opened_identity:
+        raise DatabaseSafetyError(
+            "attested copy file identity changed after connection open"
+        )
+    if open_fd is None or _regular_fd_identity(open_fd) != opened_identity:
         raise DatabaseSafetyError("active connection differs from attested copy path")
+    if source_fd is None or _regular_fd_identity(source_fd) == opened_identity:
+        raise DatabaseSafetyError("attested copy aliases the forbidden source")
+    lock_path = expected.parent / ".sab-first-verdict.lock"
+    if (
+        lock_fd is None
+        or _regular_fd_identity(lock_fd) != getattr(conn, "sab_lock_identity", None)
+        or _regular_file_identity(lock_path) != getattr(conn, "sab_lock_identity", None)
+    ):
+        raise DatabaseSafetyError("private database runner lock changed")
+    if _private_parent_identity(expected) != getattr(conn, "sab_parent_identity", None):
+        raise DatabaseSafetyError("private copy directory identity changed")
+    if Path(main_path).resolve(strict=False) != expected:
+        raise DatabaseSafetyError("active connection path differs from attested copy")
+    if str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "delete":
+        raise DatabaseSafetyError("attested copy requires DELETE journal mode")
+    if int(conn.execute("PRAGMA synchronous").fetchone()[0]) != 2:
+        raise DatabaseSafetyError("attested copy requires FULL synchronization")
 
 
 def open_attested_copy_connection(
     attestation: CopyDatabaseAttestation,
     *,
     require_pristine_backup: bool = False,
+    expected_file_identity: tuple[int, int] | None = None,
 ) -> sqlite3.Connection:
-    """Open an existing attested copy with ``mode=rw``; never create a DB."""
+    """Open one inode-bound attested copy with ``mode=rw``; never create a DB.
+
+    The copy and its SQLite sidecars live in a same-user mode-private directory.
+    Retained ``O_NOFOLLOW`` descriptors bind the intended source and copy
+    identities.  A cooperative pre-write lock-domain check detects ordinary
+    redirection; the owner-only directory prevents outside path mutation.  The
+    original path must retain the same identity at every mutation boundary.
+    Ordinary durable SQLite journal semantics remain enabled.  Arbitrary
+    same-process, root, or hostile same-UID code is outside this boundary.
+    """
 
     resolved = attestation.validate(require_pristine_backup=require_pristine_backup)
-    uri = f"file:{quote(str(resolved), safe='/')}?mode=rw"
-    conn = sqlite3.connect(uri, uri=True, factory=AttestedSQLiteConnection)
-    conn.sab_copy_attestation = attestation
+    parent_identity = _private_parent_identity(resolved)
+    before_identity = _regular_file_identity(resolved)
+    if expected_file_identity is not None and before_identity != tuple(
+        expected_file_identity
+    ):
+        raise DatabaseSafetyError(
+            "copy database identity differs from the bound application file"
+        )
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    source_flags = (
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    )
     try:
+        lock_fd = _acquire_runner_lock(resolved)
+        lock_identity = _regular_fd_identity(lock_fd)
+        open_fd = os.open(resolved, flags)
+        source_fd = os.open(attestation.source_database_path, source_flags)
+        descriptor_identity = _regular_fd_identity(open_fd)
+        source_identity = _regular_fd_identity(source_fd)
+        source_stat = os.fstat(source_fd)
+        source_binding = _anchored_source_binding(attestation)
+        if (
+            source_binding is not None
+            and (
+                _fd_sha256(source_fd),
+                int(source_stat.st_dev),
+                int(source_stat.st_ino),
+                int(source_stat.st_size),
+            )
+            != source_binding
+        ):
+            raise DatabaseSafetyError(
+                "forbidden source descriptor differs from the anchored A0 receipt"
+            )
+        source_path = Path(attestation.source_database_path)
+        if Path(f"{source_path}-wal").exists() or Path(f"{source_path}-shm").exists():
+            raise DatabaseSafetyError(
+                "forbidden source must have no live WAL sidecars during replay"
+            )
+        copy_stat = os.fstat(open_fd)
+        if copy_stat.st_uid != os.geteuid() or copy_stat.st_nlink != 1:
+            raise DatabaseSafetyError(
+                "copy database must be an owner-held single-link file"
+            )
+        if source_identity == descriptor_identity:
+            raise DatabaseSafetyError("copy database is the forbidden source file")
+        if descriptor_identity != before_identity:
+            raise DatabaseSafetyError(
+                "copy database identity changed while binding the descriptor"
+            )
+        uri = f"file:{quote(str(resolved), safe='/')}?mode=rw"
+        conn = sqlite3.connect(uri, uri=True, factory=AttestedSQLiteConnection)
+    except Exception:
+        for descriptor_name in ("source_fd", "open_fd"):
+            if descriptor_name in locals():
+                os.close(locals()[descriptor_name])
+        if "lock_fd" in locals():
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
+        raise
+    conn.sab_copy_attestation = attestation
+    conn.sab_open_file_identity = descriptor_identity
+    conn.sab_open_fd = open_fd
+    conn.sab_source_fd = source_fd
+    conn.sab_lock_fd = lock_fd
+    conn.sab_lock_identity = lock_identity
+    conn.sab_parent_identity = parent_identity
+    try:
+        if _regular_fd_identity(open_fd) != descriptor_identity:
+            raise DatabaseSafetyError(
+                "copy descriptor identity changed while opening the connection"
+            )
+        _prove_connection_matches_descriptor(conn, open_fd)
+        database_rows = conn.execute("PRAGMA database_list").fetchall()
+        main_paths = [str(row[2]) for row in database_rows if str(row[1]) == "main"]
+        if (
+            len(main_paths) != 1
+            or Path(main_paths[0]).resolve(strict=False) != resolved
+        ):
+            raise DatabaseSafetyError(
+                "SQLite main database path differs from the attested copy"
+            )
         conn.execute("PRAGMA foreign_keys = ON")
         if int(conn.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
             raise DatabaseSafetyError("could not enable SQLite foreign keys")
-        from .sab_first_verdict_evidence import lifecycle_fingerprint
+        journal_mode = str(conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0])
+        if journal_mode.lower() != "delete":
+            raise DatabaseSafetyError("could not enable SQLite DELETE journal mode")
+        conn.execute("PRAGMA synchronous=FULL")
+        if int(conn.execute("PRAGMA synchronous").fetchone()[0]) != 2:
+            raise DatabaseSafetyError("could not enable SQLite FULL synchronization")
+        from .sab_first_verdict_evidence import (
+            capture_preexisting_table_digests,
+            lifecycle_fingerprint,
+            verify_preexisting_table_digests,
+        )
 
         actual = lifecycle_fingerprint(conn)["sha256"]
         if actual != attestation.expected_lifecycle_fingerprint:
             raise DatabaseSafetyError(
                 "copy lifecycle fingerprint differs from attestation"
+            )
+        source_uri = f"file:{quote(f'/dev/fd/{source_fd}', safe='/')}?mode=ro"
+        with _RAW_SQLITE_CONNECT(source_uri, uri=True) as source_conn:
+            if (
+                str(source_conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+                != "delete"
+            ):
+                raise DatabaseSafetyError(
+                    "forbidden source must use DELETE journal mode for fd replay"
+                )
+            baseline = capture_preexisting_table_digests(source_conn)
+            source_schema = _schema_object_manifest(source_conn)
+        provenance = verify_preexisting_table_digests(conn, baseline)
+        if not provenance["verified"]:
+            raise DatabaseSafetyError(
+                "copy preexisting tables differ from the forbidden source"
+            )
+        _verify_copy_schema_provenance(conn, source_schema)
+        if (
+            _regular_fd_identity(open_fd) != descriptor_identity
+            or _regular_file_identity(resolved) != descriptor_identity
+            or _regular_fd_identity(source_fd) != source_identity
+            or _private_parent_identity(resolved) != parent_identity
+        ):
+            raise DatabaseSafetyError(
+                "copy database identity changed during connection validation"
             )
     except Exception:
         conn.close()
@@ -457,6 +953,102 @@ def _normalized_schema_sql(sql: str) -> str:
     return re.sub(r"\s+", " ", sql.strip()).replace(" IF NOT EXISTS ", " ")
 
 
+def _schema_object_manifest(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
+    rows = conn.execute(
+        "SELECT type, name, sql FROM sqlite_master "
+        "WHERE type IN ('table', 'index', 'trigger', 'view') "
+        "AND sql IS NOT NULL ORDER BY type, name"
+    ).fetchall()
+    return {
+        (str(row[0]), str(row[1])): _normalized_schema_sql(str(row[2])) for row in rows
+    }
+
+
+def _schema_from_statements(
+    statements: tuple[str, ...],
+) -> dict[tuple[str, str], str]:
+    expected: dict[tuple[str, str], str] = {}
+    for statement in statements:
+        stripped = statement.strip()
+        match = _SCHEMA_OBJECT.match(stripped)
+        if match is None:
+            raise MigrationSchemaMismatch("unrecognized frozen migration statement")
+        kind = "table" if stripped.upper().startswith("CREATE TABLE") else "trigger"
+        expected[(kind, match.group(1))] = _normalized_schema_sql(statement)
+    return expected
+
+
+def _frozen_additive_schema() -> dict[tuple[str, str], str]:
+    return {
+        **_schema_from_statements(MIGRATION_STATEMENTS),
+        **_schema_from_statements(_SIGNATURE_EVIDENCE_STATEMENTS),
+    }
+
+
+def _verify_copy_schema_provenance(
+    conn: sqlite3.Connection,
+    source_schema: Mapping[tuple[str, str], str],
+) -> None:
+    """Require exact source schema plus only the two frozen additive migrations."""
+
+    current = _schema_object_manifest(conn)
+    for identity, expected_sql in source_schema.items():
+        if current.get(identity) != expected_sql:
+            raise DatabaseSafetyError(
+                f"preexisting schema object {identity[1]} differs from the source"
+            )
+    extras = {
+        identity: sql
+        for identity, sql in current.items()
+        if identity not in source_schema
+    }
+    base_frozen = _schema_from_statements(MIGRATION_STATEMENTS)
+    signature_frozen = _schema_from_statements(_SIGNATURE_EVIDENCE_STATEMENTS)
+    frozen = {**base_frozen, **signature_frozen}
+    if any(frozen.get(identity) != sql for identity, sql in extras.items()):
+        raise DatabaseSafetyError(
+            "copy contains schema outside the frozen additive migrations"
+        )
+    if not extras:
+        return
+    ledger = conn.execute(
+        "SELECT migration_id, migration_digest "
+        "FROM sab_first_verdict_schema_migrations_v1 ORDER BY migration_id"
+    ).fetchall()
+    observed_ledger = {str(row[0]): str(row[1]) for row in ledger}
+    allowed_ledger = {
+        MIGRATION_ID: MIGRATION_DIGEST,
+        SIGNATURE_EVIDENCE_MIGRATION_ID: SIGNATURE_EVIDENCE_MIGRATION_DIGEST,
+    }
+    if (
+        not observed_ledger
+        or any(
+            allowed_ledger.get(key) != value for key, value in observed_ledger.items()
+        )
+        or observed_ledger.get(MIGRATION_ID) != MIGRATION_DIGEST
+    ):
+        raise DatabaseSafetyError(
+            "copy additive schema is not bound to the frozen migration ledger"
+        )
+    signature_installed = (
+        observed_ledger.get(SIGNATURE_EVIDENCE_MIGRATION_ID)
+        == SIGNATURE_EVIDENCE_MIGRATION_DIGEST
+    )
+    expected_extras = {
+        **base_frozen,
+        **(signature_frozen if signature_installed else {}),
+    }
+    expected_extras = {
+        identity: sql
+        for identity, sql in expected_extras.items()
+        if identity not in source_schema
+    }
+    if extras != expected_extras:
+        raise DatabaseSafetyError(
+            "copy migration schema and ledger are not an exact pair"
+        )
+
+
 def _verify_migration_schema(conn: sqlite3.Connection) -> None:
     """Reject a same-named table/trigger whose realized DDL differs.
 
@@ -568,6 +1160,96 @@ def init_first_verdict_storage(
             conn.execute(f"RELEASE SAVEPOINT {savepoint}")
         raise
     return MIGRATION_DIGEST
+
+
+def init_signature_evidence_storage(
+    conn: sqlite3.Connection,
+    *,
+    applied_at: Optional[str] = None,
+) -> str:
+    """Install the append-only persisted-signature extension atomically."""
+
+    require_copy_or_fixture_connection(conn)
+    if int(conn.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise ForeignKeysRequired(
+            "PRAGMA foreign_keys=ON is required before the signature migration"
+        )
+    base = conn.execute(
+        """
+        SELECT migration_digest
+        FROM sab_first_verdict_schema_migrations_v1
+        WHERE migration_id = ?
+        """,
+        (MIGRATION_ID,),
+    ).fetchone()
+    if base is None or str(base[0]) != MIGRATION_DIGEST:
+        raise MigrationDigestMismatch(
+            "signature evidence requires the exact first-verdict base migration"
+        )
+
+    owns_transaction = not conn.in_transaction
+    savepoint = "sab_signature_evidence_migration"
+    if owns_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    else:
+        conn.execute(f"SAVEPOINT {savepoint}")
+    try:
+        existing = conn.execute(
+            """
+            SELECT migration_digest
+            FROM sab_first_verdict_schema_migrations_v1
+            WHERE migration_id = ?
+            """,
+            (SIGNATURE_EVIDENCE_MIGRATION_ID,),
+        ).fetchone()
+        if (
+            existing is not None
+            and str(existing[0]) != SIGNATURE_EVIDENCE_MIGRATION_DIGEST
+        ):
+            raise MigrationDigestMismatch(
+                "signature evidence migration digest mismatch"
+            )
+        for statement in _SIGNATURE_EVIDENCE_STATEMENTS:
+            conn.execute(statement)
+            match = _SCHEMA_OBJECT.match(statement.strip())
+            if match is None:
+                raise MigrationSchemaMismatch(
+                    "unrecognized signature evidence migration statement"
+                )
+            name = match.group(1)
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = ?", (name,)
+            ).fetchone()
+            actual = "" if row is None or row[0] is None else str(row[0])
+            if _normalized_schema_sql(actual) != _normalized_schema_sql(statement):
+                raise MigrationSchemaMismatch(
+                    f"signature evidence object {name} differs from frozen schema"
+                )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO sab_first_verdict_schema_migrations_v1
+                (migration_id, migration_digest, applied_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                SIGNATURE_EVIDENCE_MIGRATION_ID,
+                SIGNATURE_EVIDENCE_MIGRATION_DIGEST,
+                applied_at or utc_now_text(),
+            ),
+        )
+    except Exception:
+        if owns_transaction:
+            conn.rollback()
+        else:
+            conn.execute(f"ROLLBACK TO {savepoint}")
+            conn.execute(f"RELEASE {savepoint}")
+        raise
+    else:
+        if owns_transaction:
+            conn.commit()
+        else:
+            conn.execute(f"RELEASE {savepoint}")
+    return SIGNATURE_EVIDENCE_MIGRATION_DIGEST
 
 
 _IMMUTABLE_SPECS: Dict[str, tuple[str, str, str]] = {

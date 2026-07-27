@@ -435,3 +435,143 @@ def verify_new_signature_table(
         }
     )
     return replay
+
+
+def signature_evidence_record_hash(row: Mapping[str, Any]) -> str:
+    """Hash the exact append-only persisted-signature row material."""
+
+    material = {
+        field: row[field]
+        for field in (
+            "sequence_no",
+            "record_id",
+            "artifact_type",
+            "artifact_id",
+            "lifecycle_event_id",
+            "signer",
+            "public_key",
+            "prev_hash",
+            "payload_sha256",
+            "canonicalization",
+            "signature",
+            "created_at",
+        )
+    }
+    return _sha256_bytes(_contract_canonical_bytes(material))
+
+
+def verify_signature_evidence_table(
+    conn: sqlite3.Connection,
+    *,
+    required_artifact_types: Iterable[str] = (),
+    require_nonempty: bool = True,
+) -> dict[str, Any]:
+    """Reconstruct and verify every persisted Build A signature after reopen."""
+
+    table = "sab_first_verdict_signature_evidence_v1"
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    if exists is None:
+        raise ReplayValidationError(
+            "signature_evidence_table_missing", f"copied database has no {table}"
+        )
+    cursor = conn.execute(
+        "SELECT sequence_no,record_id,artifact_type,artifact_id,lifecycle_event_id,"
+        "signer,public_key,prev_hash,payload_json,payload_sha256,canonicalization,"
+        "signature,record_hash,created_at "
+        "FROM sab_first_verdict_signature_evidence_v1 ORDER BY sequence_no"
+    )
+    columns = [str(description[0]) for description in cursor.description]
+    rows = [dict(zip(columns, tuple(row), strict=True)) for row in cursor.fetchall()]
+    if require_nonempty and not rows:
+        raise ReplayValidationError(
+            "signature_evidence_empty", "persisted signature evidence is empty"
+        )
+
+    records: list[dict[str, Any]] = []
+    previous_hash: str | None = None
+    ordered_record_ids: list[str] = []
+    for expected_sequence, row in enumerate(rows, start=1):
+        sequence_no = int(row["sequence_no"])
+        record_id = str(row["record_id"])
+        if sequence_no != expected_sequence:
+            raise ReplayValidationError(
+                "signature_evidence_sequence_gap",
+                f"persisted signature sequence is not contiguous at {record_id}",
+            )
+        if row["prev_hash"] != previous_hash:
+            raise ReplayValidationError(
+                "signature_evidence_chain_mismatch",
+                f"persisted signature predecessor differs for {record_id}",
+            )
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ReplayValidationError(
+                "signature_evidence_payload_invalid",
+                f"persisted signature payload is invalid for {record_id}",
+            ) from exc
+        if not isinstance(payload, Mapping):
+            raise ReplayValidationError(
+                "signature_evidence_payload_invalid",
+                f"persisted signature payload is not an object for {record_id}",
+            )
+        canonicalization = str(row["canonicalization"])
+        if canonicalization == "json-sort-keys-compact-v1":
+            payload_bytes = _contract_canonical_bytes(payload)
+        elif canonicalization == "canonical_json_v1":
+            payload_bytes = canonical_json_bytes(dict(payload))
+        else:
+            raise ReplayValidationError(
+                "canonicalization_unsupported",
+                f"persisted canonicalization is unsupported for {record_id}",
+            )
+        if payload_bytes.decode("utf-8") != str(row["payload_json"]):
+            raise ReplayValidationError(
+                "signature_evidence_payload_noncanonical",
+                f"persisted payload is not canonical for {record_id}",
+            )
+        payload_sha256 = _sha256_bytes(payload_bytes)
+        if payload_sha256 != str(row["payload_sha256"]):
+            raise ReplayValidationError(
+                "signature_evidence_payload_hash_mismatch",
+                f"persisted payload digest differs for {record_id}",
+            )
+        record_hash = signature_evidence_record_hash(row)
+        if record_hash != str(row["record_hash"]):
+            raise ReplayValidationError(
+                "signature_evidence_record_hash_mismatch",
+                f"persisted record hash differs for {record_id}",
+            )
+        previous_hash = record_hash
+        ordered_record_ids.append(record_id)
+        records.append(
+            {
+                "artifact_type": str(row["artifact_type"]),
+                "artifact_id": str(row["artifact_id"]),
+                "signed_payload": dict(payload),
+                "signature": {
+                    "alg": "ed25519",
+                    "signer": str(row["signer"]),
+                    "public_key": str(row["public_key"]),
+                    "signature": str(row["signature"]),
+                    "signed_payload_sha256": payload_sha256,
+                    "canonicalization": canonicalization,
+                },
+            }
+        )
+
+    replay = verify_new_signature_suffix(
+        records,
+        required_artifact_types=required_artifact_types,
+    )
+    replay.update(
+        {
+            "table": table,
+            "ordered_record_ids": ordered_record_ids,
+            "head_record_hash": previous_hash,
+            "persisted_after_reopen": True,
+        }
+    )
+    return replay
