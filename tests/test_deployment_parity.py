@@ -55,6 +55,25 @@ def test_assessment_accepts_canonical_openapi_and_exact_build() -> None:
     assert result["problems"] == []
 
 
+@pytest.mark.parametrize("invalid_operation", [None, "not-an-operation", [], True])
+def test_assessment_rejects_non_mapping_required_operation(invalid_operation: object) -> None:
+    openapi = _canonical_openapi()
+    openapi["paths"]["/auth/register"]["post"] = invalid_operation
+
+    result = assess_deployment(
+        status_payload={
+            "status": "healthy",
+            "version": "0.3.1",
+            "build_sha": "a" * 40,
+        },
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["healthy"] is False
+    assert "POST /auth/register" in result["missing_operations"]
+
+
 def test_assessment_rejects_foreign_openapi_and_missing_build_binding() -> None:
     result = assess_deployment(
         status_payload={"status": "healthy", "version": "0.3.1"},

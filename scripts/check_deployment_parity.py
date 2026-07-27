@@ -77,7 +77,11 @@ def assess_deployment(
     for path, required_methods in REQUIRED_OPERATIONS.items():
         operations_value = paths.get(path)
         operations = operations_value if isinstance(operations_value, Mapping) else {}
-        available_methods = {str(method).lower() for method in operations}
+        available_methods = {
+            str(method).lower()
+            for method, operation in operations.items()
+            if isinstance(operation, Mapping)
+        }
         for method in sorted(required_methods - available_methods):
             missing_operations.append(f"{method.upper()} {path}")
     if missing_operations:
