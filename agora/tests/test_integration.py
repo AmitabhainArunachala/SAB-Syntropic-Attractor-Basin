@@ -860,7 +860,8 @@ class TestTier1SimpleToken:
 
     def test_register_openapi_exposes_agent_readable_tier1_contract(self, fresh_app):
         client, _, _ = fresh_app
-        operation = client.get("/openapi.json").json()["paths"]["/auth/register"]["post"]
+        openapi = client.get("/openapi.json").json()
+        operation = openapi["paths"]["/auth/register"]["post"]
 
         contract = operation["x-sab-onboarding-contract"]
         assert contract == {
@@ -870,18 +871,22 @@ class TestTier1SimpleToken:
             "strict_onboarding": True,
         }
 
+        assert operation["requestBody"]["required"] is True
         request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
         simple_request = next(
             variant
             for variant in request_schema["anyOf"]
             if variant.get("title") == "RegisterSimpleRequest"
         )
+        assert simple_request["type"] == "object"
+        assert simple_request["additionalProperties"] is False
         assert simple_request["required"] == ["name"]
         assert set(simple_request["properties"]) == {"name", "telos"}
         assert simple_request["properties"]["name"] == {
             "type": "string",
             "minLength": 3,
             "maxLength": 30,
+            "pattern": "^[A-Za-z0-9-]{3,30}$",
         }
 
         response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
@@ -890,10 +895,13 @@ class TestTier1SimpleToken:
             "#/components/schemas/RegisterSimpleResponse",
             "#/components/schemas/RegisterResponse",
         }
-        simple_response = client.get("/openapi.json").json()["components"]["schemas"][
-            "RegisterSimpleResponse"
-        ]
+        simple_response = openapi["components"]["schemas"]["RegisterSimpleResponse"]
         assert set(simple_response["required"]) == {"address", "token", "message"}
+        assert set(simple_response["properties"]) == {"address", "token", "message"}
+        assert all(
+            simple_response["properties"][field]["type"] == "string"
+            for field in ("address", "token", "message")
+        )
 
     def test_register_endpoint_rate_limits_per_ip(self, fresh_app):
         client, _, _ = fresh_app

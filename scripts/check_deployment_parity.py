@@ -26,9 +26,12 @@ REQUIRED_OPERATIONS: dict[str, set[str]] = {
 }
 _FULL_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 REGISTRATION_CONTRACT_VERSION = "sab.tier1_registration.v1"
+TIER1_NAME_PATTERN = "^[A-Za-z0-9-]{3,30}$"
 
 
-def _registration_contract_is_agent_readable(operation: Mapping[str, Any]) -> bool:
+def _registration_contract_is_agent_readable(
+    operation: Mapping[str, Any], openapi_payload: Mapping[str, Any]
+) -> bool:
     """Return whether OpenAPI fully describes the default Tier-1 exchange."""
     contract_value = operation.get("x-sab-onboarding-contract")
     contract = contract_value if isinstance(contract_value, Mapping) else {}
@@ -42,6 +45,8 @@ def _registration_contract_is_agent_readable(operation: Mapping[str, Any]) -> bo
 
     request_body_value = operation.get("requestBody")
     request_body = request_body_value if isinstance(request_body_value, Mapping) else {}
+    if request_body.get("required") is not True:
+        return False
     request_content_value = request_body.get("content")
     request_content = request_content_value if isinstance(request_content_value, Mapping) else {}
     request_media_value = request_content.get("application/json")
@@ -65,11 +70,14 @@ def _registration_contract_is_agent_readable(operation: Mapping[str, Any]) -> bo
     telos_value = properties.get("telos")
     telos = telos_value if isinstance(telos_value, Mapping) else {}
     if (
-        simple_request.get("required") != ["name"]
+        simple_request.get("type") != "object"
+        or simple_request.get("additionalProperties") is not False
+        or simple_request.get("required") != ["name"]
         or set(properties) != {"name", "telos"}
         or name.get("type") != "string"
         or name.get("minLength") != 3
         or name.get("maxLength") != 30
+        or name.get("pattern") != TIER1_NAME_PATTERN
         or telos.get("type") != "string"
         or telos.get("maxLength") != 2000
     ):
@@ -90,10 +98,64 @@ def _registration_contract_is_agent_readable(operation: Mapping[str, Any]) -> bo
     response_refs = {
         variant.get("$ref") for variant in response_variants if isinstance(variant, Mapping)
     }
-    return response_refs == {
+    expected_response_refs = {
         "#/components/schemas/RegisterSimpleResponse",
         "#/components/schemas/RegisterResponse",
     }
+    if response_refs != expected_response_refs:
+        return False
+
+    components_value = openapi_payload.get("components")
+    components = components_value if isinstance(components_value, Mapping) else {}
+    schemas_value = components.get("schemas")
+    schemas = schemas_value if isinstance(schemas_value, Mapping) else {}
+
+    simple_response_value = schemas.get("RegisterSimpleResponse")
+    simple_response = (
+        simple_response_value if isinstance(simple_response_value, Mapping) else {}
+    )
+    simple_properties_value = simple_response.get("properties")
+    simple_properties = (
+        simple_properties_value if isinstance(simple_properties_value, Mapping) else {}
+    )
+    simple_required = {"address", "token", "message"}
+    if (
+        set(simple_response.get("required", [])) != simple_required
+        or set(simple_properties) != simple_required
+        or any(
+            not isinstance(simple_properties.get(field), Mapping)
+            or simple_properties[field].get("type") != "string"
+            for field in simple_required
+        )
+    ):
+        return False
+
+    legacy_response_value = schemas.get("RegisterResponse")
+    legacy_response = (
+        legacy_response_value if isinstance(legacy_response_value, Mapping) else {}
+    )
+    legacy_properties_value = legacy_response.get("properties")
+    legacy_properties = (
+        legacy_properties_value if isinstance(legacy_properties_value, Mapping) else {}
+    )
+    legacy_required = {"address", "name", "telos", "reputation", "created_at"}
+    if (
+        not legacy_required.issubset(set(legacy_response.get("required", [])))
+        or not legacy_required.issubset(set(legacy_properties))
+    ):
+        return False
+    expected_legacy_types = {
+        "address": "string",
+        "name": "string",
+        "telos": "string",
+        "reputation": "number",
+        "created_at": "string",
+    }
+    return all(
+        isinstance(legacy_properties.get(field), Mapping)
+        and legacy_properties[field].get("type") == expected_type
+        for field, expected_type in expected_legacy_types.items()
+    )
 
 
 def assess_deployment(
@@ -150,7 +212,9 @@ def assess_deployment(
     registration_post = (
         registration_post_value if isinstance(registration_post_value, Mapping) else {}
     )
-    registration_contract_ready = _registration_contract_is_agent_readable(registration_post)
+    registration_contract_ready = _registration_contract_is_agent_readable(
+        registration_post, openapi_payload
+    )
     if not registration_contract_ready:
         problems.append(
             "OpenAPI POST /auth/register does not expose the agent-readable "

@@ -26,6 +26,30 @@ REQUIRED_OPERATIONS = {
 def _canonical_openapi() -> dict:
     openapi = {
         "info": {"title": EXPECTED_TITLE, "version": "0.3.1"},
+        "components": {
+            "schemas": {
+                "RegisterSimpleResponse": {
+                    "type": "object",
+                    "required": ["address", "token", "message"],
+                    "properties": {
+                        "address": {"type": "string"},
+                        "token": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                },
+                "RegisterResponse": {
+                    "type": "object",
+                    "required": ["address", "name", "telos", "reputation", "created_at"],
+                    "properties": {
+                        "address": {"type": "string"},
+                        "name": {"type": "string"},
+                        "telos": {"type": "string"},
+                        "reputation": {"type": "number"},
+                        "created_at": {"type": "string"},
+                    },
+                },
+            }
+        },
         "paths": {
             path: {method: {} for method in methods}
             for path, methods in REQUIRED_OPERATIONS.items()
@@ -39,18 +63,22 @@ def _canonical_openapi() -> dict:
             "strict_onboarding": True,
         },
         "requestBody": {
+            "required": True,
             "content": {
                 "application/json": {
                     "schema": {
                         "anyOf": [
                             {
+                                "type": "object",
                                 "title": "RegisterSimpleRequest",
+                                "additionalProperties": False,
                                 "required": ["name"],
                                 "properties": {
                                     "name": {
                                         "type": "string",
                                         "minLength": 3,
                                         "maxLength": 30,
+                                        "pattern": "^[A-Za-z0-9-]{3,30}$",
                                     },
                                     "telos": {"type": "string", "maxLength": 2000},
                                 },
@@ -130,6 +158,73 @@ def test_assessment_rejects_untyped_registration_operation() -> None:
     assert result["registration_contract_ready"] is False
     assert result["registration_contract_version"] is None
     assert any("sab.tier1_registration.v1" in problem for problem in result["problems"])
+
+
+def test_assessment_rejects_optional_registration_body() -> None:
+    openapi = _canonical_openapi()
+    openapi["paths"]["/auth/register"]["post"]["requestBody"]["required"] = False
+
+    result = assess_deployment(
+        status_payload={"status": "healthy", "version": "0.3.1", "build_sha": "a" * 40},
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["registration_contract_ready"] is False
+    assert result["healthy"] is False
+
+
+def test_assessment_rejects_ambiguous_tier1_request_variant() -> None:
+    openapi = _canonical_openapi()
+    simple_request = openapi["paths"]["/auth/register"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["anyOf"][0]
+    simple_request["additionalProperties"] = True
+
+    result = assess_deployment(
+        status_payload={"status": "healthy", "version": "0.3.1", "build_sha": "a" * 40},
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["registration_contract_ready"] is False
+    assert result["healthy"] is False
+
+
+def test_assessment_rejects_name_schema_that_disagrees_with_runtime() -> None:
+    openapi = _canonical_openapi()
+    name_schema = openapi["paths"]["/auth/register"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["anyOf"][0]["properties"]["name"]
+    name_schema.pop("pattern")
+
+    result = assess_deployment(
+        status_payload={"status": "healthy", "version": "0.3.1", "build_sha": "a" * 40},
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["registration_contract_ready"] is False
+    assert result["healthy"] is False
+
+
+def test_assessment_rejects_missing_or_malformed_response_components() -> None:
+    for mutate in ("missing", "malformed"):
+        openapi = _canonical_openapi()
+        schemas = openapi["components"]["schemas"]
+        if mutate == "missing":
+            schemas.pop("RegisterSimpleResponse")
+        else:
+            schemas["RegisterSimpleResponse"]["required"].remove("token")
+
+        result = assess_deployment(
+            status_payload={"status": "healthy", "version": "0.3.1", "build_sha": "a" * 40},
+            openapi_payload=openapi,
+            expected_build_sha="a" * 40,
+        )
+
+        assert result["registration_contract_ready"] is False, mutate
+        assert result["healthy"] is False, mutate
 
 
 def test_assessment_rejects_foreign_openapi_and_missing_build_binding() -> None:

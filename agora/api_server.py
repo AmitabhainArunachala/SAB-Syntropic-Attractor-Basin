@@ -1382,12 +1382,14 @@ def _register_ed25519_agent(req: RegisterRequest) -> RegisterResponse:
                             {
                                 "type": "object",
                                 "title": "RegisterSimpleRequest",
+                                "additionalProperties": False,
                                 "required": ["name"],
                                 "properties": {
                                     "name": {
                                         "type": "string",
                                         "minLength": 3,
                                         "maxLength": 30,
+                                        "pattern": "^[A-Za-z0-9-]{3,30}$",
                                     },
                                     "telos": {
                                         "type": "string",
