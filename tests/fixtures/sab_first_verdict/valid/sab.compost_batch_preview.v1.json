@@ -1,0 +1,960 @@
+{
+  "actor_slot_parameterized": true,
+  "after_database_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "after_file_mtime_ns": 123456,
+  "after_head_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "after_lifecycle_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "before_database_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "before_file_mtime_ns": 123456,
+  "before_head_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "before_lifecycle_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "dharma_cron_count": 2,
+  "excluded_count": 6,
+  "execution_supported": false,
+  "hermes_count": 59,
+  "mutation_count": 0,
+  "preview_id": "sab_preview_fixture",
+  "records": [
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:0"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-00",
+      "row_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:1"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-01",
+      "row_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:2"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-02",
+      "row_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:3"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-03",
+      "row_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:4"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-04",
+      "row_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:5"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-05",
+      "row_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:6"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-06",
+      "row_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:7"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-07",
+      "row_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:8"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-08",
+      "row_sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:9"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-09",
+      "row_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:10"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-10",
+      "row_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:11"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-11",
+      "row_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:12"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-12",
+      "row_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:13"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-13",
+      "row_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:14"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-14",
+      "row_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:15"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-15",
+      "row_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:16"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-16",
+      "row_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:17"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-17",
+      "row_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:18"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-18",
+      "row_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:19"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-19",
+      "row_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:20"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-20",
+      "row_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:21"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-21",
+      "row_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:22"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-22",
+      "row_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:23"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-23",
+      "row_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:24"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-24",
+      "row_sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:25"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-25",
+      "row_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:26"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-26",
+      "row_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:27"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-27",
+      "row_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:28"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-28",
+      "row_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:29"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-29",
+      "row_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:30"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-30",
+      "row_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:31"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-31",
+      "row_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:32"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-32",
+      "row_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:33"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-33",
+      "row_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:34"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-34",
+      "row_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:35"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-35",
+      "row_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:36"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-36",
+      "row_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:37"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-37",
+      "row_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:38"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-38",
+      "row_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:39"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-39",
+      "row_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:40"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-40",
+      "row_sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:41"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-41",
+      "row_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:42"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-42",
+      "row_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:43"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-43",
+      "row_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:44"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-44",
+      "row_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:45"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-45",
+      "row_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:46"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-46",
+      "row_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:47"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-47",
+      "row_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:48"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-48",
+      "row_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:49"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-49",
+      "row_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:50"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-50",
+      "row_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:51"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-51",
+      "row_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:52"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-52",
+      "row_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:53"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-53",
+      "row_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:54"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-54",
+      "row_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:55"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-55",
+      "row_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:56"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-56",
+      "row_sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:57"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-57",
+      "row_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "actor_slot": "Hermes",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:58"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-58",
+      "row_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "actor_slot": "Dharma-cron",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:59"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-59",
+      "row_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "actor_slot": "Dharma-cron",
+      "eligible": true,
+      "evidence_refs": [
+        {
+          "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:60"
+        }
+      ],
+      "exclusion_reason": null,
+      "record_id": "seed-60",
+      "row_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "actor_slot": "other",
+      "eligible": false,
+      "evidence_refs": [
+        {
+          "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:61"
+        }
+      ],
+      "exclusion_reason": "not a selected language-womb wrapper",
+      "record_id": "seed-61",
+      "row_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "actor_slot": "other",
+      "eligible": false,
+      "evidence_refs": [
+        {
+          "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:62"
+        }
+      ],
+      "exclusion_reason": "not a selected language-womb wrapper",
+      "record_id": "seed-62",
+      "row_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+      "actor_slot": "other",
+      "eligible": false,
+      "evidence_refs": [
+        {
+          "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:63"
+        }
+      ],
+      "exclusion_reason": "not a selected language-womb wrapper",
+      "record_id": "seed-63",
+      "row_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "actor_slot": "other",
+      "eligible": false,
+      "evidence_refs": [
+        {
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:64"
+        }
+      ],
+      "exclusion_reason": "not a selected language-womb wrapper",
+      "record_id": "seed-64",
+      "row_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "actor_slot": "other",
+      "eligible": false,
+      "evidence_refs": [
+        {
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:65"
+        }
+      ],
+      "exclusion_reason": "not a selected language-womb wrapper",
+      "record_id": "seed-65",
+      "row_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "actor_slot": "other",
+      "eligible": false,
+      "evidence_refs": [
+        {
+          "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:66"
+        }
+      ],
+      "exclusion_reason": "not a selected language-womb wrapper",
+      "record_id": "seed-66",
+      "row_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "scanned_count": 67,
+  "schema": "sab.compost_batch_preview.v1",
+  "selected_count": 61
+}

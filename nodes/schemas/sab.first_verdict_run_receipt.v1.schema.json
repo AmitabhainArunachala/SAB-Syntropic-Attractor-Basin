@@ -1,0 +1,678 @@
+{
+  "$defs": {
+    "InjectedFailureReceiptV1": {
+      "additionalProperties": false,
+      "properties": {
+        "boundary": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Boundary",
+          "type": "string"
+        },
+        "injected": {
+          "const": true,
+          "default": true,
+          "title": "Injected",
+          "type": "boolean"
+        },
+        "rolled_back": {
+          "const": true,
+          "default": true,
+          "title": "Rolled Back",
+          "type": "boolean"
+        },
+        "state_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "State Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "boundary",
+        "state_sha256"
+      ],
+      "title": "InjectedFailureReceiptV1",
+      "type": "object"
+    },
+    "InvariantTableDigestV1": {
+      "additionalProperties": false,
+      "properties": {
+        "after_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Sha256",
+          "type": "string"
+        },
+        "before_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Sha256",
+          "type": "string"
+        },
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "table": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Table",
+          "type": "string"
+        },
+        "unchanged": {
+          "const": true,
+          "default": true,
+          "title": "Unchanged",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "table",
+        "columns",
+        "before_sha256",
+        "after_sha256"
+      ],
+      "title": "InvariantTableDigestV1",
+      "type": "object"
+    },
+    "ReceiptAcceptedBaseV1": {
+      "additionalProperties": false,
+      "properties": {
+        "current_head": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Current Head",
+          "type": "string"
+        },
+        "current_tree": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Current Tree",
+          "type": "string"
+        },
+        "integration_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Integration Sha",
+          "type": "string"
+        },
+        "integration_tree": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Integration Tree",
+          "type": "string"
+        }
+      },
+      "required": [
+        "integration_sha",
+        "integration_tree",
+        "current_head",
+        "current_tree"
+      ],
+      "title": "ReceiptAcceptedBaseV1",
+      "type": "object"
+    },
+    "ReceiptArtifactsV1": {
+      "additionalProperties": false,
+      "properties": {
+        "case": {
+          "$ref": "#/$defs/ReceiptNamedArtifactV1"
+        },
+        "countersign": {
+          "$ref": "#/$defs/ReceiptNamedArtifactV1"
+        },
+        "disposition": {
+          "$ref": "#/$defs/ReceiptNamedArtifactV1"
+        },
+        "lease": {
+          "$ref": "#/$defs/ReceiptNamedArtifactV1"
+        },
+        "lineage": {
+          "$ref": "#/$defs/ReceiptNamedArtifactV1"
+        },
+        "verdict": {
+          "$ref": "#/$defs/ReceiptNamedArtifactV1"
+        }
+      },
+      "required": [
+        "case",
+        "lease",
+        "verdict",
+        "countersign",
+        "disposition",
+        "lineage"
+      ],
+      "title": "ReceiptArtifactsV1",
+      "type": "object"
+    },
+    "ReceiptAuthorityV1": {
+      "additionalProperties": false,
+      "description": "Receipt rendering of the evaluator's ``Authorized<Copy>`` value.",
+      "properties": {
+        "allowed_effects": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Allowed Effects",
+          "type": "array"
+        },
+        "authority_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authority Digest",
+          "type": "string"
+        },
+        "evaluated_state_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evaluated State Hash",
+          "type": "string"
+        },
+        "refs": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Refs",
+          "type": "array"
+        },
+        "result": {
+          "const": "AuthorizedCopyOnly",
+          "default": "AuthorizedCopyOnly",
+          "title": "Result",
+          "type": "string"
+        },
+        "scope": {
+          "const": "Copy",
+          "default": "Copy",
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "authority_digest",
+        "allowed_effects",
+        "evaluated_state_hash",
+        "refs"
+      ],
+      "title": "ReceiptAuthorityV1",
+      "type": "object"
+    },
+    "ReceiptCheckpointChainV1": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "head": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Head",
+          "type": "string"
+        },
+        "valid": {
+          "const": true,
+          "default": true,
+          "title": "Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "head",
+        "count"
+      ],
+      "title": "ReceiptCheckpointChainV1",
+      "type": "object"
+    },
+    "ReceiptDatabaseRefV1": {
+      "additionalProperties": false,
+      "properties": {
+        "integrity": {
+          "const": "ok",
+          "default": "ok",
+          "title": "Integrity",
+          "type": "string"
+        },
+        "lifecycle_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Lifecycle Fingerprint",
+          "type": "string"
+        },
+        "path_ref": {
+          "pattern": "^private-local:sha256:[0-9a-f]{64}$",
+          "title": "Path Ref",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path_ref",
+        "sha256",
+        "lifecycle_fingerprint"
+      ],
+      "title": "ReceiptDatabaseRefV1",
+      "type": "object"
+    },
+    "ReceiptMutationCountersV1": {
+      "additionalProperties": false,
+      "properties": {
+        "external": {
+          "const": 0,
+          "default": 0,
+          "title": "External",
+          "type": "integer"
+        },
+        "fixture_or_copy_db": {
+          "minimum": 1,
+          "title": "Fixture Or Copy Db",
+          "type": "integer"
+        },
+        "live_db": {
+          "const": 0,
+          "default": 0,
+          "title": "Live Db",
+          "type": "integer"
+        },
+        "providers": {
+          "const": 0,
+          "default": 0,
+          "title": "Providers",
+          "type": "integer"
+        },
+        "services": {
+          "const": 0,
+          "default": 0,
+          "title": "Services",
+          "type": "integer"
+        },
+        "source_checkout": {
+          "const": 0,
+          "default": 0,
+          "title": "Source Checkout",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fixture_or_copy_db"
+      ],
+      "title": "ReceiptMutationCountersV1",
+      "type": "object"
+    },
+    "ReceiptNamedArtifactV1": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sha256"
+      ],
+      "title": "ReceiptNamedArtifactV1",
+      "type": "object"
+    },
+    "ReceiptPreviewSummaryV1": {
+      "additionalProperties": false,
+      "properties": {
+        "dharma_cron": {
+          "const": 2,
+          "default": 2,
+          "title": "Dharma Cron",
+          "type": "integer"
+        },
+        "eligible": {
+          "const": 61,
+          "default": 61,
+          "title": "Eligible",
+          "type": "integer"
+        },
+        "evidence_refs_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Refs Sha256",
+          "type": "string"
+        },
+        "hermes": {
+          "const": 59,
+          "default": 59,
+          "title": "Hermes",
+          "type": "integer"
+        },
+        "membership_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Membership Sha256",
+          "type": "string"
+        },
+        "no_write": {
+          "const": true,
+          "default": true,
+          "title": "No Write",
+          "type": "boolean"
+        },
+        "scanned": {
+          "const": 67,
+          "default": 67,
+          "title": "Scanned",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "membership_sha256",
+        "evidence_refs_sha256"
+      ],
+      "title": "ReceiptPreviewSummaryV1",
+      "type": "object"
+    },
+    "ReceiptTerminalClaimV1": {
+      "additionalProperties": false,
+      "properties": {
+        "build_b": {
+          "const": "not_run_authority_unresolved",
+          "default": "not_run_authority_unresolved",
+          "title": "Build B",
+          "type": "string"
+        },
+        "engineering_status": {
+          "const": "proven_on_copy",
+          "default": "proven_on_copy",
+          "title": "Engineering Status",
+          "type": "string"
+        },
+        "external_actions": {
+          "const": 0,
+          "default": 0,
+          "title": "External Actions",
+          "type": "integer"
+        },
+        "historic_live_win": {
+          "const": false,
+          "default": false,
+          "title": "Historic Live Win",
+          "type": "boolean"
+        },
+        "live_mutations": {
+          "const": 0,
+          "default": 0,
+          "title": "Live Mutations",
+          "type": "integer"
+        },
+        "master_vision_effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Master Vision Effect",
+          "type": "string"
+        },
+        "provider_calls": {
+          "const": 0,
+          "default": 0,
+          "title": "Provider Calls",
+          "type": "integer"
+        },
+        "service_mutations": {
+          "const": 0,
+          "default": 0,
+          "title": "Service Mutations",
+          "type": "integer"
+        },
+        "standing_effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Standing Effect",
+          "type": "string"
+        }
+      },
+      "title": "ReceiptTerminalClaimV1",
+      "type": "object"
+    },
+    "ReceiptTestResultV1": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "exit_code": {
+          "const": 0,
+          "default": 0,
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "proof_class": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proof Class"
+        },
+        "stdout_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Stdout Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "stdout_sha256"
+      ],
+      "title": "ReceiptTestResultV1",
+      "type": "object"
+    },
+    "ReceiptTransactionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "boundaries": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Boundaries",
+          "type": "array"
+        },
+        "idempotency_key": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "injected_failure_matrix": {
+          "items": {
+            "$ref": "#/$defs/InjectedFailureReceiptV1"
+          },
+          "minItems": 1,
+          "title": "Injected Failure Matrix",
+          "type": "array"
+        },
+        "request_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Sha256",
+          "type": "string"
+        },
+        "response_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Response Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "request_sha256",
+        "response_sha256",
+        "boundaries",
+        "injected_failure_matrix"
+      ],
+      "title": "ReceiptTransactionV1",
+      "type": "object"
+    },
+    "SignedEventReplayV1": {
+      "additionalProperties": false,
+      "properties": {
+        "event_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Hash",
+          "type": "string"
+        },
+        "event_id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "public_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Public Key",
+          "type": "string"
+        },
+        "replay_result": {
+          "const": "SignaturesVerified",
+          "default": "SignaturesVerified",
+          "title": "Replay Result",
+          "type": "string"
+        },
+        "signature_verified": {
+          "const": true,
+          "default": true,
+          "title": "Signature Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_hash",
+        "public_key"
+      ],
+      "title": "SignedEventReplayV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.first_verdict_run_receipt.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Strict lifecycle receipt consumed and independently re-derived by C0.",
+  "properties": {
+    "accepted_base": {
+      "$ref": "#/$defs/ReceiptAcceptedBaseV1"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/ReceiptArtifactsV1"
+    },
+    "authority": {
+      "$ref": "#/$defs/ReceiptAuthorityV1"
+    },
+    "blockers": {
+      "items": {},
+      "maxItems": 0,
+      "title": "Blockers",
+      "type": "array"
+    },
+    "checkpoint_chain": {
+      "$ref": "#/$defs/ReceiptCheckpointChainV1"
+    },
+    "copy_db": {
+      "$ref": "#/$defs/ReceiptDatabaseRefV1"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "invariant_table_digests": {
+      "items": {
+        "$ref": "#/$defs/InvariantTableDigestV1"
+      },
+      "minItems": 1,
+      "title": "Invariant Table Digests",
+      "type": "array"
+    },
+    "mutation_counters": {
+      "$ref": "#/$defs/ReceiptMutationCountersV1"
+    },
+    "preview": {
+      "$ref": "#/$defs/ReceiptPreviewSummaryV1"
+    },
+    "proof_class": {
+      "enum": [
+        "copied_live_db_rehearsal",
+        "fresh_context_same_operator_rederivation"
+      ],
+      "title": "Proof Class",
+      "type": "string"
+    },
+    "run_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "sab.first_verdict_run_receipt.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "signed_events": {
+      "items": {
+        "$ref": "#/$defs/SignedEventReplayV1"
+      },
+      "minItems": 1,
+      "title": "Signed Events",
+      "type": "array"
+    },
+    "source_db": {
+      "$ref": "#/$defs/ReceiptDatabaseRefV1"
+    },
+    "terminal_claim": {
+      "$ref": "#/$defs/ReceiptTerminalClaimV1"
+    },
+    "tests": {
+      "items": {
+        "$ref": "#/$defs/ReceiptTestResultV1"
+      },
+      "minItems": 1,
+      "title": "Tests",
+      "type": "array"
+    },
+    "transaction": {
+      "$ref": "#/$defs/ReceiptTransactionV1"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "created_at",
+    "proof_class",
+    "accepted_base",
+    "authority",
+    "source_db",
+    "copy_db",
+    "artifacts",
+    "transaction",
+    "invariant_table_digests",
+    "signed_events",
+    "preview",
+    "checkpoint_chain",
+    "mutation_counters",
+    "tests",
+    "blockers",
+    "terminal_claim"
+  ],
+  "title": "FirstVerdictRunReceiptV1",
+  "type": "object"
+}

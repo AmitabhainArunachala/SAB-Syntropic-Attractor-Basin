@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "ContractSignatureV1": {
+      "additionalProperties": false,
+      "properties": {
+        "alg": {
+          "const": "ed25519",
+          "default": "ed25519",
+          "title": "Alg",
+          "type": "string"
+        },
+        "canonicalization": {
+          "const": "json-sort-keys-compact-v1",
+          "default": "json-sort-keys-compact-v1",
+          "title": "Canonicalization",
+          "type": "string"
+        },
+        "public_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Public Key",
+          "type": "string"
+        },
+        "signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Signature",
+          "type": "string"
+        },
+        "signed_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Signed Payload Sha256",
+          "type": "string"
+        },
+        "signer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Signer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "signer",
+        "public_key",
+        "signature",
+        "signed_payload_sha256"
+      ],
+      "title": "ContractSignatureV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.seed_supersession.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority_lease_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Authority Lease Id",
+      "type": "string"
+    },
+    "claimant_identity": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Claimant Identity",
+      "type": "string"
+    },
+    "claimant_signature": {
+      "$ref": "#/$defs/ContractSignatureV1"
+    },
+    "correction_artifact_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Correction Artifact Sha256",
+      "type": "string"
+    },
+    "correction_summary": {
+      "maxLength": 6000,
+      "minLength": 1,
+      "title": "Correction Summary",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "live_eligible": {
+      "const": false,
+      "default": false,
+      "title": "Live Eligible",
+      "type": "boolean"
+    },
+    "predecessor_packet_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Predecessor Packet Sha256",
+      "type": "string"
+    },
+    "predecessor_seed_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Predecessor Seed Id",
+      "type": "string"
+    },
+    "relation": {
+      "const": "superseded_by_correction",
+      "default": "superseded_by_correction",
+      "title": "Relation",
+      "type": "string"
+    },
+    "schema": {
+      "const": "sab.seed_supersession.v1",
+      "default": "sab.seed_supersession.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "scope": {
+      "const": "Copy",
+      "default": "Copy",
+      "title": "Scope",
+      "type": "string"
+    },
+    "standing_effect": {
+      "const": "none",
+      "default": "none",
+      "title": "Standing Effect",
+      "type": "string"
+    },
+    "successor_packet_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Successor Packet Sha256",
+      "type": "string"
+    },
+    "successor_seed_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Successor Seed Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "predecessor_seed_id",
+    "predecessor_packet_sha256",
+    "successor_seed_id",
+    "successor_packet_sha256",
+    "correction_summary",
+    "correction_artifact_sha256",
+    "claimant_identity",
+    "authority_lease_id",
+    "created_at",
+    "claimant_signature"
+  ],
+  "title": "SeedSupersessionV1",
+  "type": "object"
+}

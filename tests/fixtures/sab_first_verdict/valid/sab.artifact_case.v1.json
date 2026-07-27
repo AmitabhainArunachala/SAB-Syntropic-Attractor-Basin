@@ -1,0 +1,324 @@
+{
+  "amendment_clause": "Any weakening forces appeal.",
+  "anti_capture_rules": [
+    "same operator never counts as independent"
+  ],
+  "canon_conditions": [
+    "fixture condition"
+  ],
+  "case_id": "sab_case_fixture_first_verdict",
+  "challenges": [
+    {
+      "challenge_id": "sab_challenge_fixture",
+      "challenge_packet_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "status": "pending"
+    }
+  ],
+  "clerk_identity": "fixture:clerk",
+  "clerk_signature": {
+    "alg": "ed25519",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+    "signature": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "signed_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signer": "fixture:test-issuer"
+  },
+  "compost_conditions": [
+    "fixture condition"
+  ],
+  "conflict_flags": {
+    "author_is_challenger": false,
+    "clerk_is_case_author": false,
+    "clerk_is_challenger": false
+  },
+  "demanded_correction": "Correct the named fixture defect.",
+  "docket_rule": {
+    "challenge_resolution_authorized": true,
+    "jurisdiction_established": true,
+    "rule_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signed_conditions_satisfied": true,
+    "version": "sab-first-verdict-v1"
+  },
+  "evidence_refs": [
+    {
+      "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "proof_class": "signed_fixture",
+      "ref": "fixture:evidence:0"
+    }
+  ],
+  "expected_case_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expected_seed_state": "challenged",
+  "frozen_at": "2026-07-27T15:00:00Z",
+  "frozen_roster": [
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-0",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "model_family": "family-0",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:0"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/0"
+      ],
+      "requested_lab": "lab-0",
+      "requested_model": "requested-model-0",
+      "requested_route": "fixture/route/0",
+      "seat_id": "seat-0",
+      "served_model": "served-model-0",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-1",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "model_family": "family-1",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:1"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/1"
+      ],
+      "requested_lab": "lab-1",
+      "requested_model": "requested-model-1",
+      "requested_route": "fixture/route/1",
+      "seat_id": "seat-1",
+      "served_model": "served-model-1",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-2",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "model_family": "family-2",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:2"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/2"
+      ],
+      "requested_lab": "lab-2",
+      "requested_model": "requested-model-2",
+      "requested_route": "fixture/route/2",
+      "seat_id": "seat-2",
+      "served_model": "served-model-2",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-3",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "model_family": "family-3",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:3"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/3"
+      ],
+      "requested_lab": "lab-3",
+      "requested_model": "requested-model-3",
+      "requested_route": "fixture/route/3",
+      "seat_id": "seat-3",
+      "served_model": "served-model-3",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-4",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "model_family": "family-4",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:4"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/4"
+      ],
+      "requested_lab": "lab-4",
+      "requested_model": "requested-model-4",
+      "requested_route": "fixture/route/4",
+      "seat_id": "seat-4",
+      "served_model": "served-model-4",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-5",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "model_family": "family-5",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:5"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/5"
+      ],
+      "requested_lab": "lab-5",
+      "requested_model": "requested-model-5",
+      "requested_route": "fixture/route/5",
+      "seat_id": "seat-5",
+      "served_model": "served-model-5",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-6",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "model_family": "family-6",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:6"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/6"
+      ],
+      "requested_lab": "lab-6",
+      "requested_model": "requested-model-6",
+      "requested_route": "fixture/route/6",
+      "seat_id": "seat-6",
+      "served_model": "served-model-6",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-7",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "model_family": "family-7",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:7"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/7"
+      ],
+      "requested_lab": "lab-7",
+      "requested_model": "requested-model-7",
+      "requested_route": "fixture/route/7",
+      "seat_id": "seat-7",
+      "served_model": "served-model-7",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    },
+    {
+      "adapter": "fixture-adapter",
+      "cluster_basis": "evidenced_base_model_or_training_lineage",
+      "common_operator_backing": "single disclosed fixture operator",
+      "correlation_smeared": false,
+      "credited_cluster": "base-lineage-8",
+      "execution_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "key_role": "operator_controlled_execution_attestation",
+      "liveness_receipt_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "model_family": "family-8",
+      "model_lineage_evidence_refs": [
+        {
+          "content_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:8"
+        }
+      ],
+      "possible_underlying_routes": [
+        "fixture/route/8"
+      ],
+      "requested_lab": "lab-8",
+      "requested_model": "requested-model-8",
+      "requested_route": "fixture/route/8",
+      "seat_id": "seat-8",
+      "served_model": "served-model-8",
+      "served_provider": "fixture-provider",
+      "transport": "fixture-transport",
+      "transport_correlation_refs": []
+    }
+  ],
+  "frozen_roster_sha256": "7e73c976431037461c86c59a94ca5b4ad74048413d8c8ad42b5528c352947785",
+  "independence_disclosure": "Synthetic same-operator fixture only.",
+  "lease_id": "sab_lease_fixture",
+  "schema": "sab.artifact_case.v1",
+  "signed_artifact_b64": "eyJzaWduZWQiOiJmaXh0dXJlIGFydGlmYWN0In0=",
+  "signed_artifact_sha256": "2853cc0e683a356df8ccc8f64787f8e76be999ee9b1d2080feb9d336b3e85722",
+  "single_operator_adjudicated": true,
+  "target_seed_id": "sab_seed_fixture_first_verdict",
+  "target_seed_packet_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

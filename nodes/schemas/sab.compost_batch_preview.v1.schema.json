@@ -1,0 +1,221 @@
+{
+  "$defs": {
+    "EvidenceRefV1": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "proof_class": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Proof Class",
+          "type": "string"
+        },
+        "ref": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "content_sha256",
+        "proof_class"
+      ],
+      "title": "EvidenceRefV1",
+      "type": "object"
+    },
+    "PreviewRecordV1": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_slot": {
+          "enum": [
+            "Hermes",
+            "Dharma-cron",
+            "other"
+          ],
+          "title": "Actor Slot",
+          "type": "string"
+        },
+        "eligible": {
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRefV1"
+          },
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "exclusion_reason": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exclusion Reason"
+        },
+        "record_id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "row_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Row Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_id",
+        "actor_slot",
+        "eligible",
+        "evidence_refs",
+        "row_sha256"
+      ],
+      "title": "PreviewRecordV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.compost_batch_preview.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor_slot_parameterized": {
+      "const": true,
+      "default": true,
+      "title": "Actor Slot Parameterized",
+      "type": "boolean"
+    },
+    "after_database_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "After Database Sha256",
+      "type": "string"
+    },
+    "after_file_mtime_ns": {
+      "minimum": 0,
+      "title": "After File Mtime Ns",
+      "type": "integer"
+    },
+    "after_head_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "After Head Sha256",
+      "type": "string"
+    },
+    "after_lifecycle_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "After Lifecycle Fingerprint",
+      "type": "string"
+    },
+    "before_database_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Before Database Sha256",
+      "type": "string"
+    },
+    "before_file_mtime_ns": {
+      "minimum": 0,
+      "title": "Before File Mtime Ns",
+      "type": "integer"
+    },
+    "before_head_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Before Head Sha256",
+      "type": "string"
+    },
+    "before_lifecycle_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Before Lifecycle Fingerprint",
+      "type": "string"
+    },
+    "dharma_cron_count": {
+      "const": 2,
+      "default": 2,
+      "title": "Dharma Cron Count",
+      "type": "integer"
+    },
+    "excluded_count": {
+      "const": 6,
+      "default": 6,
+      "title": "Excluded Count",
+      "type": "integer"
+    },
+    "execution_supported": {
+      "const": false,
+      "default": false,
+      "title": "Execution Supported",
+      "type": "boolean"
+    },
+    "hermes_count": {
+      "const": 59,
+      "default": 59,
+      "title": "Hermes Count",
+      "type": "integer"
+    },
+    "mutation_count": {
+      "const": 0,
+      "default": 0,
+      "title": "Mutation Count",
+      "type": "integer"
+    },
+    "preview_id": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Preview Id",
+      "type": "string"
+    },
+    "records": {
+      "items": {
+        "$ref": "#/$defs/PreviewRecordV1"
+      },
+      "maxItems": 67,
+      "minItems": 67,
+      "title": "Records",
+      "type": "array"
+    },
+    "scanned_count": {
+      "const": 67,
+      "default": 67,
+      "title": "Scanned Count",
+      "type": "integer"
+    },
+    "schema": {
+      "const": "sab.compost_batch_preview.v1",
+      "default": "sab.compost_batch_preview.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "selected_count": {
+      "const": 61,
+      "default": 61,
+      "title": "Selected Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "preview_id",
+    "records",
+    "before_database_sha256",
+    "after_database_sha256",
+    "before_lifecycle_fingerprint",
+    "after_lifecycle_fingerprint",
+    "before_head_sha256",
+    "after_head_sha256",
+    "before_file_mtime_ns",
+    "after_file_mtime_ns"
+  ],
+  "title": "CompostBatchPreviewV1",
+  "type": "object"
+}

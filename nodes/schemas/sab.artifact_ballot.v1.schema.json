@@ -1,0 +1,367 @@
+{
+  "$defs": {
+    "BallotSource": {
+      "enum": [
+        "real_external_model",
+        "fixture_model"
+      ],
+      "title": "BallotSource",
+      "type": "string"
+    },
+    "ClaimFindingV1": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_ref": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Claim Ref",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRefV1"
+          },
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "finding": {
+          "enum": [
+            "supported",
+            "refuted",
+            "uncertain",
+            "out_of_scope"
+          ],
+          "title": "Finding",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim_ref",
+        "finding",
+        "rationale",
+        "evidence_refs"
+      ],
+      "title": "ClaimFindingV1",
+      "type": "object"
+    },
+    "ContractSignatureV1": {
+      "additionalProperties": false,
+      "properties": {
+        "alg": {
+          "const": "ed25519",
+          "default": "ed25519",
+          "title": "Alg",
+          "type": "string"
+        },
+        "canonicalization": {
+          "const": "json-sort-keys-compact-v1",
+          "default": "json-sort-keys-compact-v1",
+          "title": "Canonicalization",
+          "type": "string"
+        },
+        "public_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Public Key",
+          "type": "string"
+        },
+        "signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Signature",
+          "type": "string"
+        },
+        "signed_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Signed Payload Sha256",
+          "type": "string"
+        },
+        "signer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Signer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "signer",
+        "public_key",
+        "signature",
+        "signed_payload_sha256"
+      ],
+      "title": "ContractSignatureV1",
+      "type": "object"
+    },
+    "EvidenceRefV1": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "proof_class": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Proof Class",
+          "type": "string"
+        },
+        "ref": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "content_sha256",
+        "proof_class"
+      ],
+      "title": "EvidenceRefV1",
+      "type": "object"
+    },
+    "SelfBindingWeakeningFindingV1": {
+      "additionalProperties": false,
+      "properties": {
+        "affected_constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Affected Constraints",
+          "type": "array"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRefV1"
+          },
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "explanation": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "weakens_self_binding_constraint": {
+          "title": "Weakens Self Binding Constraint",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "weakens_self_binding_constraint",
+        "affected_constraints",
+        "evidence_refs",
+        "explanation"
+      ],
+      "title": "SelfBindingWeakeningFindingV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.artifact_ballot.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ballot_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Ballot Id",
+      "type": "string"
+    },
+    "ballot_source": {
+      "$ref": "#/$defs/BallotSource"
+    },
+    "case_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Case Sha256",
+      "type": "string"
+    },
+    "claim_findings": {
+      "items": {
+        "$ref": "#/$defs/ClaimFindingV1"
+      },
+      "minItems": 1,
+      "title": "Claim Findings",
+      "type": "array"
+    },
+    "cluster_basis": {
+      "const": "evidenced_base_model_or_training_lineage",
+      "default": "evidenced_base_model_or_training_lineage",
+      "title": "Cluster Basis",
+      "type": "string"
+    },
+    "correlation_smeared": {
+      "title": "Correlation Smeared",
+      "type": "boolean"
+    },
+    "credited_cluster": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Credited Cluster",
+      "type": "string"
+    },
+    "decision": {
+      "enum": [
+        "canon",
+        "compost",
+        "correct_and_supersede",
+        "no_terminal_verdict",
+        "appeal",
+        "abstain"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "execution_signature": {
+      "$ref": "#/$defs/ContractSignatureV1"
+    },
+    "model_lineage_evidence_refs": {
+      "items": {
+        "$ref": "#/$defs/EvidenceRefV1"
+      },
+      "minItems": 1,
+      "title": "Model Lineage Evidence Refs",
+      "type": "array"
+    },
+    "raw_model_output_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Raw Model Output Sha256",
+      "type": "string"
+    },
+    "requested_model": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Requested Model",
+      "type": "string"
+    },
+    "requested_route": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Requested Route",
+      "type": "string"
+    },
+    "round_no": {
+      "const": 1,
+      "default": 1,
+      "title": "Round No",
+      "type": "integer"
+    },
+    "schema": {
+      "const": "sab.artifact_ballot.v1",
+      "default": "sab.artifact_ballot.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "seat_id": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Seat Id",
+      "type": "string"
+    },
+    "self_binding_weakening_finding": {
+      "$ref": "#/$defs/SelfBindingWeakeningFindingV1"
+    },
+    "served_model": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Served Model",
+      "type": "string"
+    },
+    "served_provider": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Served Provider",
+      "type": "string"
+    },
+    "served_route": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Served Route",
+      "type": "string"
+    },
+    "signature_role": {
+      "const": "operator_controlled_execution_attestation",
+      "default": "operator_controlled_execution_attestation",
+      "title": "Signature Role",
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "sealed_first_pass",
+        "cross_examination",
+        "final"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "strongest_case_against_decision": {
+      "maxLength": 6000,
+      "minLength": 1,
+      "title": "Strongest Case Against Decision",
+      "type": "string"
+    },
+    "transcript_ref": {
+      "$ref": "#/$defs/EvidenceRefV1"
+    },
+    "transport_correlation_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Transport Correlation Refs",
+      "type": "array"
+    },
+    "unresolved_objections": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved Objections",
+      "type": "array"
+    },
+    "vendor_signature_claimed": {
+      "const": false,
+      "default": false,
+      "title": "Vendor Signature Claimed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ballot_id",
+    "case_id",
+    "case_sha256",
+    "seat_id",
+    "stage",
+    "decision",
+    "ballot_source",
+    "claim_findings",
+    "self_binding_weakening_finding",
+    "strongest_case_against_decision",
+    "unresolved_objections",
+    "raw_model_output_sha256",
+    "transcript_ref",
+    "requested_model",
+    "requested_route",
+    "served_provider",
+    "served_model",
+    "served_route",
+    "credited_cluster",
+    "model_lineage_evidence_refs",
+    "transport_correlation_refs",
+    "correlation_smeared",
+    "execution_signature"
+  ],
+  "title": "ArtifactBallotV1",
+  "type": "object"
+}

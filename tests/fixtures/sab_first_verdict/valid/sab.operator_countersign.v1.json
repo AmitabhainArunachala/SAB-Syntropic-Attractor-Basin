@@ -1,0 +1,44 @@
+{
+  "allowed_operations": [
+    {
+      "method": "POST",
+      "path": "/api/v1/artifact-cases"
+    }
+  ],
+  "allowed_operations_sha256": "8b5ac2cee1497b590a47007ee9d98ee60b95fc4d38058a05303fa44d763f25f8",
+  "authority_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "case_id": "sab_case_fixture_first_verdict",
+  "case_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "code_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "countersign_id": "sab_countersign_fixture",
+  "created_at": "2026-07-27T15:00:00Z",
+  "decision": "correct_and_supersede",
+  "effect_payload": {
+    "challenge": "resolve",
+    "seed": "supersede"
+  },
+  "effect_payload_sha256": "dca5e8c8ae4525a53f3ebf2e3c809b24cfa2e49717647456f58f5832bb0ab8ff",
+  "expected_case_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "expected_lifecycle_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expected_seed_state": "challenged",
+  "expires_at": "2026-07-27T16:00:00Z",
+  "lease_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "live_eligible": false,
+  "schema": "sab.operator_countersign.v1",
+  "scope": "Copy",
+  "signature": {
+    "alg": "ed25519",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+    "signature": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "signed_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signer": "fixture:test-issuer"
+  },
+  "signer_kind": "fixture_ephemeral",
+  "standing_effect": "none",
+  "successor_envelope_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "target_seed_id": "sab_seed_fixture_first_verdict",
+  "verdict_id": "sab_verdict_fixture",
+  "verdict_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "write_lease_id": "sab_lease_fixture"
+}

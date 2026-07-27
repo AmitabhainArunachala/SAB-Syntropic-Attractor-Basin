@@ -1,0 +1,36 @@
+{
+  "accepted_code_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "activated_at": "2026-07-27T15:00:00Z",
+  "allowed_operations": [
+    {
+      "method": "POST",
+      "path": "/api/v1/artifact-cases"
+    }
+  ],
+  "allowed_operations_sha256": "8b5ac2cee1497b590a47007ee9d98ee60b95fc4d38058a05303fa44d763f25f8",
+  "authority_basis": "founder_bootstrap_self_declared",
+  "clerk_identity": "fixture:clerk",
+  "expected_lifecycle_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "expires_at": "2026-07-27T16:00:00Z",
+  "issued_at": "2026-07-27T15:00:00Z",
+  "issuer_fingerprint": "02d449a31fbb267c8f352e9968a79e3e5fc95c1bbeaa502fd6454ebde5a4bedc",
+  "issuer_identity": "fixture:test-issuer",
+  "issuer_public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+  "lease_id": "sab_lease_fixture",
+  "lease_sha256": "a0a3a280cadf122ac4812d0558d081df8aae7c35beb0c9a60869858e57159ddb",
+  "live_eligible": false,
+  "schema": "sab.session_write_lease.v1",
+  "scope": "Copy",
+  "session_id": "sab_session_fixture",
+  "signature": {
+    "alg": "ed25519",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+    "signature": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "signed_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signer": "fixture:test-issuer"
+  },
+  "source_backup_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "standing_effect": "none",
+  "unexpected_authority_escalation": true
+}

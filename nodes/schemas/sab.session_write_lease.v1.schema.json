@@ -1,0 +1,216 @@
+{
+  "$defs": {
+    "AllowedOperationV1": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 240,
+          "minLength": 1,
+          "pattern": "^/[^\\s]*$",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "path"
+      ],
+      "title": "AllowedOperationV1",
+      "type": "object"
+    },
+    "ContractSignatureV1": {
+      "additionalProperties": false,
+      "properties": {
+        "alg": {
+          "const": "ed25519",
+          "default": "ed25519",
+          "title": "Alg",
+          "type": "string"
+        },
+        "canonicalization": {
+          "const": "json-sort-keys-compact-v1",
+          "default": "json-sort-keys-compact-v1",
+          "title": "Canonicalization",
+          "type": "string"
+        },
+        "public_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Public Key",
+          "type": "string"
+        },
+        "signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Signature",
+          "type": "string"
+        },
+        "signed_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Signed Payload Sha256",
+          "type": "string"
+        },
+        "signer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Signer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "signer",
+        "public_key",
+        "signature",
+        "signed_payload_sha256"
+      ],
+      "title": "ContractSignatureV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.session_write_lease.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "accepted_code_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Accepted Code Sha",
+      "type": "string"
+    },
+    "activated_at": {
+      "format": "date-time",
+      "title": "Activated At",
+      "type": "string"
+    },
+    "allowed_operations": {
+      "items": {
+        "$ref": "#/$defs/AllowedOperationV1"
+      },
+      "minItems": 1,
+      "title": "Allowed Operations",
+      "type": "array"
+    },
+    "allowed_operations_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Allowed Operations Sha256",
+      "type": "string"
+    },
+    "authority_basis": {
+      "const": "founder_bootstrap_self_declared",
+      "title": "Authority Basis",
+      "type": "string"
+    },
+    "clerk_identity": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Clerk Identity",
+      "type": "string"
+    },
+    "expected_lifecycle_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Expected Lifecycle Fingerprint",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "issued_at": {
+      "format": "date-time",
+      "title": "Issued At",
+      "type": "string"
+    },
+    "issuer_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Issuer Fingerprint",
+      "type": "string"
+    },
+    "issuer_identity": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Issuer Identity",
+      "type": "string"
+    },
+    "issuer_public_key": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Issuer Public Key",
+      "type": "string"
+    },
+    "lease_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Lease Id",
+      "type": "string"
+    },
+    "lease_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Lease Sha256",
+      "type": "string"
+    },
+    "live_eligible": {
+      "const": false,
+      "default": false,
+      "title": "Live Eligible",
+      "type": "boolean"
+    },
+    "schema": {
+      "const": "sab.session_write_lease.v1",
+      "default": "sab.session_write_lease.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "scope": {
+      "const": "Copy",
+      "default": "Copy",
+      "title": "Scope",
+      "type": "string"
+    },
+    "session_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Session Id",
+      "type": "string"
+    },
+    "signature": {
+      "$ref": "#/$defs/ContractSignatureV1"
+    },
+    "source_backup_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Backup Sha256",
+      "type": "string"
+    },
+    "standing_effect": {
+      "const": "none",
+      "default": "none",
+      "title": "Standing Effect",
+      "type": "string"
+    }
+  },
+  "required": [
+    "lease_id",
+    "session_id",
+    "clerk_identity",
+    "allowed_operations",
+    "allowed_operations_sha256",
+    "accepted_code_sha",
+    "expected_lifecycle_fingerprint",
+    "source_backup_sha256",
+    "issuer_identity",
+    "issuer_public_key",
+    "issuer_fingerprint",
+    "authority_basis",
+    "issued_at",
+    "activated_at",
+    "expires_at",
+    "lease_sha256",
+    "signature"
+  ],
+  "title": "SessionWriteLeaseV1",
+  "type": "object"
+}

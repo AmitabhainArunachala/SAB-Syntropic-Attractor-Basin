@@ -1,0 +1,150 @@
+{
+  "accepted_base": {
+    "current_head": "cccccccccccccccccccccccccccccccccccccccc",
+    "current_tree": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "integration_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "integration_tree": "dddddddddddddddddddddddddddddddddddddddd"
+  },
+  "artifacts": {
+    "case": {
+      "id": "sab_case_fixture",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "countersign": {
+      "id": "sab_countersign_fixture",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "disposition": {
+      "id": "sab_disposition_fixture",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "lease": {
+      "id": "sab_lease_fixture",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "lineage": {
+      "id": "sab_lineage_fixture",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "verdict": {
+      "id": "sab_verdict_fixture",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "authority": {
+    "allowed_effects": [
+      "challenge:resolve",
+      "seed:supersede"
+    ],
+    "authority_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "evaluated_state_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "refs": [
+      "fixture:signed-policy"
+    ],
+    "result": "AuthorizedCopyOnly",
+    "scope": "Copy"
+  },
+  "blockers": [],
+  "checkpoint_chain": {
+    "count": 9,
+    "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "valid": true
+  },
+  "copy_db": {
+    "integrity": "ok",
+    "lifecycle_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path_ref": "private-local:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "created_at": "2026-07-27T15:00:00Z",
+  "invariant_table_digests": [
+    {
+      "after_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "before_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "columns": [
+        "standing_id",
+        "subject_id"
+      ],
+      "table": "sab_standing_v1",
+      "unchanged": true
+    }
+  ],
+  "mutation_counters": {
+    "external": 0,
+    "fixture_or_copy_db": 1,
+    "live_db": 0,
+    "providers": 0,
+    "services": 0,
+    "source_checkout": 0
+  },
+  "preview": {
+    "dharma_cron": 2,
+    "eligible": 61,
+    "evidence_refs_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "hermes": 59,
+    "membership_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "no_write": true,
+    "scanned": 67
+  },
+  "proof_class": "copied_live_db_rehearsal",
+  "run_id": "sab_build_a_fixture_run",
+  "schema_version": "sab.first_verdict_run_receipt.v1",
+  "signed_events": [
+    {
+      "event_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "event_id": "sab_event_fixture",
+      "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "replay_result": "SignaturesVerified",
+      "signature_verified": true
+    }
+  ],
+  "source_db": {
+    "integrity": "ok",
+    "lifecycle_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path_ref": "private-local:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "terminal_claim": {
+    "build_b": "not_run_authority_unresolved",
+    "engineering_status": "proven_on_copy",
+    "external_actions": 0,
+    "historic_live_win": false,
+    "live_mutations": 0,
+    "master_vision_effect": "none",
+    "provider_calls": 0,
+    "service_mutations": 0,
+    "standing_effect": "none"
+  },
+  "tests": [
+    {
+      "command": "python -m pytest -q",
+      "exit_code": 0,
+      "proof_class": "local_offline_test",
+      "stdout_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "transaction": {
+    "boundaries": [
+      "case_insert",
+      "verdict_insert"
+    ],
+    "idempotency_key": "fixture-idempotency-key",
+    "injected_failure_matrix": [
+      {
+        "boundary": "case_insert",
+        "injected": true,
+        "rolled_back": true,
+        "state_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "boundary": "verdict_insert",
+        "injected": true,
+        "rolled_back": true,
+        "state_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "response_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "unexpected_authority_escalation": true
+}

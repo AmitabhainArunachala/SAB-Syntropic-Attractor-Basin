@@ -1,0 +1,492 @@
+{
+  "$defs": {
+    "ChallengeSnapshotV1": {
+      "additionalProperties": false,
+      "properties": {
+        "challenge_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Challenge Id",
+          "type": "string"
+        },
+        "challenge_packet_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Challenge Packet Sha256",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "resolved",
+            "withdrawn"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "challenge_id",
+        "challenge_packet_sha256",
+        "status"
+      ],
+      "title": "ChallengeSnapshotV1",
+      "type": "object"
+    },
+    "ConflictFlagsV1": {
+      "additionalProperties": false,
+      "properties": {
+        "author_is_challenger": {
+          "title": "Author Is Challenger",
+          "type": "boolean"
+        },
+        "clerk_is_case_author": {
+          "title": "Clerk Is Case Author",
+          "type": "boolean"
+        },
+        "clerk_is_challenger": {
+          "title": "Clerk Is Challenger",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "clerk_is_case_author",
+        "clerk_is_challenger",
+        "author_is_challenger"
+      ],
+      "title": "ConflictFlagsV1",
+      "type": "object"
+    },
+    "ContractSignatureV1": {
+      "additionalProperties": false,
+      "properties": {
+        "alg": {
+          "const": "ed25519",
+          "default": "ed25519",
+          "title": "Alg",
+          "type": "string"
+        },
+        "canonicalization": {
+          "const": "json-sort-keys-compact-v1",
+          "default": "json-sort-keys-compact-v1",
+          "title": "Canonicalization",
+          "type": "string"
+        },
+        "public_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Public Key",
+          "type": "string"
+        },
+        "signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Signature",
+          "type": "string"
+        },
+        "signed_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Signed Payload Sha256",
+          "type": "string"
+        },
+        "signer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Signer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "signer",
+        "public_key",
+        "signature",
+        "signed_payload_sha256"
+      ],
+      "title": "ContractSignatureV1",
+      "type": "object"
+    },
+    "DocketRuleV1": {
+      "additionalProperties": false,
+      "properties": {
+        "challenge_resolution_authorized": {
+          "title": "Challenge Resolution Authorized",
+          "type": "boolean"
+        },
+        "jurisdiction_established": {
+          "title": "Jurisdiction Established",
+          "type": "boolean"
+        },
+        "rule_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Rule Sha256",
+          "type": "string"
+        },
+        "signed_conditions_satisfied": {
+          "title": "Signed Conditions Satisfied",
+          "type": "boolean"
+        },
+        "version": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "rule_sha256",
+        "signed_conditions_satisfied",
+        "challenge_resolution_authorized",
+        "jurisdiction_established"
+      ],
+      "title": "DocketRuleV1",
+      "type": "object"
+    },
+    "EvidenceRefV1": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "proof_class": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Proof Class",
+          "type": "string"
+        },
+        "ref": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "content_sha256",
+        "proof_class"
+      ],
+      "title": "EvidenceRefV1",
+      "type": "object"
+    },
+    "FrozenSeatV1": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Adapter",
+          "type": "string"
+        },
+        "cluster_basis": {
+          "const": "evidenced_base_model_or_training_lineage",
+          "default": "evidenced_base_model_or_training_lineage",
+          "title": "Cluster Basis",
+          "type": "string"
+        },
+        "common_operator_backing": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Common Operator Backing",
+          "type": "string"
+        },
+        "correlation_smeared": {
+          "title": "Correlation Smeared",
+          "type": "boolean"
+        },
+        "credited_cluster": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Credited Cluster",
+          "type": "string"
+        },
+        "execution_public_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Execution Public Key",
+          "type": "string"
+        },
+        "key_role": {
+          "const": "operator_controlled_execution_attestation",
+          "default": "operator_controlled_execution_attestation",
+          "title": "Key Role",
+          "type": "string"
+        },
+        "liveness_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Liveness Receipt Sha256",
+          "type": "string"
+        },
+        "model_family": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Model Family",
+          "type": "string"
+        },
+        "model_lineage_evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRefV1"
+          },
+          "minItems": 1,
+          "title": "Model Lineage Evidence Refs",
+          "type": "array"
+        },
+        "possible_underlying_routes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Possible Underlying Routes",
+          "type": "array"
+        },
+        "requested_lab": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Requested Lab",
+          "type": "string"
+        },
+        "requested_model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Requested Model",
+          "type": "string"
+        },
+        "requested_route": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Requested Route",
+          "type": "string"
+        },
+        "seat_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Seat Id",
+          "type": "string"
+        },
+        "served_model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Served Model",
+          "type": "string"
+        },
+        "served_provider": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Served Provider",
+          "type": "string"
+        },
+        "transport": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Transport",
+          "type": "string"
+        },
+        "transport_correlation_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Transport Correlation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "seat_id",
+        "requested_lab",
+        "requested_model",
+        "adapter",
+        "transport",
+        "requested_route",
+        "served_provider",
+        "served_model",
+        "model_family",
+        "credited_cluster",
+        "model_lineage_evidence_refs",
+        "possible_underlying_routes",
+        "correlation_smeared",
+        "execution_public_key",
+        "common_operator_backing",
+        "liveness_receipt_sha256"
+      ],
+      "title": "FrozenSeatV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.artifact_case.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "amendment_clause": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Amendment Clause",
+      "type": "string"
+    },
+    "anti_capture_rules": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Anti Capture Rules",
+      "type": "array"
+    },
+    "canon_conditions": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Canon Conditions",
+      "type": "array"
+    },
+    "case_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Case Id",
+      "type": "string"
+    },
+    "challenges": {
+      "items": {
+        "$ref": "#/$defs/ChallengeSnapshotV1"
+      },
+      "title": "Challenges",
+      "type": "array"
+    },
+    "clerk_identity": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Clerk Identity",
+      "type": "string"
+    },
+    "clerk_signature": {
+      "$ref": "#/$defs/ContractSignatureV1"
+    },
+    "compost_conditions": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Compost Conditions",
+      "type": "array"
+    },
+    "conflict_flags": {
+      "$ref": "#/$defs/ConflictFlagsV1"
+    },
+    "demanded_correction": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Demanded Correction",
+      "type": "string"
+    },
+    "docket_rule": {
+      "$ref": "#/$defs/DocketRuleV1"
+    },
+    "evidence_refs": {
+      "items": {
+        "$ref": "#/$defs/EvidenceRefV1"
+      },
+      "minItems": 1,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "expected_case_head": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Expected Case Head",
+      "type": "string"
+    },
+    "expected_seed_state": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Expected Seed State",
+      "type": "string"
+    },
+    "frozen_at": {
+      "format": "date-time",
+      "title": "Frozen At",
+      "type": "string"
+    },
+    "frozen_roster": {
+      "items": {
+        "$ref": "#/$defs/FrozenSeatV1"
+      },
+      "maxItems": 9,
+      "minItems": 9,
+      "title": "Frozen Roster",
+      "type": "array"
+    },
+    "frozen_roster_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Frozen Roster Sha256",
+      "type": "string"
+    },
+    "independence_disclosure": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Independence Disclosure",
+      "type": "string"
+    },
+    "lease_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Lease Id",
+      "type": "string"
+    },
+    "schema": {
+      "const": "sab.artifact_case.v1",
+      "default": "sab.artifact_case.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "signed_artifact_b64": {
+      "minLength": 1,
+      "title": "Signed Artifact B64",
+      "type": "string"
+    },
+    "signed_artifact_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Signed Artifact Sha256",
+      "type": "string"
+    },
+    "single_operator_adjudicated": {
+      "const": true,
+      "default": true,
+      "title": "Single Operator Adjudicated",
+      "type": "boolean"
+    },
+    "target_seed_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Target Seed Id",
+      "type": "string"
+    },
+    "target_seed_packet_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Target Seed Packet Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "case_id",
+    "target_seed_id",
+    "target_seed_packet_sha256",
+    "expected_seed_state",
+    "expected_case_head",
+    "challenges",
+    "evidence_refs",
+    "docket_rule",
+    "canon_conditions",
+    "compost_conditions",
+    "anti_capture_rules",
+    "independence_disclosure",
+    "demanded_correction",
+    "amendment_clause",
+    "conflict_flags",
+    "signed_artifact_b64",
+    "signed_artifact_sha256",
+    "frozen_roster",
+    "frozen_roster_sha256",
+    "clerk_identity",
+    "lease_id",
+    "frozen_at",
+    "clerk_signature"
+  ],
+  "title": "ArtifactCaseV1",
+  "type": "object"
+}

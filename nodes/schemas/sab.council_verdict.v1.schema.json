@@ -1,0 +1,196 @@
+{
+  "$defs": {
+    "BallotSource": {
+      "enum": [
+        "real_external_model",
+        "fixture_model"
+      ],
+      "title": "BallotSource",
+      "type": "string"
+    },
+    "EvidenceProvenance": {
+      "enum": [
+        "real_external_models",
+        "fixture_models"
+      ],
+      "title": "EvidenceProvenance",
+      "type": "string"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.council_verdict.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "appeal_reasons": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Appeal Reasons",
+      "type": "array"
+    },
+    "authority_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authority Digest",
+      "type": "string"
+    },
+    "ballot_sources": {
+      "items": {
+        "$ref": "#/$defs/BallotSource"
+      },
+      "minItems": 1,
+      "title": "Ballot Sources",
+      "type": "array"
+    },
+    "case_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Case Sha256",
+      "type": "string"
+    },
+    "clean_routing_tally": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Clean Routing Tally",
+      "type": "object"
+    },
+    "compiled_at": {
+      "format": "date-time",
+      "title": "Compiled At",
+      "type": "string"
+    },
+    "correlation_removal_result": {
+      "enum": [
+        "stable",
+        "winner_changed",
+        "terminality_changed"
+      ],
+      "title": "Correlation Removal Result",
+      "type": "string"
+    },
+    "credited_clusters_by_result": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Credited Clusters By Result",
+      "type": "object"
+    },
+    "decision": {
+      "enum": [
+        "canon",
+        "compost",
+        "correct_and_supersede",
+        "no_terminal_verdict",
+        "appeal_required"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "effect_domain": {
+      "const": "artifact",
+      "default": "artifact",
+      "title": "Effect Domain",
+      "type": "string"
+    },
+    "evidence_provenance": {
+      "$ref": "#/$defs/EvidenceProvenance"
+    },
+    "operator_independence": {
+      "const": "single_operator_bootstrap",
+      "default": "single_operator_bootstrap",
+      "title": "Operator Independence",
+      "type": "string"
+    },
+    "raw_tally": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Raw Tally",
+      "type": "object"
+    },
+    "requested_effects": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requested Effects",
+      "type": "array"
+    },
+    "round_no": {
+      "const": 1,
+      "default": 1,
+      "title": "Round No",
+      "type": "integer"
+    },
+    "schema": {
+      "const": "sab.council_verdict.v1",
+      "default": "sab.council_verdict.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "scope": {
+      "enum": [
+        "Copy",
+        "Live"
+      ],
+      "title": "Scope",
+      "type": "string"
+    },
+    "smeared_seats": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Smeared Seats",
+      "type": "array"
+    },
+    "standing_effect": {
+      "const": "none",
+      "default": "none",
+      "title": "Standing Effect",
+      "type": "string"
+    },
+    "terminality": {
+      "enum": [
+        "terminal",
+        "no_terminal_verdict",
+        "appeal_required"
+      ],
+      "title": "Terminality",
+      "type": "string"
+    },
+    "verdict_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Verdict Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "verdict_id",
+    "case_id",
+    "case_sha256",
+    "decision",
+    "raw_tally",
+    "clean_routing_tally",
+    "credited_clusters_by_result",
+    "smeared_seats",
+    "correlation_removal_result",
+    "terminality",
+    "appeal_reasons",
+    "ballot_sources",
+    "evidence_provenance",
+    "requested_effects",
+    "authority_digest",
+    "scope",
+    "compiled_at"
+  ],
+  "title": "CouncilVerdictV1",
+  "type": "object"
+}

@@ -1,0 +1,46 @@
+{
+  "appeal_reasons": [],
+  "authority_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "ballot_sources": [
+    "fixture_model"
+  ],
+  "case_id": "sab_case_fixture_first_verdict",
+  "case_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "clean_routing_tally": {
+    "correct_and_supersede": 9
+  },
+  "compiled_at": "2026-07-27T15:00:00Z",
+  "correlation_removal_result": "stable",
+  "credited_clusters_by_result": {
+    "correct_and_supersede": [
+      "lineage-0",
+      "lineage-1",
+      "lineage-2",
+      "lineage-3",
+      "lineage-4",
+      "lineage-5",
+      "lineage-6",
+      "lineage-7",
+      "lineage-8"
+    ]
+  },
+  "decision": "correct_and_supersede",
+  "effect_domain": "artifact",
+  "evidence_provenance": "fixture_models",
+  "operator_independence": "single_operator_bootstrap",
+  "raw_tally": {
+    "correct_and_supersede": 9
+  },
+  "requested_effects": [
+    "challenge:resolve",
+    "seed:supersede"
+  ],
+  "round_no": 1,
+  "schema": "sab.council_verdict.v1",
+  "scope": "Copy",
+  "smeared_seats": [],
+  "standing_effect": "none",
+  "terminality": "terminal",
+  "unexpected_authority_escalation": true,
+  "verdict_id": "sab_verdict_fixture"
+}
