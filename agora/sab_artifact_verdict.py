@@ -1,9 +1,10 @@
 """Strict, offline contracts for SAB's first-verdict Build A slice.
 
-The central safety property is deliberately implemented as construction-time
-semantics: a copy rehearsal contains ``Authorized<Copy>`` and a live effective
-verdict contains ``Authorized<Live>``.  A ballot tally, lease, countersign, or
-fixture is never accepted as a substitute for disposition authority.
+The central safety property is deliberately implemented as evaluator semantics:
+only an authority value freshly sealed by the evaluator can authorize a copy
+effect.  Serialized authority and disposition objects are immutable receipts;
+deserializing one never recreates the evaluator capability.  Build A does not
+represent or construct ``Authorized<Live>`` or ``EffectiveVerdict<Live>``.
 
 This module is pure.  It performs no I/O, persistence, provider calls, or
 service mutation.
@@ -26,6 +27,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     TypeAdapter,
     field_validator,
     model_validator,
@@ -38,6 +40,28 @@ HEX_PUBLIC_KEY_PATTERN = r"^[0-9a-f]{64}$"
 HEX_SIGNATURE_PATTERN = r"^[0-9a-f]{128}$"
 CANONICALIZATION = "json-sort-keys-compact-v1"
 MASTER_VISION_SEED_ID = "sab_seed_master_vision_v1_ebe422aab149"
+MASTER_VISION_CHALLENGE_ID = "sab_challenge_master_vision_v1_ebe422aab149"
+MASTER_VISION_SOURCE_COMMIT = "bc9d2f6f8b8a17964a94d627a0e2d6917c375611"
+MASTER_VISION_DOCUMENT_SHA256 = (
+    "ebe422aab149d268bf4a4a44d6718f3ebed2f273beefb76d9fb881d7b207e887"
+)
+MASTER_VISION_SEED_PACKET_RAW_SHA256 = (
+    "ddbdee5d2ab9228b367f2022c82d11bc4b32548397fe03ae92eb0f68f206223d"
+)
+MASTER_VISION_SEED_PACKET_SHA256 = (
+    "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88"
+)
+MASTER_VISION_CHALLENGE_PACKET_RAW_SHA256 = (
+    "96cafd38d892e56f9e486ae96a7e9e0fbf37b6f028a90751657ea95c6edfab90"
+)
+MASTER_VISION_CHALLENGE_PACKET_SHA256 = (
+    "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95"
+)
+MASTER_VISION_SIGNER = "agent_claude_fable_5"
+MASTER_VISION_SIGNER_PUBLIC_KEY = (
+    "0a70c303c0e794d0978e80f9c521e81c655a94a17f95a952ac9b5f7ab901f1f5"
+)
+MASTER_VISION_REVALIDATION_DUE = datetime(2026, 10, 3, 0, 0, tzinfo=timezone.utc)
 
 MASTER_VISION_FORBIDDEN_EFFECTS = (
     "alter_standing",
@@ -108,7 +132,11 @@ def _nonblank(value: str, *, field: str) -> str:
 def _exact_strings(
     values: Sequence[str], *, field: str, allow_empty: bool = False
 ) -> tuple[str, ...]:
-    normalized = tuple(sorted({_nonblank(str(value), field=field) for value in values}))
+    if isinstance(values, (str, bytes, bytearray)) or not isinstance(values, Sequence):
+        raise ValueError(f"{field} must be a sequence of strings")
+    if any(not isinstance(value, str) for value in values):
+        raise ValueError(f"{field} must contain strings only")
+    normalized = tuple(sorted({_nonblank(value, field=field) for value in values}))
     if not normalized and not allow_empty:
         raise ValueError(f"{field} cannot be empty")
     if any("*" in value for value in normalized):
@@ -210,6 +238,10 @@ class AllowedOperationV1(StrictCanonicalModel):
 def allowed_operations_digest(
     operations: Sequence[AllowedOperationV1 | Mapping[str, Any]],
 ) -> str:
+    if isinstance(operations, (str, bytes, bytearray)) or not isinstance(
+        operations, Sequence
+    ):
+        raise ValueError("allowed operations must be a sequence")
     parsed = [
         operation
         if isinstance(operation, AllowedOperationV1)
@@ -229,6 +261,11 @@ def validate_exact_allowed_operations(
     operations: Sequence[AllowedOperationV1 | Mapping[str, Any]],
 ) -> tuple[AllowedOperationV1, ...]:
     """Parse, deduplicate, sort, and freeze exact method/path pairs."""
+
+    if isinstance(operations, (str, bytes, bytearray)) or not isinstance(
+        operations, Sequence
+    ):
+        raise ValueError("allowed operations must be a sequence")
 
     parsed = tuple(
         sorted(
@@ -322,6 +359,351 @@ class SignedDispositionPolicyV1(StrictCanonicalModel):
         return self.canonical_bytes(exclude={"signature"})
 
 
+def _decode_canonical_base64(value: str, *, field: str) -> bytes:
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"{field} is not strict base64") from exc
+    if base64.b64encode(decoded).decode("ascii") != value:
+        raise ValueError(f"{field} is not canonical base64")
+    return decoded
+
+
+class MasterVisionPolicyEvidenceV1(StrictCanonicalModel):
+    """Exact signed evidence which can justify only an AdvisoryOnly ruling.
+
+    The seed and challenge signatures do not manufacture disposition authority.
+    They prove the opposite boundary: the same-operator challenge is pending,
+    independent resolution is required, and no signed compost condition is met.
+    """
+
+    schema_: Literal["sab.master_vision_policy_evidence.v1"] = Field(
+        "sab.master_vision_policy_evidence.v1", alias="schema"
+    )
+    proof_class: Literal["signed_repository_and_copied_database_state"] = (
+        "signed_repository_and_copied_database_state"
+    )
+    source_commit: Literal["bc9d2f6f8b8a17964a94d627a0e2d6917c375611"] = (
+        MASTER_VISION_SOURCE_COMMIT
+    )
+    document_path: Literal["docs/SAB_MASTER_VISION_V1.md"] = (
+        "docs/SAB_MASTER_VISION_V1.md"
+    )
+    document_base64: str = Field(min_length=1, max_length=40_000)
+    document_sha256: Literal[
+        "ebe422aab149d268bf4a4a44d6718f3ebed2f273beefb76d9fb881d7b207e887"
+    ] = MASTER_VISION_DOCUMENT_SHA256
+    seed_packet_path: Literal[
+        "docs/lanes/sab-agent-seeding-v1/contributions/packets/"
+        "sab_seed_master_vision_v1_ebe422aab149.json"
+    ] = (
+        "docs/lanes/sab-agent-seeding-v1/contributions/packets/"
+        "sab_seed_master_vision_v1_ebe422aab149.json"
+    )
+    seed_packet_base64: str = Field(min_length=1, max_length=20_000)
+    seed_packet_raw_sha256: Literal[
+        "ddbdee5d2ab9228b367f2022c82d11bc4b32548397fe03ae92eb0f68f206223d"
+    ] = MASTER_VISION_SEED_PACKET_RAW_SHA256
+    seed_packet_sha256: Literal[
+        "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88"
+    ] = MASTER_VISION_SEED_PACKET_SHA256
+    seed_state: Literal["challenged"] = "challenged"
+    challenge_packet_path: Literal[
+        "docs/lanes/sab-agent-seeding-v1/contributions/packets/"
+        "sab_challenge_master_vision_v1_ebe422aab149.json"
+    ] = (
+        "docs/lanes/sab-agent-seeding-v1/contributions/packets/"
+        "sab_challenge_master_vision_v1_ebe422aab149.json"
+    )
+    challenge_packet_base64: str = Field(min_length=1, max_length=10_000)
+    challenge_packet_raw_sha256: Literal[
+        "96cafd38d892e56f9e486ae96a7e9e0fbf37b6f028a90751657ea95c6edfab90"
+    ] = MASTER_VISION_CHALLENGE_PACKET_RAW_SHA256
+    challenge_packet_sha256: Literal[
+        "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95"
+    ] = MASTER_VISION_CHALLENGE_PACKET_SHA256
+    challenge_state: Literal["pending"] = "pending"
+    signer: Literal["agent_claude_fable_5"] = MASTER_VISION_SIGNER
+    signer_public_key: Literal[
+        "0a70c303c0e794d0978e80f9c521e81c655a94a17f95a952ac9b5f7ab901f1f5"
+    ] = MASTER_VISION_SIGNER_PUBLIC_KEY
+
+    @staticmethod
+    def _packet_signature_is_valid(
+        packet: Mapping[str, Any],
+        *,
+        packet_hash: str,
+        signed_payload_hash: str,
+        kind: str,
+    ) -> bool:
+        signature = packet.get("signature")
+        if not isinstance(signature, Mapping):
+            return False
+        signed_payload = signature.get("signed_payload")
+        if not isinstance(signed_payload, Mapping):
+            return False
+        if (
+            signature.get("alg") != "ed25519"
+            or signature.get("canonicalization") != CANONICALIZATION
+            or signature.get("signer") != MASTER_VISION_SIGNER
+            or signed_payload.get("kind") != kind
+            or canonical_sha256(signed_payload) != signed_payload_hash
+        ):
+            return False
+        raw_signature = signature.get("signature")
+        if not isinstance(raw_signature, str) or not re_fullmatch_hex_signature(
+            raw_signature
+        ):
+            return False
+        unsigned_packet = dict(packet)
+        unsigned_packet.pop("signature", None)
+        if canonical_sha256(unsigned_packet) != packet_hash:
+            return False
+        try:
+            VerifyKey(
+                MASTER_VISION_SIGNER_PUBLIC_KEY.encode("ascii"), encoder=HexEncoder
+            ).verify(canonical_json_bytes(signed_payload), bytes.fromhex(raw_signature))
+        except (BadSignatureError, ValueError, TypeError):
+            return False
+        return True
+
+    @model_validator(mode="after")
+    def exact_signed_evidence(self) -> "MasterVisionPolicyEvidenceV1":
+        document = _decode_canonical_base64(
+            self.document_base64, field="document_base64"
+        )
+        seed_bytes = _decode_canonical_base64(
+            self.seed_packet_base64, field="seed_packet_base64"
+        )
+        challenge_bytes = _decode_canonical_base64(
+            self.challenge_packet_base64, field="challenge_packet_base64"
+        )
+        if len(document) != 20_660 or bytes_sha256(document) != self.document_sha256:
+            raise ValueError("document bytes do not match the signed Master Vision")
+        if bytes_sha256(seed_bytes) != self.seed_packet_raw_sha256:
+            raise ValueError("seed packet raw bytes do not match the frozen evidence")
+        if bytes_sha256(challenge_bytes) != self.challenge_packet_raw_sha256:
+            raise ValueError(
+                "challenge packet raw bytes do not match the frozen evidence"
+            )
+        try:
+            seed_packet = json.loads(seed_bytes)
+            challenge_packet = json.loads(challenge_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Master Vision packet evidence is not valid JSON") from exc
+        if not isinstance(seed_packet, Mapping) or not isinstance(
+            challenge_packet, Mapping
+        ):
+            raise ValueError("Master Vision packet evidence must be JSON objects")
+        if (
+            seed_packet.get("seed_id") != MASTER_VISION_SEED_ID
+            or seed_packet.get("claimant_identity", {}).get("subject_id")
+            != MASTER_VISION_SIGNER
+            or seed_packet.get("challenge_plan", {}).get("required") is not True
+            or seed_packet.get("canon_compost_policy", {}).get("revalidation_due")
+            != "2026-10-03T00:00:00Z"
+            or seed_packet.get("canon_compost_policy", {}).get("compost_conditions")
+            != [
+                "A Section 11 falsification test fails, or a superseding version "
+                "earns standing, or revalidation lapses without review."
+            ]
+        ):
+            raise ValueError("seed packet does not encode the frozen policy boundary")
+        claim_text = seed_packet.get("claim", {}).get("text")
+        if not isinstance(claim_text, str) or self.document_sha256 not in claim_text:
+            raise ValueError("seed packet does not bind the Master Vision document")
+        if (
+            challenge_packet.get("challenge_id") != MASTER_VISION_CHALLENGE_ID
+            or challenge_packet.get("target_seed_id") != MASTER_VISION_SEED_ID
+            or challenge_packet.get("blocking") is not True
+            or challenge_packet.get("challenger_identity") != MASTER_VISION_SIGNER
+            or "Resolution requires an independent operator"
+            not in str(challenge_packet.get("independence_disclosure", ""))
+        ):
+            raise ValueError("challenge packet does not encode the frozen refusal")
+        if not self._packet_signature_is_valid(
+            seed_packet,
+            packet_hash=self.seed_packet_sha256,
+            signed_payload_hash=(
+                "10ad16d35054c6b543b1a866f632de639c5502417e85ccb5f9161f3014753299"
+            ),
+            kind="sab_seed_submit",
+        ):
+            raise ValueError("Master Vision seed signature does not verify")
+        if (
+            seed_packet["signature"]["signed_payload"].get("seed_packet_sha256")
+            != self.seed_packet_sha256
+        ):
+            raise ValueError("seed signature does not bind the seed packet digest")
+        if not self._packet_signature_is_valid(
+            challenge_packet,
+            packet_hash=self.challenge_packet_sha256,
+            signed_payload_hash=(
+                "4e4b5f3a3e29d0f9b67727beb73cee685f70d57fd633fa31e75c7f3262c31c69"
+            ),
+            kind="sab_challenge_submit",
+        ):
+            raise ValueError("Master Vision challenge signature does not verify")
+        if (
+            challenge_packet["signature"]["signed_payload"].get(
+                "challenge_packet_sha256"
+            )
+            != self.challenge_packet_sha256
+        ):
+            raise ValueError(
+                "challenge signature does not bind the challenge packet digest"
+            )
+        return self
+
+    def seed_packet_payload(self) -> dict[str, Any]:
+        payload = json.loads(
+            _decode_canonical_base64(
+                self.seed_packet_base64, field="seed_packet_base64"
+            )
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("seed packet evidence is not an object")
+        return payload
+
+    def challenge_packet_payload(self) -> dict[str, Any]:
+        payload = json.loads(
+            _decode_canonical_base64(
+                self.challenge_packet_base64, field="challenge_packet_base64"
+            )
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("challenge packet evidence is not an object")
+        return payload
+
+
+class MasterVisionStateObservationV1(StrictCanonicalModel):
+    """Database-derived state witness accepted only out of band by Build A."""
+
+    schema_: Literal["sab.master_vision_state_observation.v1"] = Field(
+        "sab.master_vision_state_observation.v1", alias="schema"
+    )
+    proof_class: Literal["attested_copied_database_observation"] = (
+        "attested_copied_database_observation"
+    )
+    database_lifecycle_fingerprint: str = Field(pattern=SHA256_PATTERN)
+    seed_id: Literal["sab_seed_master_vision_v1_ebe422aab149"] = MASTER_VISION_SEED_ID
+    seed_state: Literal["challenged"] = "challenged"
+    seed_packet_sha256: Literal[
+        "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88"
+    ] = MASTER_VISION_SEED_PACKET_SHA256
+    seed_packet_json_sha256: str = Field(pattern=SHA256_PATTERN)
+    challenge_id: Literal["sab_challenge_master_vision_v1_ebe422aab149"] = (
+        MASTER_VISION_CHALLENGE_ID
+    )
+    challenge_state: Literal["pending"] = "pending"
+    challenge_packet_sha256: Literal[
+        "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95"
+    ] = MASTER_VISION_CHALLENGE_PACKET_SHA256
+    challenge_packet_json_sha256: str = Field(pattern=SHA256_PATTERN)
+    signer: Literal["agent_claude_fable_5"] = MASTER_VISION_SIGNER
+    signer_public_key: Literal[
+        "0a70c303c0e794d0978e80f9c521e81c655a94a17f95a952ac9b5f7ab901f1f5"
+    ] = MASTER_VISION_SIGNER_PUBLIC_KEY
+    witness_event_count: Literal[2] = 2
+    witness_event_types: tuple[str, ...] = ("challenge", "submit")
+    witness_event_chain_sha256: str = Field(pattern=SHA256_PATTERN)
+    terminal_witness_count: Literal[0] = 0
+    supersession_edge_count: Literal[0] = 0
+    effective_disposition_count: Literal[0] = 0
+    observed_state_hash: str = Field(pattern=SHA256_PATTERN)
+
+    @field_validator("witness_event_types", mode="before")
+    @classmethod
+    def exact_witness_event_types(cls, value: Sequence[str]) -> tuple[str, ...]:
+        parsed = _exact_strings(value, field="witness_event_types")
+        if parsed != ("challenge", "submit"):
+            raise ValueError("Master Vision witness history is not the frozen prefix")
+        return parsed
+
+    @model_validator(mode="after")
+    def state_hash_binds_observation(self) -> "MasterVisionStateObservationV1":
+        if self.observed_state_hash != self.canonical_sha256(
+            exclude={"observed_state_hash"}
+        ):
+            raise ValueError("observed_state_hash does not bind database state")
+        return self
+
+
+_MASTER_VISION_OBSERVATION_TOKEN = object()
+
+
+class MasterVisionObservationCapability:
+    """Non-serializable request-boundary evidence from the database observer.
+
+    This prevents request JSON from claiming observed state.  As with every
+    in-process Python object, it is not a sandbox against arbitrary code that
+    can import private module members; the lifecycle therefore also performs
+    the observation itself immediately before evaluation.  Master Vision can
+    produce only AdvisoryOnly, so this value never grants an effect.
+    """
+
+    __slots__ = ("_observation",)
+
+    def __init__(
+        self,
+        observation: MasterVisionStateObservationV1,
+        *,
+        _token: object | None = None,
+    ) -> None:
+        if _token is not _MASTER_VISION_OBSERVATION_TOKEN:
+            raise TypeError(
+                "Master Vision observation capabilities are database-derived"
+            )
+        self._observation = MasterVisionStateObservationV1.model_validate(
+            observation.canonical_payload()
+        )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if hasattr(self, name):
+            raise AttributeError("Master Vision observation evidence is immutable")
+        object.__setattr__(self, name, value)
+
+    @property
+    def observation(self) -> MasterVisionStateObservationV1:
+        return self._observation
+
+    @property
+    def observed_state_hash(self) -> str:
+        return self._observation.observed_state_hash
+
+
+def _seal_master_vision_observation(
+    observation: MasterVisionStateObservationV1,
+) -> MasterVisionObservationCapability:
+    return MasterVisionObservationCapability(
+        observation, _token=_MASTER_VISION_OBSERVATION_TOKEN
+    )
+
+
+class TrustedPolicyIssuerV1(StrictCanonicalModel):
+    """Out-of-band Build A capability; never accepted from request JSON."""
+
+    schema_: Literal["sab.trusted_policy_issuer.v1"] = Field(
+        "sab.trusted_policy_issuer.v1", alias="schema"
+    )
+    proof_class: Literal["fixture_context_out_of_band"] = "fixture_context_out_of_band"
+    issuer_identity: str = Field(min_length=1, max_length=200)
+    issuer_public_key: str = Field(pattern=HEX_PUBLIC_KEY_PATTERN)
+    source_fixture_id: str = Field(min_length=1, max_length=240)
+    copied_database_id: str = Field(min_length=1, max_length=240)
+    authority_basis: Literal["founder_bootstrap_self_declared"]
+    scope: Literal[DispositionScope.COPY] = DispositionScope.COPY
+    live_eligible: Literal[False] = False
+
+
+def re_fullmatch_hex_signature(value: str) -> bool:
+    """Small local helper which avoids accepting whitespace in hex signatures."""
+
+    return len(value) == 128 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
 class DispositionAuthorityBaseV1(StrictCanonicalModel):
     schema_: Literal["sab.disposition_authority.v1"] = Field(
         "sab.disposition_authority.v1", alias="schema"
@@ -338,6 +720,7 @@ class DispositionAuthorityBaseV1(StrictCanonicalModel):
     reason_codes: tuple[str, ...] = Field(min_length=1)
     live_eligible: bool
     standing_effect: Literal["none"] = "none"
+    _evaluation_seal: tuple[object, str] | None = PrivateAttr(default=None)
 
     @field_validator(
         "authority_refs",
@@ -362,7 +745,8 @@ class DispositionAuthorityBaseV1(StrictCanonicalModel):
 
 class AuthorizedDispositionAuthorityV1(DispositionAuthorityBaseV1):
     result: Literal["Authorized"] = "Authorized"
-    scope: Literal[DispositionScope.COPY, DispositionScope.LIVE]
+    scope: Literal[DispositionScope.COPY] = DispositionScope.COPY
+    live_eligible: Literal[False] = False
 
     @model_validator(mode="after")
     def authorized_shape(self) -> "AuthorizedDispositionAuthorityV1":
@@ -370,10 +754,6 @@ class AuthorizedDispositionAuthorityV1(DispositionAuthorityBaseV1):
             raise ValueError("Authorized requires authority references")
         if not self.allowed_effects or self.forbidden_effects:
             raise ValueError("Authorized requires allowed effects only")
-        if self.scope == DispositionScope.COPY and self.live_eligible:
-            raise ValueError("Authorized<Copy> cannot be live eligible")
-        if self.scope == DispositionScope.LIVE and not self.live_eligible:
-            raise ValueError("Authorized<Live> must be live eligible")
         return self
 
 
@@ -416,12 +796,58 @@ class AuthorityDenied(ValueError):
     """A requested effect cannot be constructed from the supplied authority."""
 
 
-def _evaluation_id(artifact_id: str, state_hash: str, scope: DispositionScope) -> str:
+_AUTHORITY_EVALUATION_TOKEN = object()
+
+
+def _seal_evaluated_authority(
+    authority: DispositionAuthorityV1,
+) -> DispositionAuthorityV1:
+    """Attach a non-serializable seal binding the evaluator's exact output.
+
+    The seal is a semantic boundary for untrusted serialized inputs.  Python
+    module-private names are not a same-process security sandbox; Build A's
+    operational lifecycle therefore always invokes the evaluator itself.
+    """
+
+    object.__setattr__(
+        authority,
+        "_evaluation_seal",
+        (_AUTHORITY_EVALUATION_TOKEN, authority.authority_digest),
+    )
+    return authority
+
+
+def _is_fresh_evaluator_output(authority: DispositionAuthorityV1) -> bool:
+    seal = getattr(authority, "_evaluation_seal", None)
+    return bool(
+        isinstance(seal, tuple)
+        and len(seal) == 2
+        and seal[0] is _AUTHORITY_EVALUATION_TOKEN
+        and seal[1] == authority.authority_digest
+    )
+
+
+def _evaluation_id(
+    *,
+    artifact_id: str,
+    artifact_sha256: str,
+    state_hash: str,
+    scope: DispositionScope,
+    requested_effects: Sequence[str],
+    policy_sha256: str,
+    result: str,
+    reason_codes: Sequence[str],
+) -> str:
     digest = canonical_sha256(
         {
             "artifact_id": artifact_id,
+            "artifact_sha256": artifact_sha256,
             "evaluated_state_hash": state_hash,
             "scope": scope.value,
+            "requested_effects": list(requested_effects),
+            "policy_sha256": policy_sha256,
+            "result": result,
+            "reason_codes": list(reason_codes),
         }
     )
     return f"sab_authority_{digest[:24]}"
@@ -435,21 +861,31 @@ def _no_jurisdiction(
     evaluated_state_hash: str,
     policy_sha256: str,
     authority_refs: Sequence[str],
+    requested_effects: Sequence[str],
     reasons: Sequence[str],
 ) -> NoJurisdictionDispositionAuthorityV1:
-    return NoJurisdictionDispositionAuthorityV1(
-        evaluation_id=_evaluation_id(
-            artifact_id, evaluated_state_hash, requested_scope
-        ),
-        artifact_id=artifact_id,
-        scope=requested_scope,
-        authority_refs=tuple(authority_refs),
-        policy_sha256=policy_sha256,
-        content_sha256=artifact_sha256,
-        evaluated_state_hash=evaluated_state_hash,
-        reason_codes=tuple(reasons),
-        live_eligible=False,
-    )
+    return _seal_evaluated_authority(
+        NoJurisdictionDispositionAuthorityV1(
+            evaluation_id=_evaluation_id(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                state_hash=evaluated_state_hash,
+                scope=requested_scope,
+                requested_effects=requested_effects,
+                policy_sha256=policy_sha256,
+                result="NoJurisdiction",
+                reason_codes=reasons,
+            ),
+            artifact_id=artifact_id,
+            scope=requested_scope,
+            authority_refs=tuple(authority_refs),
+            policy_sha256=policy_sha256,
+            content_sha256=artifact_sha256,
+            evaluated_state_hash=evaluated_state_hash,
+            reason_codes=tuple(reasons),
+            live_eligible=False,
+        )
+    )  # type: ignore[return-value]
 
 
 def evaluate_disposition_authority(
@@ -459,14 +895,22 @@ def evaluate_disposition_authority(
     requested_scope: DispositionScope | str,
     requested_effects: Sequence[str],
     evaluated_state_hash: str,
-    signed_policy: SignedDispositionPolicyV1 | Mapping[str, Any] | None,
+    signed_policy: (
+        SignedDispositionPolicyV1
+        | MasterVisionPolicyEvidenceV1
+        | Mapping[str, Any]
+        | None
+    ),
+    trusted_policy_issuer: TrustedPolicyIssuerV1 | Mapping[str, Any] | None = None,
+    master_vision_observation: MasterVisionObservationCapability | None = None,
     now: datetime | None = None,
 ) -> DispositionAuthorityV1:
     """Evaluate authority *before* any merit tally or effect construction.
 
     Invalid, missing, expired, ambiguous, mismatched, or unverifiable policy
-    fails closed.  Master Vision v1.0 has a controlling explicit AdvisoryOnly
-    ruling regardless of vote count or requested effect.
+    fails closed.  Master Vision v1.0 can reach AdvisoryOnly only when the exact
+    signed repository evidence and copied-database states are supplied.  Ballot
+    count and a countersign never substitute for that evidence.
     """
 
     scope = DispositionScope(requested_scope)
@@ -477,28 +921,143 @@ def evaluate_disposition_authority(
     zero_hash = "0" * 64
 
     if artifact_id == MASTER_VISION_SEED_ID:
-        raw_policy = (
-            signed_policy.canonical_payload()
-            if isinstance(signed_policy, SignedDispositionPolicyV1)
-            else dict(signed_policy or {})
+        try:
+            evidence_input = (
+                signed_policy.canonical_payload()
+                if isinstance(signed_policy, StrictCanonicalModel)
+                else signed_policy
+            )
+            evidence = MasterVisionPolicyEvidenceV1.model_validate(evidence_input)
+        except Exception:
+            raw_policy = (
+                signed_policy.canonical_payload()
+                if isinstance(signed_policy, StrictCanonicalModel)
+                else dict(signed_policy)
+                if isinstance(signed_policy, Mapping)
+                else {}
+            )
+            try:
+                invalid_policy_sha256 = canonical_sha256(raw_policy)
+            except (TypeError, ValueError):
+                invalid_policy_sha256 = zero_hash
+            return _no_jurisdiction(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                requested_scope=scope,
+                evaluated_state_hash=evaluated_state_hash,
+                policy_sha256=invalid_policy_sha256,
+                authority_refs=(),
+                requested_effects=effects,
+                reasons=("invalid_master_vision_policy_evidence",),
+            )
+        policy_sha256 = evidence.canonical_sha256()
+        if not isinstance(master_vision_observation, MasterVisionObservationCapability):
+            return _no_jurisdiction(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                requested_scope=scope,
+                evaluated_state_hash=evaluated_state_hash,
+                policy_sha256=policy_sha256,
+                authority_refs=(),
+                requested_effects=effects,
+                reasons=("master_vision_state_observation_missing_or_invalid",),
+            )
+        observation = master_vision_observation.observation
+        if artifact_sha256 != evidence.document_sha256:
+            return _no_jurisdiction(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                requested_scope=scope,
+                evaluated_state_hash=evaluated_state_hash,
+                policy_sha256=policy_sha256,
+                authority_refs=(),
+                requested_effects=effects,
+                reasons=("artifact_binding_mismatch",),
+            )
+        if evaluated_state_hash != observation.observed_state_hash:
+            return _no_jurisdiction(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                requested_scope=scope,
+                evaluated_state_hash=evaluated_state_hash,
+                policy_sha256=policy_sha256,
+                authority_refs=(),
+                requested_effects=effects,
+                reasons=("state_hash_mismatch",),
+            )
+        if (
+            observation.seed_packet_json_sha256
+            != canonical_sha256(evidence.seed_packet_payload())
+            or observation.challenge_packet_json_sha256
+            != canonical_sha256(evidence.challenge_packet_payload())
+            or observation.seed_state != evidence.seed_state
+            or observation.challenge_state != evidence.challenge_state
+            or observation.signer != evidence.signer
+            or observation.signer_public_key != evidence.signer_public_key
+        ):
+            return _no_jurisdiction(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                requested_scope=scope,
+                evaluated_state_hash=evaluated_state_hash,
+                policy_sha256=policy_sha256,
+                authority_refs=(),
+                requested_effects=effects,
+                reasons=("master_vision_database_evidence_mismatch",),
+            )
+        if current_time >= MASTER_VISION_REVALIDATION_DUE:
+            return _no_jurisdiction(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                requested_scope=scope,
+                evaluated_state_hash=evaluated_state_hash,
+                policy_sha256=policy_sha256,
+                authority_refs=(),
+                requested_effects=effects,
+                reasons=("master_vision_revalidation_due",),
+            )
+        reason_codes = (
+            "independent_operator_resolution_required",
+            "signed_compost_conditions_unmet",
         )
-        return AdvisoryOnlyDispositionAuthorityV1(
-            evaluation_id=_evaluation_id(artifact_id, evaluated_state_hash, scope),
+        return _seal_evaluated_authority(
+            AdvisoryOnlyDispositionAuthorityV1(
+                evaluation_id=_evaluation_id(
+                    artifact_id=artifact_id,
+                    artifact_sha256=artifact_sha256,
+                    state_hash=evaluated_state_hash,
+                    scope=scope,
+                    requested_effects=effects,
+                    policy_sha256=policy_sha256,
+                    result="AdvisoryOnly",
+                    reason_codes=reason_codes,
+                ),
+                artifact_id=artifact_id,
+                scope=DispositionScope.ALL,
+                authority_refs=(
+                    "signed-seed:sab_seed_master_vision_v1_ebe422aab149",
+                    "signed-challenge:sab_challenge_master_vision_v1_ebe422aab149",
+                    "git-commit:bc9d2f6f8b8a17964a94d627a0e2d6917c375611",
+                ),
+                forbidden_effects=MASTER_VISION_FORBIDDEN_EFFECTS,
+                policy_sha256=policy_sha256,
+                content_sha256=artifact_sha256,
+                evaluated_state_hash=evaluated_state_hash,
+                reason_codes=reason_codes,
+                live_eligible=False,
+            )
+        )
+
+    if scope == DispositionScope.LIVE:
+        return _no_jurisdiction(
             artifact_id=artifact_id,
-            scope=DispositionScope.ALL,
-            authority_refs=(
-                "signed-seed:sab_seed_master_vision_v1_ebe422aab149",
-                "signed-challenge:sab_challenge_master_vision_v1_ebe422aab149",
-            ),
-            forbidden_effects=MASTER_VISION_FORBIDDEN_EFFECTS,
-            policy_sha256=canonical_sha256(raw_policy),
-            content_sha256=artifact_sha256,
+            artifact_sha256=artifact_sha256,
+            requested_scope=scope,
             evaluated_state_hash=evaluated_state_hash,
-            reason_codes=(
-                "independent_operator_resolution_required",
-                "signed_compost_conditions_unmet",
-            ),
-            live_eligible=False,
+            policy_sha256=zero_hash,
+            authority_refs=(),
+            requested_effects=effects,
+            reasons=("live_authority_outside_build_a",),
         )
 
     if signed_policy is None:
@@ -509,15 +1068,17 @@ def evaluate_disposition_authority(
             evaluated_state_hash=evaluated_state_hash,
             policy_sha256=zero_hash,
             authority_refs=(),
+            requested_effects=effects,
             reasons=("missing_signed_policy",),
         )
 
     try:
-        policy = (
-            signed_policy
-            if isinstance(signed_policy, SignedDispositionPolicyV1)
-            else SignedDispositionPolicyV1.model_validate(signed_policy)
+        policy_input = (
+            signed_policy.canonical_payload()
+            if isinstance(signed_policy, StrictCanonicalModel)
+            else signed_policy
         )
+        policy = SignedDispositionPolicyV1.model_validate(policy_input)
     except Exception:
         raw = dict(signed_policy) if isinstance(signed_policy, Mapping) else {}
         return _no_jurisdiction(
@@ -527,11 +1088,21 @@ def evaluate_disposition_authority(
             evaluated_state_hash=evaluated_state_hash,
             policy_sha256=canonical_sha256(raw),
             authority_refs=(),
+            requested_effects=effects,
             reasons=("invalid_policy_contract",),
         )
 
+    try:
+        trusted_input = (
+            trusted_policy_issuer.canonical_payload()
+            if isinstance(trusted_policy_issuer, StrictCanonicalModel)
+            else trusted_policy_issuer
+        )
+        trusted_issuer = TrustedPolicyIssuerV1.model_validate(trusted_input)
+    except Exception:
+        trusted_issuer = None
+
     base = dict(
-        evaluation_id=_evaluation_id(artifact_id, evaluated_state_hash, scope),
         artifact_id=artifact_id,
         authority_refs=policy.authority_refs,
         policy_sha256=policy.policy_sha256,
@@ -543,18 +1114,37 @@ def evaluate_disposition_authority(
         mismatches.append("artifact_binding_mismatch")
     if policy.evaluated_state_hash != evaluated_state_hash:
         mismatches.append("state_hash_mismatch")
+    if policy.issued_at > current_time:
+        mismatches.append("policy_not_yet_valid")
     if policy.expires_at <= current_time:
         mismatches.append("policy_expired")
     if not verify_contract_signature(policy.signing_bytes(), policy.signature):
         mismatches.append("policy_signature_invalid")
+    if trusted_issuer is None:
+        mismatches.append("trusted_policy_issuer_missing")
+    elif (
+        policy.issuer != trusted_issuer.issuer_identity
+        or policy.signature.signer != trusted_issuer.issuer_identity
+        or policy.signature.public_key != trusted_issuer.issuer_public_key
+        or policy.source_fixture_id != trusted_issuer.source_fixture_id
+        or policy.copied_database_id != trusted_issuer.copied_database_id
+    ):
+        mismatches.append("trusted_policy_issuer_mismatch")
+    if (
+        not policy.test_issuer
+        or policy.scope != DispositionScope.COPY
+        or policy.live_eligible
+    ):
+        mismatches.append("build_a_fixture_policy_required")
     if policy.scope not in {scope, DispositionScope.ALL}:
         mismatches.append("scope_mismatch")
     if not set(effects).issubset(policy.permitted_effects):
         mismatches.append("effect_not_authorized")
-    if scope == DispositionScope.LIVE and (
-        policy.test_issuer or not policy.live_eligible
+    if policy.disposition_mode == "authorized" and tuple(policy.preconditions) != (
+        "challenge_state=pending",
+        "seed_state=challenged",
     ):
-        mismatches.append("live_authority_absent")
+        mismatches.append("policy_preconditions_mismatch")
     if mismatches:
         return _no_jurisdiction(
             artifact_id=artifact_id,
@@ -563,29 +1153,69 @@ def evaluate_disposition_authority(
             evaluated_state_hash=evaluated_state_hash,
             policy_sha256=policy.policy_sha256,
             authority_refs=policy.authority_refs,
+            requested_effects=effects,
             reasons=mismatches,
         )
     if policy.disposition_mode == "advisory_only":
-        return AdvisoryOnlyDispositionAuthorityV1(
-            **base,
-            scope=scope,
-            forbidden_effects=policy.forbidden_effects,
-            reason_codes=("policy_advisory_only",),
-            live_eligible=False,
+        reason_codes = ("policy_advisory_only",)
+        return _seal_evaluated_authority(
+            AdvisoryOnlyDispositionAuthorityV1(
+                **base,
+                evaluation_id=_evaluation_id(
+                    artifact_id=artifact_id,
+                    artifact_sha256=artifact_sha256,
+                    state_hash=evaluated_state_hash,
+                    scope=scope,
+                    requested_effects=effects,
+                    policy_sha256=policy.policy_sha256,
+                    result="AdvisoryOnly",
+                    reason_codes=reason_codes,
+                ),
+                scope=scope,
+                forbidden_effects=policy.forbidden_effects,
+                reason_codes=reason_codes,
+                live_eligible=False,
+            )
         )
     if policy.disposition_mode == "no_jurisdiction":
-        return NoJurisdictionDispositionAuthorityV1(
-            **base,
-            scope=scope,
-            reason_codes=("policy_declines_jurisdiction",),
-            live_eligible=False,
+        reason_codes = ("policy_declines_jurisdiction",)
+        return _seal_evaluated_authority(
+            NoJurisdictionDispositionAuthorityV1(
+                **base,
+                evaluation_id=_evaluation_id(
+                    artifact_id=artifact_id,
+                    artifact_sha256=artifact_sha256,
+                    state_hash=evaluated_state_hash,
+                    scope=scope,
+                    requested_effects=effects,
+                    policy_sha256=policy.policy_sha256,
+                    result="NoJurisdiction",
+                    reason_codes=reason_codes,
+                ),
+                scope=scope,
+                reason_codes=reason_codes,
+                live_eligible=False,
+            )
         )
-    return AuthorizedDispositionAuthorityV1(
-        **base,
-        scope=scope,
-        allowed_effects=policy.permitted_effects,
-        reason_codes=("signed_policy_authorizes_exact_scope_and_effects",),
-        live_eligible=policy.live_eligible,
+    reason_codes = ("signed_policy_authorizes_exact_scope_and_effects",)
+    return _seal_evaluated_authority(
+        AuthorizedDispositionAuthorityV1(
+            **base,
+            evaluation_id=_evaluation_id(
+                artifact_id=artifact_id,
+                artifact_sha256=artifact_sha256,
+                state_hash=evaluated_state_hash,
+                scope=scope,
+                requested_effects=effects,
+                policy_sha256=policy.policy_sha256,
+                result="Authorized",
+                reason_codes=reason_codes,
+            ),
+            scope=scope,
+            allowed_effects=policy.permitted_effects,
+            reason_codes=reason_codes,
+            live_eligible=policy.live_eligible,
+        )
     )
 
 
@@ -599,6 +1229,10 @@ def require_authorized_effects(
     requested_scope = DispositionScope(scope)
     provenance = EvidenceProvenance(evidence_provenance)
     requested_effects = set(_exact_strings(effects, field="effects"))
+    if not _is_fresh_evaluator_output(authority):
+        raise AuthorityDenied(
+            "serialized authority receipt is not an evaluator capability"
+        )
     if not isinstance(authority, AuthorizedDispositionAuthorityV1):
         raise AuthorityDenied(
             f"{authority.result} cannot construct an effective disposition"
@@ -644,12 +1278,8 @@ def require_live_authority(
 ) -> AuthorizedDispositionAuthorityV1:
     """Construction gate for ``EffectiveVerdict<Live>``."""
 
-    return require_authorized_effects(
-        authority,
-        scope=DispositionScope.LIVE,
-        effects=effects,
-        evidence_provenance=EvidenceProvenance.REAL_EXTERNAL_MODELS,
-    )
+    del authority, effects
+    raise AuthorityDenied("EffectiveVerdict<Live> is outside Build A authority")
 
 
 class SessionWriteLeaseV1(StrictCanonicalModel):
@@ -685,6 +1315,12 @@ class SessionWriteLeaseV1(StrictCanonicalModel):
     @field_validator("allowed_operations", mode="before")
     @classmethod
     def sort_operations(cls, value: Sequence[Any]) -> tuple[Any, ...]:
+        if isinstance(value, (str, bytes, bytearray)) or not isinstance(
+            value, Sequence
+        ):
+            raise ValueError("allowed_operations must be a sequence")
+        if any(not isinstance(item, (Mapping, AllowedOperationV1)) for item in value):
+            raise ValueError("allowed_operations entries must be operation objects")
         return tuple(
             sorted(
                 value,
@@ -1051,6 +1687,13 @@ class OperatorCountersignV1(StrictCanonicalModel):
 
 
 class RehearsalDispositionV1(StrictCanonicalModel):
+    """Immutable Copy disposition receipt; it is not an effect capability.
+
+    The lifecycle can persist this receipt only after independently obtaining
+    an evaluator-sealed authority and checking the receipt against that exact
+    value.  Deserialization deliberately recreates data, never authority.
+    """
+
     schema_: Literal["sab.rehearsal_disposition.v1"] = Field(
         "sab.rehearsal_disposition.v1", alias="schema"
     )
@@ -1088,17 +1731,17 @@ class RehearsalDispositionV1(StrictCanonicalModel):
         return _utc(value)
 
     @model_validator(mode="after")
-    def authorized_copy_constructor(self) -> "RehearsalDispositionV1":
-        require_authorized_effects(
-            self.authority,
-            scope=DispositionScope.COPY,
-            effects=self.effects,
-            evidence_provenance=EvidenceProvenance.FIXTURE_MODELS,
-        )
+    def authorized_copy_receipt_shape(self) -> "RehearsalDispositionV1":
+        if self.authority.scope != DispositionScope.COPY:
+            raise ValueError("rehearsal receipt requires copy-scoped authority data")
+        if not set(self.effects).issubset(self.authority.allowed_effects):
+            raise ValueError("effect is outside the exact authority set")
         return self
 
 
 class EffectiveVerdictV1(StrictCanonicalModel):
+    """Reserved Build B shape; no instance is constructible in Build A."""
+
     schema_: Literal["sab.effective_verdict.v1"] = Field(
         "sab.effective_verdict.v1", alias="schema"
     )
@@ -1127,13 +1770,7 @@ class EffectiveVerdictV1(StrictCanonicalModel):
 
     @model_validator(mode="after")
     def authorized_live_constructor(self) -> "EffectiveVerdictV1":
-        require_authorized_effects(
-            self.authority,
-            scope=DispositionScope.LIVE,
-            effects=self.effects,
-            evidence_provenance=EvidenceProvenance.REAL_EXTERNAL_MODELS,
-        )
-        return self
+        raise ValueError("EffectiveVerdict<Live> is outside Build A authority")
 
 
 class SeedSupersessionV1(StrictCanonicalModel):
@@ -1424,7 +2061,6 @@ SCHEMA_EXPORTS: ClassVar[dict[str, Any]] = {
     "sab.artifact_case.v1.schema.json": ArtifactCaseV1,
     "sab.artifact_ballot.v1.schema.json": ArtifactBallotV1,
     "sab.council_verdict.v1.schema.json": CouncilVerdictV1,
-    "sab.effective_verdict.v1.schema.json": EffectiveVerdictV1,
     "sab.operator_countersign.v1.schema.json": OperatorCountersignV1,
     "sab.rehearsal_disposition.v1.schema.json": RehearsalDispositionV1,
     "sab.seed_supersession.v1.schema.json": SeedSupersessionV1,
@@ -1502,8 +2138,20 @@ __all__ = [
     "EvidenceRefV1",
     "FROZEN_MAINTENANCE_OPERATIONS",
     "FirstVerdictRunReceiptV1",
+    "MASTER_VISION_CHALLENGE_ID",
+    "MASTER_VISION_CHALLENGE_PACKET_RAW_SHA256",
+    "MASTER_VISION_CHALLENGE_PACKET_SHA256",
+    "MASTER_VISION_DOCUMENT_SHA256",
     "MASTER_VISION_FORBIDDEN_EFFECTS",
+    "MASTER_VISION_REVALIDATION_DUE",
+    "MASTER_VISION_SEED_PACKET_RAW_SHA256",
+    "MASTER_VISION_SEED_PACKET_SHA256",
     "MASTER_VISION_SEED_ID",
+    "MASTER_VISION_SIGNER",
+    "MASTER_VISION_SIGNER_PUBLIC_KEY",
+    "MASTER_VISION_SOURCE_COMMIT",
+    "MasterVisionPolicyEvidenceV1",
+    "MasterVisionStateObservationV1",
     "NoJurisdiction",
     "NoJurisdictionDispositionAuthorityV1",
     "OperatorCountersign",
@@ -1514,6 +2162,7 @@ __all__ = [
     "SeedSupersessionV1",
     "SessionWriteLeaseV1",
     "SignedDispositionPolicyV1",
+    "TrustedPolicyIssuerV1",
     "allowed_operations_digest",
     "canonical_json",
     "canonical_json_bytes",

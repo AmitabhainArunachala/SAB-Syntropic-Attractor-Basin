@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 import hashlib
 import json
 import subprocess
@@ -20,11 +21,13 @@ from agora.sab_artifact_verdict import (
     AuthorizedDispositionAuthorityV1,
     EffectiveVerdictV1,
     EvidenceProvenance,
-    MASTER_VISION_FORBIDDEN_EFFECTS,
     MASTER_VISION_SEED_ID,
+    MasterVisionPolicyEvidenceV1,
+    MasterVisionStateObservationV1,
     NoJurisdictionDispositionAuthorityV1,
     RehearsalDispositionV1,
     SignedDispositionPolicyV1,
+    TrustedPolicyIssuerV1,
     canonical_json_bytes,
     canonical_sha256,
     evaluate_disposition_authority,
@@ -107,6 +110,19 @@ def evaluate(policy: SignedDispositionPolicyV1 | dict[str, Any] | None, **change
         "requested_effects": EFFECTS,
         "evaluated_state_hash": STATE_HASH,
         "signed_policy": policy,
+        "trusted_policy_issuer": (
+            TrustedPolicyIssuerV1(
+                issuer_identity=policy.issuer,
+                issuer_public_key=policy.signature.public_key,
+                source_fixture_id=str(policy.source_fixture_id),
+                copied_database_id=str(policy.copied_database_id),
+                authority_basis="founder_bootstrap_self_declared",
+            )
+            if isinstance(policy, SignedDispositionPolicyV1)
+            and policy.source_fixture_id
+            and policy.copied_database_id
+            else None
+        ),
         "now": NOW,
     }
     request.update(changes)
@@ -150,7 +166,7 @@ def test_all_three_authority_variants_are_distinct_typed_results() -> None:
     [
         ({"signed_policy": None}, "missing_signed_policy"),
         ({"evaluated_state_hash": "c" * 64}, "state_hash_mismatch"),
-        ({"requested_scope": "Live"}, "scope_mismatch"),
+        ({"requested_scope": "Live"}, "live_authority_outside_build_a"),
         ({"requested_effects": ("canon",)}, "effect_not_authorized"),
     ],
 )
@@ -188,7 +204,7 @@ def test_malformed_or_ambiguous_policy_never_raises_into_authority() -> None:
     assert result.reason_codes == ("invalid_policy_contract",)
 
 
-def test_master_vision_exact_signed_inputs_are_advisory_only() -> None:
+def test_master_vision_exact_signed_inputs_need_database_capability() -> None:
     document_bytes = subprocess.run(
         ["git", "show", "bc9d2f6:docs/SAB_MASTER_VISION_V1.md"],
         cwd=ROOT,
@@ -204,25 +220,54 @@ def test_master_vision_exact_signed_inputs_are_advisory_only() -> None:
     assert challenge_packet["blocking"] is True
     assert "independent operator" in challenge_packet["demanded_correction"]
 
+    evidence = MasterVisionPolicyEvidenceV1(
+        document_base64=base64.b64encode(document_bytes).decode("ascii"),
+        seed_packet_base64=base64.b64encode(MASTER_SEED.read_bytes()).decode("ascii"),
+        challenge_packet_base64=base64.b64encode(MASTER_CHALLENGE.read_bytes()).decode(
+            "ascii"
+        ),
+    )
+    observation_body = {
+        "schema": "sab.master_vision_state_observation.v1",
+        "proof_class": "attested_copied_database_observation",
+        "database_lifecycle_fingerprint": "d" * 64,
+        "seed_id": MASTER_VISION_SEED_ID,
+        "seed_state": "challenged",
+        "seed_packet_sha256": evidence.seed_packet_sha256,
+        "seed_packet_json_sha256": canonical_sha256(seed_packet),
+        "challenge_id": "sab_challenge_master_vision_v1_ebe422aab149",
+        "challenge_state": "pending",
+        "challenge_packet_sha256": evidence.challenge_packet_sha256,
+        "challenge_packet_json_sha256": canonical_sha256(challenge_packet),
+        "signer": evidence.signer,
+        "signer_public_key": evidence.signer_public_key,
+        "witness_event_count": 2,
+        "witness_event_types": ["challenge", "submit"],
+        "witness_event_chain_sha256": "e" * 64,
+        "terminal_witness_count": 0,
+        "supersession_edge_count": 0,
+        "effective_disposition_count": 0,
+    }
+    observation = MasterVisionStateObservationV1.model_validate(
+        {
+            **observation_body,
+            "observed_state_hash": canonical_sha256(observation_body),
+        }
+    )
     result = evaluate_disposition_authority(
         artifact_id=MASTER_VISION_SEED_ID,
         artifact_sha256=claimed,
         requested_scope="Live",
         requested_effects=("canon", "compost", "resolve_challenge", "supersede"),
-        evaluated_state_hash=STATE_HASH,
-        signed_policy={
-            "seed_packet": seed_packet,
-            "challenge_packet": challenge_packet,
-        },
+        evaluated_state_hash=observation.observed_state_hash,
+        signed_policy=evidence,
+        master_vision_observation=observation,
         now=NOW,
     )
-    assert isinstance(result, AdvisoryOnlyDispositionAuthorityV1)
-    assert result.scope == "All"
-    assert result.forbidden_effects == MASTER_VISION_FORBIDDEN_EFFECTS
-    with pytest.raises(AuthorityDenied):
-        require_live_authority(result, effects=("compost",))
-    with pytest.raises(AuthorityDenied):
-        require_rehearsal_authority(result, effects=("compost",))
+    assert isinstance(result, NoJurisdictionDispositionAuthorityV1)
+    assert result.reason_codes == (
+        "master_vision_state_observation_missing_or_invalid",
+    )
 
 
 def test_fixture_authority_cannot_promote_live() -> None:
@@ -250,6 +295,24 @@ def test_fixture_authority_cannot_promote_live() -> None:
                 "standing_effect": "none",
             }
         )
+
+
+def test_self_signed_live_policy_cannot_manufacture_build_a_authority() -> None:
+    self_signed = signed_policy(
+        scope="Live",
+        permitted_effects=("compost",),
+        live_eligible=True,
+        test_issuer=False,
+    )
+    result = evaluate(
+        self_signed,
+        requested_scope="Live",
+        requested_effects=("compost",),
+    )
+    assert isinstance(result, NoJurisdictionDispositionAuthorityV1)
+    assert result.reason_codes == ("live_authority_outside_build_a",)
+    with pytest.raises(AuthorityDenied):
+        require_live_authority(result, effects=("compost",))
 
 
 def test_rehearsal_constructor_requires_authorized_copy_and_fixture_provenance() -> (
@@ -287,6 +350,49 @@ def test_rehearsal_constructor_requires_authorized_copy_and_fixture_provenance()
         RehearsalDispositionV1.model_validate(forbidden)
 
 
+def test_serialized_or_model_copied_authority_is_not_an_effect_capability() -> None:
+    evaluated = evaluate(signed_policy())
+    serialized = AuthorizedDispositionAuthorityV1.model_validate(
+        evaluated.canonical_payload()
+    )
+    with pytest.raises(AuthorityDenied, match="serialized authority receipt"):
+        require_rehearsal_authority(serialized, effects=EFFECTS)
+
+    # Pydantic model_copy intentionally does not revalidate updates.  The
+    # evaluator seal binds the old digest, so the copied value still cannot be
+    # used as an effect capability.
+    promoted = evaluated.model_copy(
+        update={
+            "scope": "Live",
+            "live_eligible": True,
+            "allowed_effects": ("compost",),
+        }
+    )
+    with pytest.raises(AuthorityDenied, match="serialized authority receipt"):
+        require_authorized_effects(
+            promoted,
+            scope="Live",
+            effects=("compost",),
+            evidence_provenance="real_external_models",
+        )
+    with pytest.raises(ValidationError, match="outside Build A"):
+        EffectiveVerdictV1.model_validate(
+            {
+                "schema": "sab.effective_verdict.v1",
+                "effective_verdict_id": "forged-live",
+                "verdict_id": "forged-verdict",
+                "verdict_sha256": ARTIFACT_HASH,
+                "authority": promoted,
+                "effects": ["compost"],
+                "evidence_provenance": "real_external_models",
+                "scope": "Live",
+                "fixture_derived": False,
+                "applied_at": NOW,
+                "standing_effect": "none",
+            }
+        )
+
+
 def test_exact_method_path_allowlist_rejects_wildcards_and_unmounted_routes() -> None:
     parsed = validate_exact_allowed_operations(
         [
@@ -318,7 +424,7 @@ def test_copy_authority_cannot_claim_standing_or_live_eligibility() -> None:
         AuthorizedDispositionAuthorityV1.model_validate(payload)
     payload = evaluate(signed_policy()).canonical_payload()
     payload["live_eligible"] = True
-    with pytest.raises(ValidationError, match="Copy"):
+    with pytest.raises(ValidationError, match="Input should be False"):
         AuthorizedDispositionAuthorityV1.model_validate(payload)
 
 

@@ -49,6 +49,8 @@
           "type": "array"
         },
         "live_eligible": {
+          "const": false,
+          "default": false,
           "title": "Live Eligible",
           "type": "boolean"
         },
@@ -78,10 +80,8 @@
           "type": "string"
         },
         "scope": {
-          "enum": [
-            "Copy",
-            "Live"
-          ],
+          "const": "Copy",
+          "default": "Copy",
           "title": "Scope",
           "type": "string"
         },
@@ -95,13 +95,11 @@
       "required": [
         "evaluation_id",
         "artifact_id",
-        "scope",
         "authority_refs",
         "policy_sha256",
         "content_sha256",
         "evaluated_state_hash",
-        "reason_codes",
-        "live_eligible"
+        "reason_codes"
       ],
       "title": "AuthorizedDispositionAuthorityV1",
       "type": "object"
@@ -110,6 +108,7 @@
   "$id": "https://sab.local/schemas/sab.rehearsal_disposition.v1.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "Immutable Copy disposition receipt; it is not an effect capability.\n\nThe lifecycle can persist this receipt only after independently obtaining\nan evaluator-sealed authority and checking the receipt against that exact\nvalue.  Deserialization deliberately recreates data, never authority.",
   "properties": {
     "after_state_hash": {
       "pattern": "^[0-9a-f]{64}$",

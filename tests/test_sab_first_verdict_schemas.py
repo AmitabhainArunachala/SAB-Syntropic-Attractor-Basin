@@ -21,7 +21,6 @@ from agora.sab_artifact_verdict import (
     ContractSignatureV1,
     CouncilVerdictV1,
     DISPOSITION_AUTHORITY_ADAPTER,
-    EffectiveVerdictV1,
     FirstVerdictRunReceiptV1,
     FrozenSeatV1,
     OperatorCountersignV1,
@@ -544,7 +543,6 @@ MODEL_FIXTURES: dict[str, tuple[Any, Any]] = {
     "sab.artifact_case.v1.schema.json": (ArtifactCaseV1, case_payload),
     "sab.artifact_ballot.v1.schema.json": (ArtifactBallotV1, ballot_payload),
     "sab.council_verdict.v1.schema.json": (CouncilVerdictV1, verdict_payload),
-    "sab.effective_verdict.v1.schema.json": (EffectiveVerdictV1, effective_payload),
     "sab.operator_countersign.v1.schema.json": (
         OperatorCountersignV1,
         countersign_payload,

@@ -150,6 +150,8 @@
           "type": "array"
         },
         "live_eligible": {
+          "const": false,
+          "default": false,
           "title": "Live Eligible",
           "type": "boolean"
         },
@@ -179,10 +181,8 @@
           "type": "string"
         },
         "scope": {
-          "enum": [
-            "Copy",
-            "Live"
-          ],
+          "const": "Copy",
+          "default": "Copy",
           "title": "Scope",
           "type": "string"
         },
@@ -196,13 +196,11 @@
       "required": [
         "evaluation_id",
         "artifact_id",
-        "scope",
         "authority_refs",
         "policy_sha256",
         "content_sha256",
         "evaluated_state_hash",
-        "reason_codes",
-        "live_eligible"
+        "reason_codes"
       ],
       "title": "AuthorizedDispositionAuthorityV1",
       "type": "object"
