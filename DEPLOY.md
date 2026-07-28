@@ -108,10 +108,12 @@ handler for each of `/docs` and `/openapi.json`, both still point to the declare
 displaced upstream, and exactly one catch-all handler points to the declared SAB
 upstream. It changes only those two `reverse_proxy` directives, writes private
 `0600` artifacts, records before/after SHA-256 values, and always reports
-`applied=false`. It never connects to a host, replaces the source Caddyfile, or
-reloads Caddy. Validate and review the candidate independently before any
-operator-controlled proxy change; then rerun deployment parity and strict SAB
-orientation from an external vantage.
+`applied=false`. Candidate and receipt paths are append-only: the renderer
+refuses to overwrite either artifact, so use fresh paths for every review. It
+never connects to a host, replaces the source Caddyfile, or reloads Caddy.
+Validate and review the candidate independently before any operator-controlled
+proxy change; then rerun deployment parity and strict SAB orientation from an
+external vantage.
 
 ## Troubleshooting
 

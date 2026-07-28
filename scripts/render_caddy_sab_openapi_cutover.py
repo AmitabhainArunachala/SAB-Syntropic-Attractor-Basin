@@ -217,8 +217,8 @@ def render_cutover(
 
 def _atomic_private_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
-        raise CutoverError(f"refusing to replace symlink: {path}")
+    if path.exists() or path.is_symlink():
+        raise CutoverError(f"refusing to overwrite existing artifact: {path}")
     descriptor, temporary_name = tempfile.mkstemp(
         dir=path.parent,
         prefix=f".{path.name}.",
@@ -230,7 +230,10 @@ def _atomic_private_write(path: Path, content: str) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise CutoverError(f"refusing to overwrite existing artifact: {path}") from exc
         directory_descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory_descriptor)
@@ -256,6 +259,11 @@ def main(argv: list[str] | None = None) -> int:
         receipt_identity = args.receipt.resolve(strict=False)
         if len({source_identity, output_identity, receipt_identity}) != 3:
             raise CutoverError("source, candidate, and receipt paths must be distinct")
+        for artifact_path in (args.output, args.receipt):
+            if artifact_path.exists() or artifact_path.is_symlink():
+                raise CutoverError(
+                    f"refusing to overwrite existing artifact: {artifact_path}"
+                )
         if args.source.stat().st_size > MAX_CADDYFILE_BYTES:
             raise CutoverError("Caddy source exceeds the size limit")
         source = args.source.read_text(encoding="utf-8")

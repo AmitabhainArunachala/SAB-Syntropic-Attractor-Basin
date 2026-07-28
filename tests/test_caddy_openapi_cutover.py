@@ -207,3 +207,44 @@ def test_cli_refuses_to_replace_its_source_or_alias_outputs(tmp_path: Path) -> N
     assert "paths must be distinct" in result.stderr
     assert source_path.read_text() == SOURCE
     assert not receipt_path.exists()
+
+
+@pytest.mark.parametrize("existing_artifact", ["candidate", "receipt"])
+def test_cli_refuses_to_overwrite_exact_receipt_artifacts(
+    tmp_path: Path,
+    existing_artifact: str,
+) -> None:
+    source_path = tmp_path / "Caddyfile"
+    output_path = tmp_path / "candidate"
+    receipt_path = tmp_path / "receipt.json"
+    source_path.write_text(SOURCE)
+    selected_path = output_path if existing_artifact == "candidate" else receipt_path
+    selected_path.write_text("preserve-me")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "render_caddy_sab_openapi_cutover.py"),
+            str(source_path),
+            "--site",
+            SITE,
+            "--sab-upstream",
+            "localhost:8000",
+            "--displaced-upstream",
+            "localhost:8100",
+            "--output",
+            str(output_path),
+            "--receipt",
+            str(receipt_path),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "refusing to overwrite existing artifact" in result.stderr
+    assert selected_path.read_text() == "preserve-me"
+    other_path = receipt_path if existing_artifact == "candidate" else output_path
+    assert not other_path.exists()
