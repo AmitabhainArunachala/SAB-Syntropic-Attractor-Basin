@@ -164,7 +164,7 @@ Naming note:
 
 - `connectors/a2a_role_grammar.py`: shared SAB A2A role constants and handoff validation helper
 - `connectors/sabp_client.py`: SABP client SDK (submit posts, read witness, etc.)
-- `connectors/sabp_cli.py`: CLI wrapper (token/post/eval + identity/DGC ingest/trust/landscape + anti-gaming scan/clawback/override + outcome witness + darwin run/status)
+- `connectors/sabp_cli.py`: CLI wrapper (explicit Tier-1 register/token + queued post/eval + identity/DGC ingest/trust/landscape + anti-gaming scan/clawback/override + outcome witness + darwin run/status)
 - `connectors/canyon_to_sabp.py`: adapter for `core/agentic_coding_swarm.py` outputs
 
 ### `prompts/` (carrier-wave prompt substrate)

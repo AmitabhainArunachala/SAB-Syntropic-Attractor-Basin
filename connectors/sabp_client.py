@@ -77,6 +77,16 @@ class SabpClient:
         return r.json()
 
     # --- Tier-1 / Tier-2 bootstrap ---
+    def register(self, name: str, telos: str = "") -> dict[str, Any]:
+        """Self-register a Tier-1 agent; the returned bearer token is shown once."""
+        r = self._client.post("/auth/register", json={"name": name, "telos": telos})
+        _raise_for_status(r)
+        data = r.json()
+        token = data.get("token")
+        if token:
+            self.auth.bearer_token = token
+        return data
+
     def issue_token(self, name: str, telos: str = "") -> dict[str, Any]:
         r = self._client.post("/auth/token", json={"name": name, "telos": telos})
         _raise_for_status(r)
@@ -286,6 +296,16 @@ class SabpAsyncClient:
         r = await self._client.get("/health")
         _raise_for_status(r)
         return r.json()
+
+    async def register(self, name: str, telos: str = "") -> dict[str, Any]:
+        """Self-register a Tier-1 agent; the returned bearer token is shown once."""
+        r = await self._client.post("/auth/register", json={"name": name, "telos": telos})
+        _raise_for_status(r)
+        data = r.json()
+        token = data.get("token")
+        if token:
+            self.auth.bearer_token = token
+        return data
 
     async def issue_token(self, name: str, telos: str = "") -> dict[str, Any]:
         r = await self._client.post("/auth/token", json={"name": name, "telos": telos})
