@@ -229,15 +229,22 @@ python3 scripts/enforce_claim_promotions.py --require-stage --fail-on-no-claims
 One-command AGNI rollout (pull, build, restart, health checks):
 
 ```bash
-scripts/deploy_agni_docker.sh
+AGNI_PUBLIC_BASE_URL=https://agora.example scripts/deploy_agni_docker.sh
 ```
+
+`AGNI_PUBLIC_BASE_URL` is required. The helper fails before SSH when it is
+missing or is not a root HTTPS origin, and it cannot report success unless
+that public origin serves the canonical SAB OpenAPI routes and the exact
+deployed build SHA from both AGNI and the external caller. The helper binds the
+deployment to the remote branch SHA, builds from `git archive` rather than the
+worktree, and requires exact OpenAPI SHA-256 equality across the container,
+AGNI public route, and external caller. `--no-build` is intentionally disabled:
+an image label alone is not source identity.
 
 Useful options:
 
 ```bash
-# Skip image rebuild, restart container only
-scripts/deploy_agni_docker.sh --no-build
-
 # Override target branch or SSH alias
-AGNI_BRANCH=main AGNI_SSH_TARGET=agni scripts/deploy_agni_docker.sh
+AGNI_PUBLIC_BASE_URL=https://agora.example \
+  AGNI_BRANCH=main AGNI_SSH_TARGET=agni scripts/deploy_agni_docker.sh
 ```

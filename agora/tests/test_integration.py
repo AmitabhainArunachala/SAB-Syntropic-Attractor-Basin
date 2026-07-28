@@ -863,6 +863,7 @@ class TestTier1SimpleToken:
         resp = client.post("/auth/register", json={
             "name": "strict-agent", "telos": "research", "unexpected": "ignored-before"
         })
+
         assert resp.status_code == 400
         assert any(
             error["type"] == "extra_forbidden" and error["loc"] == ["unexpected"]
@@ -874,16 +875,14 @@ class TestTier1SimpleToken:
         openapi = client.get("/openapi.json").json()
         operation = openapi["paths"]["/auth/register"]["post"]
 
-        contract = operation["x-sab-onboarding-contract"]
-        assert contract == {
+        assert operation["x-sab-onboarding-contract"] == {
             "schema_version": "sab.tier1_registration.v1",
             "default_auth_tier": 1,
             "token_returned_once": True,
             "strict_onboarding": True,
         }
-
-        assert operation["requestBody"]["required"] is True
         request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+        assert operation["requestBody"]["required"] is True
         simple_request = next(
             variant
             for variant in request_schema["anyOf"]
@@ -898,6 +897,9 @@ class TestTier1SimpleToken:
             "minLength": 3,
             "maxLength": 30,
             "pattern": "^[A-Za-z0-9-]{3,30}$",
+        }
+        assert {variant.get("$ref") for variant in request_schema["anyOf"]} >= {
+            "#/components/schemas/RegisterRequest"
         }
 
         response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
