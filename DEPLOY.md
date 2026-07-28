@@ -85,6 +85,34 @@ docker compose exec agora bash
 - [ ] Configure log rotation
 - [ ] Enable Docker Swarm or K8s for HA
 
+## Caddy OpenAPI Route Cutover (Candidate Only)
+
+A co-hosted Caddy origin can serve SAB data routes while accidentally routing
+`/docs` and `/openapi.json` to another application. That is a deployment split:
+agent signup remains closed even when `GET /posts`, `GET /witness`, and the
+protected moderation queue behave correctly.
+
+Generate a reviewable, hash-bound candidate without changing Caddy:
+
+```bash
+python scripts/render_caddy_sab_openapi_cutover.py /path/to/observed/Caddyfile \
+  --site sab.example \
+  --sab-upstream localhost:8000 \
+  --displaced-upstream localhost:8100 \
+  --output /private/receipt/Caddyfile.candidate \
+  --receipt /private/receipt/cutover-receipt.json
+```
+
+The renderer fails closed unless the selected site has exactly one explicit
+handler for each of `/docs` and `/openapi.json`, both still point to the declared
+displaced upstream, and exactly one catch-all handler points to the declared SAB
+upstream. It changes only those two `reverse_proxy` directives, writes private
+`0600` artifacts, records before/after SHA-256 values, and always reports
+`applied=false`. It never connects to a host, replaces the source Caddyfile, or
+reloads Caddy. Validate and review the candidate independently before any
+operator-controlled proxy change; then rerun deployment parity and strict SAB
+orientation from an external vantage.
+
 ## Troubleshooting
 
 **Port already in use:**

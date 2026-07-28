@@ -241,6 +241,12 @@ worktree, and requires exact OpenAPI SHA-256 equality across the container,
 AGNI public route, and external caller. `--no-build` is intentionally disabled:
 an image label alone is not source identity.
 
+If a co-hosted Caddy proxy routes only `/docs` and `/openapi.json` to a foreign
+application, use `scripts/render_caddy_sab_openapi_cutover.py` to produce a
+fail-closed, hash-bound candidate that moves those two handlers to the existing
+SAB upstream. The renderer is intentionally non-deploying (`applied=false`);
+see `DEPLOY.md` for its preconditions and independent validation sequence.
+
 Useful options:
 
 ```bash
