@@ -23,6 +23,102 @@ def load_module():
     return module
 
 
+def agent_readable_protocol_openapi(
+    *,
+    extra_paths: dict | None = None,
+    extra_schemas: dict | None = None,
+) -> dict:
+    """Return the minimal exact Tier-1 contract accepted by the live signup gate."""
+    paths = {
+        "/auth/register": {
+            "post": {
+                "x-sab-onboarding-contract": {
+                    "schema_version": "sab.tier1_registration.v1",
+                    "default_auth_tier": 1,
+                    "token_returned_once": True,
+                    "strict_onboarding": True,
+                },
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "anyOf": [
+                                    {
+                                        "type": "object",
+                                        "title": "RegisterSimpleRequest",
+                                        "additionalProperties": False,
+                                        "required": ["name"],
+                                        "properties": {
+                                            "name": {
+                                                "type": "string",
+                                                "minLength": 3,
+                                                "maxLength": 30,
+                                                "pattern": "^[A-Za-z0-9-]{3,30}$",
+                                            },
+                                            "telos": {
+                                                "type": "string",
+                                                "default": "",
+                                                "maxLength": 2000,
+                                            },
+                                        },
+                                    },
+                                    {"$ref": "#/components/schemas/RegisterRequest"},
+                                ]
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "anyOf": [
+                                        {"$ref": "#/components/schemas/RegisterSimpleResponse"},
+                                        {"$ref": "#/components/schemas/RegisterResponse"},
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        },
+        "/posts": {"get": {}, "post": {}},
+        "/witness": {"get": {}},
+    }
+    paths.update(extra_paths or {})
+    schemas = {
+        "RegisterSimpleResponse": {
+            "type": "object",
+            "required": ["address", "token", "message"],
+            "properties": {
+                "address": {"type": "string"},
+                "token": {"type": "string"},
+                "message": {"type": "string"},
+            },
+        },
+        "RegisterResponse": {
+            "type": "object",
+            "required": ["address", "name", "telos", "reputation", "created_at"],
+            "properties": {
+                "address": {"type": "string"},
+                "name": {"type": "string"},
+                "telos": {"type": "string"},
+                "reputation": {"type": "number"},
+                "created_at": {"type": "string"},
+            },
+        },
+    }
+    schemas.update(extra_schemas or {})
+    return {
+        "info": {"title": "SAB DHARMIC_AGORA API"},
+        "paths": paths,
+        "components": {"schemas": schemas},
+    }
+
+
 def test_canonical_map_has_three_to_ten_existing_unique_semantic_roles():
     module = load_module()
 
@@ -223,6 +319,123 @@ def test_live_probe_fails_closed_when_openapi_is_not_sab():
     assert "not canonical sab" in live["blocker"].lower()
 
 
+def test_route_only_registration_contract_never_enables_signup():
+    module = load_module()
+    payloads = {
+        "/status": {"status": "healthy", "posts": 9, "witness_entries": 11},
+        "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
+        "/witness": [
+            {"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}
+        ],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": {}},
+                "/posts": {"get": {}, "post": {}},
+                "/witness": {"get": {}},
+            },
+        },
+        "/api/federation/health": {"status": "operational", "registered_agents": 0},
+    }
+    browser_probes: list[str] = []
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    def fake_browser_probe(base_url: str, path: str, timeout: float):
+        browser_probes.append(path)
+        return 200, "text/html", "SAB Swagger UI"
+
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=fake_browser_probe,
+        now=datetime(2026, 7, 26, 0, 2, tzinfo=timezone.utc),
+    )
+
+    assert live["canonical_sab_routes"] is True
+    assert live["registration_contract_ready"] is False
+    assert live["registration_contract_version"] is None
+    assert live["agent_entry_surface"] is None
+    assert live["signup_ready"] is False
+    assert live["recruitment_ready"] is False
+    assert live["status"] == "registration_contract_invalid"
+    assert browser_probes == []
+    assert module.onboarding_links(live, instance_verified=True)["registration_url"] is None
+
+
+def test_invalid_protocol_contract_cannot_capture_valid_basin_entry():
+    module = load_module()
+    payloads = {
+        "/status": {"status": "healthy", "posts": 9, "witness_entries": 11},
+        "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
+        "/witness": [
+            {"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}
+        ],
+        "/openapi.json": {
+            "info": {"title": "SAB DHARMIC_AGORA API"},
+            "paths": {
+                "/auth/register": {"post": {}},
+                "/posts": {"get": {}, "post": {}},
+                "/witness": {"get": {}},
+                "/api/agents/register": {"post": {}},
+                "/api/spark/submit": {"post": {}},
+            },
+        },
+        "/api/federation/health": {"status": "operational", "registered_agents": 0},
+    }
+    browser_probes: list[str] = []
+
+    def fake_get(base_url: str, path: str, timeout: float):
+        return 200, payloads[path]
+
+    def fake_browser_probe(base_url: str, path: str, timeout: float):
+        browser_probes.append(path)
+        return 200, "text/html", "SAB public basin"
+
+    live = module.probe_live_surface(
+        "https://sab.example",
+        get_json=fake_get,
+        probe_url=fake_browser_probe,
+        now=datetime(2026, 7, 26, 0, 2, tzinfo=timezone.utc),
+    )
+    links = module.onboarding_links(live, instance_verified=True)
+
+    assert live["protocol_surface_ready"] is True
+    assert live["public_basin_ready"] is True
+    assert live["registration_contract_ready"] is False
+    assert live["agent_entry_surface"] == "public_basin"
+    assert live["signup_ready"] is True
+    assert live["recruitment_ready"] is True
+    assert browser_probes == ["/"]
+    assert links["browser_url"] == "https://sab.example/"
+    assert links["registration_url"] == "https://sab.example/api/agents/register"
+
+
+def test_openapi_token_return_metadata_is_public_only_as_a_boolean():
+    module = load_module()
+    openapi = agent_readable_protocol_openapi()
+
+    assert (
+        module._contains_sensitive_public_key(
+            openapi,
+            symbolic_key_maps=module.OPENAPI_SYMBOLIC_KEY_MAPS,
+        )
+        is False
+    )
+
+    contract = openapi["paths"]["/auth/register"]["post"]["x-sab-onboarding-contract"]
+    contract["token_returned_once"] = "TOKEN-MARKER"
+
+    assert (
+        module._contains_sensitive_public_key(
+            openapi,
+            symbolic_key_maps=module.OPENAPI_SYMBOLIC_KEY_MAPS,
+        )
+        is True
+    )
+
+
 def test_deceptive_title_wrong_methods_and_down_status_never_become_ready():
     module = load_module()
     payloads = {
@@ -283,14 +496,7 @@ def test_canonical_sab_on_ip_is_not_recruitment_ready():
         "/status": {"status": "healthy", "posts": 1, "witness_entries": 2},
         "/posts": [{"id": 1}],
         "/witness": [{"id": 2, "hash": "w2"}],
-        "/openapi.json": {
-            "info": {"title": "SAB DHARMIC_AGORA API"},
-            "paths": {
-                "/auth/register": {"post": {}},
-                "/posts": {"get": {}, "post": {}},
-                "/witness": {"get": {}},
-            },
-        },
+        "/openapi.json": agent_readable_protocol_openapi(),
         "/api/federation/health": {"status": "operational", "registered_agents": 0},
     }
 
@@ -312,14 +518,7 @@ def test_live_probe_captures_current_posts_and_witness_preflight():
         "/status": {"status": "healthy", "posts": 9, "witness_entries": 11},
         "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
         "/witness": [{"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}],
-        "/openapi.json": {
-            "info": {"title": "SAB DHARMIC_AGORA API"},
-            "paths": {
-                "/auth/register": {"post": {}},
-                "/posts": {"get": {}, "post": {}},
-                "/witness": {"get": {}},
-            },
-        },
+        "/openapi.json": agent_readable_protocol_openapi(),
         "/api/federation/health": {"status": "operational", "registered_agents": 0},
     }
 
@@ -337,6 +536,9 @@ def test_live_probe_captures_current_posts_and_witness_preflight():
     assert live["preflight"]["latest_post_id"] == 9
     assert live["preflight"]["latest_witness_id"] == 11
     assert live["preflight"]["latest_witness_hash"] == "a" * 64
+    assert live["registration_contract_ready"] is True
+    assert live["registration_contract_version"] == "sab.tier1_registration.v1"
+    assert live["agent_entry_surface"] == "protocol"
     assert live["recruitment_ready"] is True
 
 
@@ -350,17 +552,13 @@ def test_hardened_federation_401_is_acceptable_only_when_openapi_declares_header
             "/witness": [
                 {"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}
             ],
-            "/openapi.json": {
-                "info": {"title": "SAB DHARMIC_AGORA API"},
-                "paths": {
-                    "/auth/register": {"post": {}},
-                    "/posts": {"get": {}, "post": {}},
-                    "/witness": {"get": {}},
+            "/openapi.json": agent_readable_protocol_openapi(
+                extra_paths={
                     "/api/federation/health": {
                         "get": {"parameters": [header_parameter] if header_parameter else []}
-                    },
-                },
-            },
+                    }
+                }
+            ),
             "/api/federation/health": {"error": "HTTPError"},
         }
 
@@ -416,14 +614,7 @@ def test_browser_entry_must_resolve_before_recruitment_is_ready():
         "/status": {"status": "healthy"},
         "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
         "/witness": [{"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}],
-        "/openapi.json": {
-            "info": {"title": "SAB DHARMIC_AGORA API"},
-            "paths": {
-                "/auth/register": {"post": {}},
-                "/posts": {"get": {}, "post": {}},
-                "/witness": {"get": {}},
-            },
-        },
+        "/openapi.json": agent_readable_protocol_openapi(),
         "/api/federation/health": {"status": "operational"},
     }
 
@@ -569,24 +760,18 @@ def test_openapi_route_and_schema_names_do_not_self_block_canonical_preflight():
                 "timestamp": "2026-07-26T00:01:00Z",
             }
         ],
-        "/openapi.json": {
-            "info": {"title": "SAB DHARMIC_AGORA API"},
-            "paths": {
-                "/auth/register": {"post": {}},
+        "/openapi.json": agent_readable_protocol_openapi(
+            extra_paths={
                 "/auth/token": {"post": {}},
                 "/auth/apikey": {"post": {}},
-                "/posts": {"get": {}, "post": {}},
-                "/witness": {"get": {}},
             },
-            "components": {
-                "schemas": {
-                    "VerifyResponse": {
-                        "type": "object",
-                        "properties": {"token": {"type": "string"}},
-                    }
+            extra_schemas={
+                "VerifyResponse": {
+                    "type": "object",
+                    "properties": {"token": {"type": "string"}},
                 }
             },
-        },
+        ),
         "/api/federation/health": {"status": "operational", "registered_agents": 0},
     }
 
@@ -1110,6 +1295,7 @@ def test_onboarding_links_exist_only_when_recruitment_is_ready():
             "recruitment_ready": True,
             "protocol_surface_ready": True,
             "public_basin_ready": False,
+            "agent_entry_surface": "protocol",
         },
         instance_verified=True,
     )

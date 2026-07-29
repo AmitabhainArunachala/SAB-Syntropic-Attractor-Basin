@@ -43,7 +43,7 @@ def _exact_string_set(value: Any, expected: set[str]) -> bool:
     return len(value) == len(expected) and set(value) == expected
 
 
-def _registration_contract_is_agent_readable(
+def registration_contract_is_agent_readable(
     operation: Mapping[str, Any], openapi_payload: Mapping[str, Any]
 ) -> bool:
     """Fail closed unless OpenAPI fully describes the default Tier-1 exchange."""
@@ -258,7 +258,7 @@ def assess_deployment(
     registration_post = (
         registration_post_value if isinstance(registration_post_value, Mapping) else {}
     )
-    registration_contract_ready = _registration_contract_is_agent_readable(
+    registration_contract_ready = registration_contract_is_agent_readable(
         registration_post, openapi_payload
     )
     if not registration_contract_ready:

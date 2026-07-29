@@ -18,6 +18,17 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urljoin, urlparse
 
+try:
+    from scripts.check_deployment_parity import (
+        REGISTRATION_CONTRACT_VERSION,
+        registration_contract_is_agent_readable,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/sab_orient.py`` execution.
+    from check_deployment_parity import (  # type: ignore[no-redef]
+        REGISTRATION_CONTRACT_VERSION,
+        registration_contract_is_agent_readable,
+    )
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 CANONICAL_ANCHORS = [
@@ -293,6 +304,7 @@ def _timestamp_fresh(value: object, *, now: datetime, max_age_seconds: int) -> b
 OPENAPI_SYMBOLIC_KEY_MAPS = frozenset(
     {"paths", "schemas", "properties", "securitySchemes", "security", "callbacks"}
 )
+OPENAPI_PUBLIC_BOOLEAN_METADATA = frozenset({"token_returned_once"})
 
 
 def _contains_sensitive_public_key(
@@ -300,6 +312,7 @@ def _contains_sensitive_public_key(
     *,
     symbolic_key_maps: frozenset[str] = frozenset(),
     entries_are_symbols: bool = False,
+    entries_are_public_metadata: bool = False,
 ) -> bool:
     """Detect secret-bearing keys without mistaking OpenAPI symbol names for values."""
     if isinstance(value, dict):
@@ -320,18 +333,30 @@ def _contains_sensitive_public_key(
             )
             # OpenAPI maps route, schema, property, and security-scheme names as
             # dictionary keys. Names such as `/auth/token` and `properties.token`
-            # describe the public contract; they are not credential material. A
-            # scalar under the same sensitive-looking key is not a schema symbol
-            # and remains a hard failure.
-            if sensitive_key and not (
+            # describe the public contract; they are not credential material. The
+            # exact onboarding contract also exposes one boolean named
+            # ``token_returned_once``; only that boolean shape is public metadata.
+            # Any string/object under the same sensitive-looking key remains a
+            # hard failure.
+            allowed_public_boolean = (
+                entries_are_public_metadata
+                and isinstance(key, str)
+                and key in OPENAPI_PUBLIC_BOOLEAN_METADATA
+                and type(child) is bool
+            )
+            if sensitive_key and not allowed_public_boolean and not (
                 entries_are_symbols and isinstance(child, (dict, list))
             ):
                 return True
             child_entries_are_symbols = isinstance(key, str) and key in symbolic_key_maps
+            child_entries_are_public_metadata = (
+                key == "x-sab-onboarding-contract" and isinstance(child, dict)
+            )
             if _contains_sensitive_public_key(
                 child,
                 symbolic_key_maps=symbolic_key_maps,
                 entries_are_symbols=child_entries_are_symbols,
+                entries_are_public_metadata=child_entries_are_public_metadata,
             ):
                 return True
     elif isinstance(value, list):
@@ -340,6 +365,7 @@ def _contains_sensitive_public_key(
                 item,
                 symbolic_key_maps=symbolic_key_maps,
                 entries_are_symbols=entries_are_symbols,
+                entries_are_public_metadata=entries_are_public_metadata,
             )
             for item in value
         )
@@ -446,11 +472,27 @@ def probe_live_surface(
     basin_ready = has_method("/api/agents/register", "post") and has_method(
         "/api/spark/submit", "post"
     )
+    registration_operations = paths.get("/auth/register")
+    registration_operation = (
+        registration_operations.get("post")
+        if isinstance(registration_operations, dict)
+        else None
+    )
+    registration_contract_ready = (
+        isinstance(openapi, dict)
+        and isinstance(registration_operation, dict)
+        and registration_contract_is_agent_readable(registration_operation, openapi)
+    )
+    protocol_signup_ready = protocol_ready and registration_contract_ready
+    basin_signup_ready = basin_ready
+    agent_entry_surface: str | None = None
+    if title_is_sab and protocol_signup_ready:
+        agent_entry_surface = "protocol"
+    elif title_is_sab and basin_signup_ready:
+        agent_entry_surface = "public_basin"
     canonical_routes = title_is_sab and (protocol_ready or basin_ready)
     http_healthy = status_http == 200 and openapi_http == 200
-    signup_ready = canonical_routes and (
-        has_method("/auth/register", "post") or has_method("/api/agents/register", "post")
-    )
+    signup_ready = agent_entry_surface is not None
     persistent_url_ready = _persistent_https_url(base_url)
     latest_post = posts[0] if posts_http == 200 and isinstance(posts, list) and posts else {}
     latest_witness = (
@@ -586,7 +628,11 @@ def probe_live_surface(
             witness_timestamp if _parse_rfc3339(witness_timestamp) is not None else None
         ),
     }
-    browser_path = "/docs" if protocol_ready else "/" if basin_ready else None
+    browser_path: str | None = None
+    if agent_entry_surface == "protocol":
+        browser_path = "/docs"
+    elif agent_entry_surface == "public_basin":
+        browser_path = "/"
     browser_http: int | None = None
     browser_content_type = ""
     browser_body = ""
@@ -611,6 +657,12 @@ def probe_live_surface(
     if recruitment_ready:
         live_status = "ready"
         blocker = None
+    elif canonical_routes and protocol_ready and not registration_contract_ready and not basin_ready:
+        live_status = "registration_contract_invalid"
+        blocker = (
+            "Canonical SAB routes exist, but POST /auth/register does not expose the "
+            f"agent-readable {REGISTRATION_CONTRACT_VERSION} contract."
+        )
     elif canonical_routes and signup_ready and not persistent_url_ready:
         live_status = "persistent_url_missing"
         blocker = (
@@ -641,6 +693,11 @@ def probe_live_surface(
         "canonical_sab_routes": canonical_routes,
         "protocol_surface_ready": protocol_ready,
         "public_basin_ready": basin_ready,
+        "registration_contract_ready": registration_contract_ready,
+        "registration_contract_version": (
+            REGISTRATION_CONTRACT_VERSION if registration_contract_ready else None
+        ),
+        "agent_entry_surface": agent_entry_surface,
         "signup_ready": signup_ready,
         "agent_entry_ready": signup_ready,
         "browser_entry_ready": browser_entry_ready,
@@ -672,12 +729,20 @@ def onboarding_links(live: dict, *, instance_verified: bool) -> dict:
                 else live.get("blocker") or "Recruitment readiness has not passed."
             ),
         }
-    if live.get("protocol_surface_ready"):
+    if live.get("agent_entry_surface") == "protocol":
         browser_url = base_url + "/docs"
         registration_url = base_url + "/auth/register"
-    else:
+    elif live.get("agent_entry_surface") == "public_basin":
         browser_url = base_url + "/"
         registration_url = base_url + "/api/agents/register"
+    else:
+        return {
+            "browser_url": None,
+            "registration_url": None,
+            "agent_cli": "python -m connectors.sabp_cli --help",
+            "qr_payload": None,
+            "blocker": "Recruitment readiness lacks a typed agent-entry surface.",
+        }
     return {
         "browser_url": browser_url,
         "registration_url": registration_url,
