@@ -346,10 +346,10 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         control_kind="service",
         target_id="agora-live",
         authority_scope="pause_and_restore_exact_prior_service",
-        authorized_from=NOW - timedelta(minutes=1),
-        authorized_until=NOW + timedelta(minutes=5),
-        issued_at=NOW - timedelta(minutes=2),
-        expires_at=NOW + timedelta(minutes=6),
+        authorized_from=NOW - timedelta(seconds=30),
+        authorized_until=NOW + timedelta(minutes=3),
+        issued_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=4),
     )
     tick_control = _signed_observation(
         MaintenanceControlAuthorityReceiptV1,
@@ -360,10 +360,10 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         control_kind="tick",
         target_id="agora-tick",
         authority_scope="exclude_and_restore_exact_prior_tick",
-        authorized_from=NOW - timedelta(minutes=1),
-        authorized_until=NOW + timedelta(minutes=5),
-        issued_at=NOW - timedelta(minutes=2),
-        expires_at=NOW + timedelta(minutes=6),
+        authorized_from=NOW - timedelta(seconds=30),
+        authorized_until=NOW + timedelta(minutes=3),
+        issued_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=4),
     )
     lease = _signed_observation(
         LiveWriteLeaseEnvelopeV1,
@@ -413,12 +413,12 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         tick_id=snapshot.tick_id,
         tick_definition_sha256=snapshot.prior_tick_definition_sha256,
         tick_control_authority_sha256=tick_control.canonical_sha256(),
-        excluded_from=NOW - timedelta(minutes=1),
-        excluded_until=NOW + timedelta(minutes=4),
+        excluded_from=NOW - timedelta(seconds=30),
+        excluded_until=NOW + timedelta(minutes=3),
         ceremony_window_start=NOW - timedelta(seconds=30),
         ceremony_window_end=NOW + timedelta(minutes=3),
         last_tick_completed_at=NOW - timedelta(minutes=2),
-        next_tick_not_before=NOW + timedelta(minutes=4),
+        next_tick_not_before=NOW + timedelta(minutes=3),
         observed_at=NOW - timedelta(seconds=10),
         expires_at=NOW + timedelta(minutes=4),
     )
@@ -581,6 +581,31 @@ def test_genuine_frozen_facts_are_locally_sealed_and_non_authorizing() -> None:
     assert "Authorized<Live>" not in result.canonical_json()
 
 
+def test_cost_signature_never_claims_operator_signing_rail_approval() -> None:
+    packet = _packet()
+    manifest_payload = packet["manifest"].canonical_payload()
+    frozen = _frozen(packet)
+
+    assert packet["cost"].approval_signature.signature
+    assert manifest_payload["operator_signing_rail_state"] == "approval_required"
+    assert "operator_signing_rail_approved" not in manifest_payload
+    assert "operator_signing_rail_approved" not in frozen.canonical_payload()
+    assert (
+        frozen.next_requirement
+        == "fresh_authority_capability_and_attended_operator_rail_approval"
+    )
+
+    old_claim = copy.deepcopy(manifest_payload)
+    old_claim["operator_signing_rail_approved"] = True
+    with pytest.raises(ValidationError):
+        AttendedCeremonyManifestV1.model_validate(old_claim)
+
+    false_promotion = copy.deepcopy(manifest_payload)
+    false_promotion["operator_signing_rail_state"] = "approved"
+    with pytest.raises(ValidationError):
+        AttendedCeremonyManifestV1.model_validate(false_promotion)
+
+
 def test_genuine_live_preflight_is_locally_sealed_but_never_live_authority() -> None:
     packet = _packet()
     result = _live(packet)
@@ -589,7 +614,8 @@ def test_genuine_live_preflight_is_locally_sealed_but_never_live_authority() -> 
     assert readiness_is_locally_verified(result, phase="live_maintenance_preflight")
     assert result.phase == "live_maintenance_preflight"
     assert (
-        result.next_requirement == "fresh_authority_capability_and_operator_signature"
+        result.next_requirement
+        == "fresh_authority_capability_and_attended_operator_rail_approval"
     )
     assert result.live_authority_state == "absent"
     assert result.permits_live_effect is False
@@ -825,6 +851,86 @@ def test_control_receipts_require_out_of_band_trust() -> None:
         "service_control_attestor_untrusted",
         "tick_control_attestor_untrusted",
     }.issubset(_codes(result))
+
+
+@pytest.mark.parametrize(
+    ("receipt_name", "argument_name", "expected_code"),
+    [
+        (
+            "service_control",
+            "service_control_authority_receipt",
+            "service_control_authority_binding_mismatch",
+        ),
+        (
+            "tick_control",
+            "tick_control_authority_receipt",
+            "tick_control_authority_binding_mismatch",
+        ),
+    ],
+)
+def test_control_authority_must_equal_not_enclose_the_ceremony_window(
+    receipt_name: str, argument_name: str, expected_code: str
+) -> None:
+    packet = _packet()
+    broad = packet[receipt_name].canonical_payload()
+    broad["authorized_from"] = (NOW - timedelta(seconds=31)).isoformat()
+    broad["authorized_until"] = (NOW + timedelta(minutes=3, seconds=1)).isoformat()
+    MaintenanceControlAuthorityReceiptV1.model_validate(broad)
+
+    result = _live(packet, **{argument_name: broad})
+
+    assert isinstance(result, Blocked)
+    assert expected_code in _codes(result)
+
+
+def test_long_lived_control_authority_is_structurally_rejected() -> None:
+    packet = _packet()
+    long_lived = packet["service_control"].canonical_payload()
+    long_lived["expires_at"] = (NOW + timedelta(minutes=10)).isoformat()
+
+    with pytest.raises(ValidationError, match="control authority window is invalid"):
+        MaintenanceControlAuthorityReceiptV1.model_validate(long_lived)
+
+    result = _live(packet, service_control_authority_receipt=long_lived)
+    assert isinstance(result, Blocked)
+    assert "service_control_authority_invalid" in _codes(result)
+
+
+def test_snapshot_capture_must_be_inside_both_control_windows() -> None:
+    packet = _packet()
+    early = packet["snapshot"].canonical_payload()
+    early["captured_at"] = (NOW - timedelta(seconds=45)).isoformat()
+    ServiceStateSnapshotV1.model_validate(early)
+
+    result = _live(packet, service_state_snapshot=early)
+
+    assert isinstance(result, Blocked)
+    assert "service_snapshot_outside_control_window" in _codes(result)
+
+
+def test_tick_observation_and_exclusion_must_be_inside_tick_control_window() -> None:
+    packet = _packet()
+    early = packet["tick"].canonical_payload()
+    early["excluded_from"] = (NOW - timedelta(seconds=45)).isoformat()
+    early["observed_at"] = (NOW - timedelta(seconds=40)).isoformat()
+    TickExclusionReceiptV1.model_validate(early)
+
+    result = _live(packet, tick_exclusion_receipt=early)
+
+    assert isinstance(result, Blocked)
+    assert "tick_exclusion_outside_control_window" in _codes(result)
+
+
+def test_restoration_plan_generation_must_be_inside_both_control_windows() -> None:
+    packet = _packet()
+    early = packet["restoration"].canonical_payload()
+    early["generated_at"] = (NOW - timedelta(seconds=45)).isoformat()
+    RestorationPlanV1.model_validate(early)
+
+    result = _live(packet, restoration_plan=early)
+
+    assert isinstance(result, Blocked)
+    assert "restoration_plan_outside_control_window" in _codes(result)
 
 
 def test_write_lease_is_mandatory_trusted_and_signed() -> None:

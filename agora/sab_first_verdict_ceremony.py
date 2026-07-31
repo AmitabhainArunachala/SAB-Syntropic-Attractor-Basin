@@ -571,7 +571,7 @@ class AttendedCeremonyManifestV1(StrictCanonicalModel):
     maintenance_window_start: datetime
     maintenance_window_end: datetime
     operator_presence_required: Literal[True] = True
-    operator_signing_rail_approved: Literal[True] = True
+    operator_signing_rail_state: Literal["approval_required"] = "approval_required"
     operator_signature_state: Literal["not_yet_signed"] = "not_yet_signed"
     live_authority_state: Literal["awaiting_evaluator_capability"] = (
         "awaiting_evaluator_capability"
@@ -894,6 +894,7 @@ class MaintenanceControlAuthorityReceiptV1(_SignedObservationV1):
             self.issued_at <= self.authorized_from < self.authorized_until
             and self.issued_at < self.expires_at
             and self.authorized_until <= self.expires_at
+            and self.expires_at - self.issued_at <= MAINTENANCE_RECEIPT_MAX_AGE
         ):
             raise ValueError("maintenance control authority window is invalid")
         return self
@@ -984,9 +985,9 @@ class StructurallyCompleteAwaitingAuthority(StrictCanonicalModel):
     blockers: tuple[PreflightIssueV1, ...] = Field(default=(), max_length=0)
     live_authority_state: Literal["absent"] = "absent"
     permits_live_effect: Literal[False] = False
-    next_requirement: Literal["fresh_authority_capability_and_operator_signature"] = (
-        "fresh_authority_capability_and_operator_signature"
-    )
+    next_requirement: Literal[
+        "fresh_authority_capability_and_attended_operator_rail_approval"
+    ] = "fresh_authority_capability_and_attended_operator_rail_approval"
     standing_effect: Literal["none"] = "none"
 
     @field_validator("checked_at", "valid_until")
@@ -1956,8 +1957,8 @@ def validate_live_preflight_receipts(
                     control.control_kind == expected_kind,
                     control.target_id == expected_target,
                     control.authority_scope == expected_scope,
-                    control.authorized_from <= parsed_manifest.maintenance_window_start,
-                    control.authorized_until >= parsed_manifest.maintenance_window_end,
+                    control.authorized_from == parsed_manifest.maintenance_window_start,
+                    control.authorized_until == parsed_manifest.maintenance_window_end,
                     control.canonical_sha256() == expected_digest,
                 )
             ):
@@ -1990,6 +1991,67 @@ def validate_live_preflight_receipts(
                     "write_lease_binding_mismatch",
                     "write_lease",
                     "write lease does not bind exact runtime, state, effect, and window",
+                )
+            )
+
+        if (
+            isinstance(parsed_snapshot, ServiceStateSnapshotV1)
+            and isinstance(parsed_service_control, MaintenanceControlAuthorityReceiptV1)
+            and isinstance(parsed_tick_control, MaintenanceControlAuthorityReceiptV1)
+            and not (
+                parsed_service_control.authorized_from
+                <= parsed_snapshot.captured_at
+                < parsed_service_control.authorized_until
+                and parsed_tick_control.authorized_from
+                <= parsed_snapshot.captured_at
+                < parsed_tick_control.authorized_until
+            )
+        ):
+            issues.append(
+                _issue(
+                    "service_snapshot_outside_control_window",
+                    "service_state",
+                    "snapshot was not captured inside both exact control windows",
+                )
+            )
+
+        if (
+            isinstance(parsed_tick, TickExclusionReceiptV1)
+            and isinstance(parsed_tick_control, MaintenanceControlAuthorityReceiptV1)
+            and not (
+                parsed_tick_control.authorized_from
+                <= parsed_tick.excluded_from
+                <= parsed_tick.observed_at
+                <= parsed_tick.excluded_until
+                <= parsed_tick_control.authorized_until
+            )
+        ):
+            issues.append(
+                _issue(
+                    "tick_exclusion_outside_control_window",
+                    "tick_exclusion",
+                    "tick observation or exclusion interval exceeds its control window",
+                )
+            )
+
+        if (
+            isinstance(parsed_restoration, RestorationPlanV1)
+            and isinstance(parsed_service_control, MaintenanceControlAuthorityReceiptV1)
+            and isinstance(parsed_tick_control, MaintenanceControlAuthorityReceiptV1)
+            and not (
+                parsed_service_control.authorized_from
+                <= parsed_restoration.generated_at
+                < parsed_service_control.authorized_until
+                and parsed_tick_control.authorized_from
+                <= parsed_restoration.generated_at
+                < parsed_tick_control.authorized_until
+            )
+        ):
+            issues.append(
+                _issue(
+                    "restoration_plan_outside_control_window",
+                    "restoration_plan",
+                    "restoration plan was not generated inside both control windows",
                 )
             )
 
