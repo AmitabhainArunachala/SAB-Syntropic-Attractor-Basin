@@ -8,8 +8,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+from nacl.encoding import HexEncoder
+from nacl.signing import SigningKey
 from pydantic import ValidationError
 
+import agora.sab_first_verdict_transcript as transcript_module
 from agora.sab_artifact_verdict import (
     ArtifactBallotV1,
     FrozenSeatV1,
@@ -49,7 +52,6 @@ from agora.sab_first_verdict_transcript import (
     verify_commit_reveal,
 )
 
-
 FIXTURES = Path(__file__).parent / "fixtures" / "sab_first_verdict" / "valid"
 CASE_TEMPLATE = json.loads((FIXTURES / "sab.artifact_case.v1.json").read_text())
 BALLOT_TEMPLATE = json.loads((FIXTURES / "sab.artifact_ballot.v1.json").read_text())
@@ -58,6 +60,7 @@ CASE_SHA256 = hashlib.sha256(b"build-b-case").hexdigest()
 AUTHORITY_DIGEST = hashlib.sha256(b"non-authorizing-authority-input").hexdigest()
 RULE_DIGEST = hashlib.sha256(b"frozen-rule-input").hexdigest()
 RECORDED_AT = "2026-08-01T00:00:00Z"
+SIGNING_KEYS = tuple(SigningKey.generate() for _ in range(9))
 
 
 def _digest(label: str) -> str:
@@ -65,9 +68,14 @@ def _digest(label: str) -> str:
 
 
 def _roster() -> tuple[FrozenSeatV1, ...]:
-    return tuple(
-        FrozenSeatV1.model_validate(item) for item in CASE_TEMPLATE["frozen_roster"]
-    )
+    roster: list[FrozenSeatV1] = []
+    for position, source in enumerate(CASE_TEMPLATE["frozen_roster"]):
+        item = deepcopy(source)
+        item["execution_public_key"] = (
+            SIGNING_KEYS[position].verify_key.encode(encoder=HexEncoder).decode()
+        )
+        roster.append(FrozenSeatV1.model_validate(item))
+    return tuple(roster)
 
 
 def _ballot(
@@ -76,6 +84,7 @@ def _ballot(
     seat: FrozenSeatV1,
     *,
     served_route: str | None = None,
+    signature_fault: str | None = None,
 ) -> ArtifactBallotV1:
     payload = deepcopy(BALLOT_TEMPLATE)
     payload.update(
@@ -103,8 +112,37 @@ def _ballot(
                 "content_sha256": _digest(f"transcript:{stage}:{position}"),
                 "proof_class": "offline_fixture",
             },
+            "execution_signature": {
+                "alg": "ed25519",
+                "signer": seat.seat_id,
+                "public_key": seat.execution_public_key,
+                "signature": "0" * 128,
+                "signed_payload_sha256": "0" * 64,
+                "canonicalization": "json-sort-keys-compact-v1",
+            },
         }
     )
+    provisional = ArtifactBallotV1.model_validate(payload)
+    unsigned = provisional.canonical_bytes(exclude={"execution_signature"})
+    signing_key = SIGNING_KEYS[position]
+    claimed_key = seat.execution_public_key
+    signer = seat.seat_id
+    if signature_fault in {"invalid", "key_mismatch"}:
+        signing_key = SIGNING_KEYS[(position + 1) % len(SIGNING_KEYS)]
+    if signature_fault == "key_mismatch":
+        claimed_key = signing_key.verify_key.encode(encoder=HexEncoder).decode()
+    elif signature_fault == "signer_mismatch":
+        signer = f"{seat.seat_id}:substituted"
+    elif signature_fault not in {None, "invalid"}:
+        raise ValueError(f"unknown signature fault: {signature_fault}")
+    payload["execution_signature"] = {
+        "alg": "ed25519",
+        "signer": signer,
+        "public_key": claimed_key,
+        "signature": signing_key.sign(unsigned).signature.hex(),
+        "signed_payload_sha256": hashlib.sha256(unsigned).hexdigest(),
+        "canonicalization": "json-sort-keys-compact-v1",
+    }
     return ArtifactBallotV1.model_validate(payload)
 
 
@@ -115,6 +153,7 @@ def _stage(
     roster: tuple[FrozenSeatV1, ...],
     stage_input_sha256: str | None = None,
     served_route_override: str | None = None,
+    signature_fault: str | None = None,
 ) -> CeremonyStageEnvelopeV1:
     stage_index = CEREMONY_STAGES.index(stage)  # type: ignore[arg-type]
     stage_input = stage_input_sha256 or _digest(f"stage-input:{stage}")
@@ -144,6 +183,7 @@ def _stage(
             position,
             seat,
             served_route=served_route_override if position == 0 else None,
+            signature_fault=signature_fault if position == 0 else None,
         )
         facts = BallotExecutionFactsV1.from_ballot(ballot)
         nonce = f"offline-public-nonce:{stage}:{position:02d}"
@@ -232,6 +272,8 @@ def _ceremony(
     *,
     cross_predecessor: str | None = None,
     stage_input: Callable[[str], str] | None = None,
+    signature_fault_stage: str | None = None,
+    signature_fault: str | None = None,
 ) -> tuple[CeremonyStageEnvelopeV1, ...]:
     roster = _roster()
     first = _stage(
@@ -239,18 +281,25 @@ def _ceremony(
         EMPTY_REVEAL_SET_SHA256,
         roster=roster,
         stage_input_sha256=stage_input("sealed_first_pass") if stage_input else None,
+        signature_fault=(
+            signature_fault if signature_fault_stage == "sealed_first_pass" else None
+        ),
     )
     cross = _stage(
         "cross_examination",
         cross_predecessor or first.reveal_set_sha256,
         roster=roster,
         stage_input_sha256=stage_input("cross_examination") if stage_input else None,
+        signature_fault=(
+            signature_fault if signature_fault_stage == "cross_examination" else None
+        ),
     )
     final = _stage(
         "final",
         cross.reveal_set_sha256,
         roster=roster,
         stage_input_sha256=stage_input("final") if stage_input else None,
+        signature_fault=signature_fault if signature_fault_stage == "final" else None,
     )
     return first, cross, final
 
@@ -291,13 +340,67 @@ def test_verify_commit_reveal_accepts_exact_preimage_but_grants_no_authority(
 ) -> None:
     commitment = ceremony[0].commitments[0]
     reveal = ceremony[0].reveals[0]
-    result = verify_commit_reveal(commitment, reveal)
+    result = verify_commit_reveal(commitment, reveal, frozen_seat=_roster()[0])
     assert result.ok is True
     assert result.readiness == "structurally_ready_awaiting_authority"
     assert result.errors == ()
     assert result.authority_effect == "none"
     assert result.standing_effect == "none"
     assert result.live_eligible is False
+    assert result.frozen_roster_sha256 == commitment.frozen_roster_sha256
+    assert result.rule_digest == RULE_DIGEST
+
+
+def test_verify_commit_reveal_requires_the_trusted_frozen_seat(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+) -> None:
+    result = verify_commit_reveal(
+        ceremony[0].commitments[0],
+        ceremony[0].reveals[0],
+    )
+    assert _codes(result) == {"frozen_seat_required"}
+
+
+def test_full_transcript_cryptographically_checks_all_twenty_seven_ballots(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    original = transcript_module.verify_contract_signature
+
+    def recording_verifier(message: bytes, signature: Any) -> bool:
+        calls.append(signature.signer)
+        return original(message, signature)
+
+    monkeypatch.setattr(
+        transcript_module,
+        "verify_contract_signature",
+        recording_verifier,
+    )
+    result = verify_ceremony_transcript(ceremony, expected_roster=_roster())
+    assert result.ok is True
+    assert len(calls) == 27
+
+
+@pytest.mark.parametrize(
+    ("stage", "fault", "expected_code"),
+    [
+        ("sealed_first_pass", "invalid", "ballot_signature_invalid"),
+        ("cross_examination", "invalid", "ballot_signature_invalid"),
+        ("final", "invalid", "ballot_signature_invalid"),
+        ("final", "key_mismatch", "ballot_signature_key_mismatch"),
+        ("final", "signer_mismatch", "ballot_signature_signer_mismatch"),
+    ],
+)
+def test_ballot_signature_failures_have_stable_typed_errors(
+    stage: str,
+    fault: str,
+    expected_code: str,
+) -> None:
+    ceremony = _ceremony(signature_fault_stage=stage, signature_fault=fault)
+    result = verify_ceremony_transcript(ceremony, expected_roster=_roster())
+    assert result.ok is False
+    assert expected_code in _codes(result)
 
 
 def test_verify_commit_reveal_returns_typed_errors_for_bad_contracts(
@@ -313,8 +416,18 @@ def test_verify_commit_reveal_returns_typed_errors_for_bad_contracts(
     assert result.readiness == "blocked"
     assert _codes(result) == {"invalid_commitment_contract"}
     assert result.transcript_sha256 is None
+    assert result.frozen_roster_sha256 is None
+    assert result.rule_digest is None
     assert result.ordered_final_ballots == ()
     assert "must-not-appear" not in result.errors[0].detail
+    with pytest.raises(ValidationError, match="blocked validation"):
+        type(result).model_validate(
+            {
+                **result.canonical_payload(),
+                "frozen_roster_sha256": "a" * 64,
+                "rule_digest": "b" * 64,
+            }
+        )
 
 
 def test_transcript_verifier_returns_typed_error_for_non_sequence_input() -> None:
@@ -330,7 +443,7 @@ def test_nonce_or_ballot_substitution_cannot_open_commitment(
     reveal = ceremony[0].reveals[0]
     wrong_nonce = reveal.model_copy(update={"nonce": "different-public-nonce-value"})
     assert "commitment_preimage_mismatch" in _codes(
-        verify_commit_reveal(commitment, wrong_nonce)
+        verify_commit_reveal(commitment, wrong_nonce, frozen_seat=_roster()[0])
     )
 
     ballot_payload = reveal.ballot.canonical_payload()
@@ -343,7 +456,11 @@ def test_nonce_or_ballot_substitution_cannot_open_commitment(
             "execution_facts": BallotExecutionFactsV1.from_ballot(substituted_ballot),
         }
     )
-    result = verify_commit_reveal(commitment, substituted)
+    result = verify_commit_reveal(
+        commitment,
+        substituted,
+        frozen_seat=_roster()[0],
+    )
     assert "commit_reveal_binding_mismatch" in _codes(result)
     assert "commitment_preimage_mismatch" in _codes(result)
 
@@ -351,7 +468,11 @@ def test_nonce_or_ballot_substitution_cannot_open_commitment(
 def test_seat_substitution_and_commitment_reference_mismatch_are_blocked(
     ceremony: tuple[CeremonyStageEnvelopeV1, ...],
 ) -> None:
-    result = verify_commit_reveal(ceremony[0].commitments[0], ceremony[0].reveals[1])
+    result = verify_commit_reveal(
+        ceremony[0].commitments[0],
+        ceremony[0].reveals[1],
+        frozen_seat=_roster()[0],
+    )
     assert {
         "commitment_reference_mismatch",
         "commitment_digest_mismatch",
@@ -378,6 +499,8 @@ def test_full_transcript_is_exactly_ordered_and_exposes_final_ballots_only(
     assert result.transcript_sha256 == canonical_sha256(
         [envelope.canonical_payload() for envelope in ceremony]
     )
+    assert result.frozen_roster_sha256 == ceremony[0].frozen_roster_sha256
+    assert result.rule_digest == RULE_DIGEST
     assert result.authority_effect == "none"
 
 
@@ -668,7 +791,11 @@ def test_commit_before_reveal_and_final_after_cross_are_enforced(
     with pytest.raises(
         TranscriptImmutableConflict, match="all nine ordered commitments"
     ):
-        store_ballot_reveal(conn, ceremony[0].reveals[0])
+        store_ballot_reveal(
+            conn,
+            ceremony[0].reveals[0],
+            frozen_seat=ceremony[0].frozen_roster[0],
+        )
     with pytest.raises(TranscriptImmutableConflict, match="predecessor"):
         store_ballot_commitment(conn, ceremony[2].commitments[0])
     assert conn.execute("SELECT COUNT(*) FROM sab_ballot_reveals_v1").fetchone()[0] == 0
@@ -682,8 +809,8 @@ def test_direct_stage_storage_rejects_cross_stage_binding_substitution(
     init_transcript_storage(conn)
     for commitment in ceremony[0].commitments:
         store_ballot_commitment(conn, commitment)
-    for reveal in ceremony[0].reveals:
-        store_ballot_reveal(conn, reveal)
+    for seat, reveal in zip(ceremony[0].frozen_roster, ceremony[0].reveals):
+        store_ballot_reveal(conn, reveal, frozen_seat=seat)
     store_stage_envelope(conn, ceremony[0])
 
     substituted = (

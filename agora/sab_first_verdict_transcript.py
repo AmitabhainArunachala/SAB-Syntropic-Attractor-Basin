@@ -30,15 +30,15 @@ from pydantic import (
 )
 
 from .sab_artifact_verdict import (
+    SHA256_PATTERN,
     ArtifactBallotV1,
     EvidenceRefV1,
     FrozenSeatV1,
-    SHA256_PATTERN,
     StrictCanonicalModel,
     canonical_sha256,
+    verify_contract_signature,
 )
 from .sab_first_verdict_storage import require_copy_or_fixture_connection
-
 
 CeremonyStage = Literal["sealed_first_pass", "cross_examination", "final"]
 CEREMONY_STAGES: tuple[CeremonyStage, ...] = (
@@ -416,6 +416,8 @@ class TranscriptValidationResultV1(TranscriptCanonicalModel):
     validated_stages: tuple[CeremonyStage, ...]
     ordered_final_ballots: tuple[ArtifactBallotV1, ...]
     transcript_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    frozen_roster_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    rule_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
     authority_effect: Literal["none"] = "none"
     standing_effect: Literal["none"] = "none"
     live_eligible: Literal[False] = False
@@ -427,9 +429,18 @@ class TranscriptValidationResultV1(TranscriptCanonicalModel):
         expected = "structurally_ready_awaiting_authority" if self.ok else "blocked"
         if self.readiness != expected:
             raise ValueError("readiness does not match validation errors")
-        if not self.ok and (self.ordered_final_ballots or self.transcript_sha256):
+        if not self.ok and (
+            self.ordered_final_ballots
+            or self.transcript_sha256
+            or self.frozen_roster_sha256
+            or self.rule_digest
+        ):
             raise ValueError(
-                "blocked validation cannot expose final ballots or a transcript digest"
+                "blocked validation cannot expose ballots or trusted transcript digests"
+            )
+        if self.ok and (self.frozen_roster_sha256 is None or self.rule_digest is None):
+            raise ValueError(
+                "successful validation must expose frozen-roster and rule digests"
             )
         return self
 
@@ -467,6 +478,8 @@ def _result(
     validated_stages: Sequence[CeremonyStage] = (),
     final_ballots: Sequence[ArtifactBallotV1] = (),
     transcript_sha256: str | None = None,
+    frozen_roster_sha256: str | None = None,
+    rule_digest: str | None = None,
 ) -> TranscriptValidationResultV1:
     unique: list[TranscriptValidationErrorV1] = []
     seen: set[tuple[str, str, str]] = set()
@@ -484,6 +497,8 @@ def _result(
         validated_stages=tuple(validated_stages),
         ordered_final_ballots=tuple(final_ballots) if ok else (),
         transcript_sha256=transcript_sha256 if ok else None,
+        frozen_roster_sha256=frozen_roster_sha256 if ok else None,
+        rule_digest=rule_digest if ok else None,
     )
 
 
@@ -556,8 +571,10 @@ def _verify_commit_reveal_models(
 def verify_commit_reveal(
     commitment: BallotCommitmentV1 | Mapping[str, Any],
     reveal: BallotRevealV1 | Mapping[str, Any],
+    *,
+    frozen_seat: FrozenSeatV1 | Mapping[str, Any] | None = None,
 ) -> TranscriptValidationResultV1:
-    """Verify one pair without throwing and without producing authority."""
+    """Verify one pair and its frozen-seat signature without producing authority."""
 
     try:
         parsed_commitment = BallotCommitmentV1.model_validate(
@@ -590,11 +607,64 @@ def verify_commit_reveal(
             ]
         )
     errors = _verify_commit_reveal_models(parsed_commitment, parsed_reveal, path="pair")
+    if frozen_seat is None:
+        errors.append(
+            _error(
+                "frozen_seat_required",
+                "frozen_seat",
+                "signature verification requires the trusted frozen seat",
+            )
+        )
+    else:
+        try:
+            parsed_seat = (
+                FrozenSeatV1.model_validate(frozen_seat.canonical_payload())
+                if isinstance(frozen_seat, FrozenSeatV1)
+                else FrozenSeatV1.model_validate(frozen_seat)
+            )
+        except Exception as exc:
+            errors.append(
+                _error(
+                    "frozen_seat_invalid",
+                    "frozen_seat",
+                    _safe_validation_detail(exc),
+                )
+            )
+        else:
+            if (
+                parsed_commitment.seat_id != parsed_seat.seat_id
+                or parsed_reveal.seat_id != parsed_seat.seat_id
+                or parsed_commitment.frozen_seat_sha256
+                != parsed_seat.canonical_sha256()
+                or parsed_reveal.frozen_seat_sha256 != parsed_seat.canonical_sha256()
+                or not _facts_match_frozen_seat(
+                    parsed_commitment.execution_facts, parsed_seat
+                )
+                or not _facts_match_frozen_seat(
+                    parsed_reveal.execution_facts, parsed_seat
+                )
+            ):
+                errors.append(
+                    _error(
+                        "frozen_seat_mismatch",
+                        "frozen_seat",
+                        "commitment or reveal differs from the trusted frozen seat",
+                    )
+                )
+            errors.extend(
+                _verify_ballot_authenticity(
+                    parsed_reveal.ballot,
+                    parsed_seat,
+                    path="pair.ballot.execution_signature",
+                )
+            )
     return _result(
         errors,
         expected_seat_ids=(parsed_commitment.seat_id,),
         validated_stages=(parsed_commitment.stage,),
         final_ballots=(parsed_reveal.ballot,) if parsed_reveal.stage == "final" else (),
+        frozen_roster_sha256=parsed_commitment.frozen_roster_sha256,
+        rule_digest=parsed_commitment.rule_digest,
     )
 
 
@@ -611,6 +681,46 @@ def _facts_match_frozen_seat(facts: BallotExecutionFactsV1, seat: FrozenSeatV1) 
         and facts.transport_correlation_refs == seat.transport_correlation_refs
         and facts.correlation_smeared == seat.correlation_smeared
     )
+
+
+def _verify_ballot_authenticity(
+    ballot: ArtifactBallotV1,
+    seat: FrozenSeatV1,
+    *,
+    path: str,
+) -> list[TranscriptValidationErrorV1]:
+    """Bind an execution signature to the exact frozen seat before verifying it."""
+
+    errors: list[TranscriptValidationErrorV1] = []
+    signature = ballot.execution_signature
+    if signature.signer != seat.seat_id:
+        errors.append(
+            _error(
+                "ballot_signature_signer_mismatch",
+                f"{path}.signer",
+                "ballot signature signer differs from the frozen seat identity",
+            )
+        )
+    if signature.public_key != seat.execution_public_key:
+        errors.append(
+            _error(
+                "ballot_signature_key_mismatch",
+                f"{path}.public_key",
+                "ballot signature key differs from the frozen seat key",
+            )
+        )
+    if not errors and not verify_contract_signature(
+        ballot.canonical_bytes(exclude={"execution_signature"}), signature
+    ):
+        errors.append(
+            _error(
+                "ballot_signature_invalid",
+                path,
+                "ballot execution signature does not verify over canonical "
+                "unsigned bytes",
+            )
+        )
+    return errors
 
 
 class CeremonyStageEnvelopeV1(TranscriptCanonicalModel):
@@ -1024,6 +1134,19 @@ def verify_ceremony_transcript(
                     "stage index differs from transcript position",
                 )
             )
+        for position, (seat, reveal) in enumerate(
+            zip(envelope.frozen_roster, envelope.reveals)
+        ):
+            errors.extend(
+                _verify_ballot_authenticity(
+                    reveal.ballot,
+                    seat,
+                    path=(
+                        f"envelopes[{index}].reveals[{position}]"
+                        ".ballot.execution_signature"
+                    ),
+                )
+            )
 
     if len({envelope.envelope_id for envelope in parsed}) != len(parsed):
         errors.append(
@@ -1104,6 +1227,8 @@ def verify_ceremony_transcript(
         validated_stages=observed_stages if not errors else (),
         final_ballots=tuple(reveal.ballot for reveal in final_ballots),
         transcript_sha256=transcript_digest,
+        frozen_roster_sha256=first.frozen_roster_sha256,
+        rule_digest=first.rule_digest,
     )
 
 
@@ -1682,6 +1807,7 @@ def store_ballot_reveal(
     conn: sqlite3.Connection,
     reveal: BallotRevealV1 | Mapping[str, Any],
     *,
+    frozen_seat: FrozenSeatV1 | Mapping[str, Any],
     recorded_at: str | None = None,
 ) -> tuple[BallotRevealV1, str, bool]:
     require_copy_or_fixture_connection(conn)
@@ -1711,7 +1837,11 @@ def store_ballot_reveal(
     )
     if commitment is None:
         raise TranscriptImmutableConflict("reveal references an unknown commitment")
-    pair_result = verify_commit_reveal(commitment, model)
+    pair_result = verify_commit_reveal(
+        commitment,
+        model,
+        frozen_seat=frozen_seat,
+    )
     if not pair_result.ok:
         raise TranscriptValidationFailure(pair_result)
     digest = model.canonical_sha256()
@@ -1931,9 +2061,12 @@ def store_ceremony_transcript(
                     failure_hook(
                         f"commitment:{envelope.stage}:{commitment.seat_position}"
                     )
-            for reveal in envelope.reveals:
+            for seat, reveal in zip(envelope.frozen_roster, envelope.reveals):
                 _, _, replay = store_ballot_reveal(
-                    conn, reveal, recorded_at=recorded_at
+                    conn,
+                    reveal,
+                    frozen_seat=seat,
+                    recorded_at=recorded_at,
                 )
                 replays.append(replay)
                 if failure_hook is not None:

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from agora.sab_artifact_verdict import (
     ArtifactBallotV1,
+    FrozenSeatV1,
     SignedDispositionPolicyV1,
     TrustedPolicyIssuerV1,
     canonical_json_bytes,
@@ -30,13 +31,13 @@ from agora.sab_first_verdict_compiler import (
     verify_compiled_outcome,
 )
 
-
 NOW = datetime(2026, 7, 31, 12, 0, tzinfo=timezone.utc)
 CASE_ID = "sab_case_build_b_synthetic"
 CASE_SHA256 = "a" * 64
 STATE_SHA256 = "b" * 64
 EFFECTS = ("challenge:resolve", "seed:supersede")
 SEATS = tuple(f"seat-{index}" for index in range(9))
+BALLOT_KEYS = tuple(SigningKey.generate() for _ in range(9))
 
 
 def _digest(label: str) -> str:
@@ -170,59 +171,111 @@ def _ballot(
     stage: str = "final",
     seat_id: str | None = None,
     ballot_id: str | None = None,
+    signature_fault: str | None = None,
 ) -> ArtifactBallotV1:
-    return ArtifactBallotV1.model_validate(
-        {
-            "schema": "sab.artifact_ballot.v1",
-            "ballot_id": ballot_id or f"sab_ballot_build_b_{index}",
-            "case_id": CASE_ID,
-            "case_sha256": CASE_SHA256,
-            "seat_id": seat_id or f"seat-{index}",
-            "round_no": 1,
-            "stage": stage,
-            "decision": decision,
-            "ballot_source": "fixture_model",
-            "claim_findings": [
-                {
-                    "claim_ref": "fixture:claim:build-b",
-                    "finding": "supported",
-                    "rationale": "Synthetic evidence supports this fixture finding.",
-                    "evidence_refs": [_evidence(index)],
-                }
-            ],
-            "self_binding_weakening_finding": {
-                "weakens_self_binding_constraint": False,
-                "affected_constraints": [],
-                "evidence_refs": [_evidence(index + 20)],
-                "explanation": "The synthetic decision preserves self-binding.",
-            },
-            "strongest_case_against_decision": "The fixture may be incomplete.",
-            "unresolved_objections": [],
-            "raw_model_output_sha256": _digest(f"raw:{index}"),
-            "transcript_ref": _evidence(index + 40),
-            "requested_model": f"fixture-model-{index}",
-            "requested_route": f"fixture/requested/{index}",
-            "served_provider": "fixture-provider",
-            "served_model": f"fixture-model-{index}",
-            "served_route": f"fixture/served/{index}",
-            "credited_cluster": cluster or f"cluster-{index}",
-            "cluster_basis": "evidenced_base_model_or_training_lineage",
-            "model_lineage_evidence_refs": [_evidence(index + 60)],
-            "transport_correlation_refs": (
-                ["fixture:shared-transport"] if smeared else []
+    actual_seat_id = seat_id or f"seat-{index}"
+    payload: dict[str, Any] = {
+        "schema": "sab.artifact_ballot.v1",
+        "ballot_id": ballot_id or f"sab_ballot_build_b_{index}",
+        "case_id": CASE_ID,
+        "case_sha256": CASE_SHA256,
+        "seat_id": actual_seat_id,
+        "round_no": 1,
+        "stage": stage,
+        "decision": decision,
+        "ballot_source": "fixture_model",
+        "claim_findings": [
+            {
+                "claim_ref": "fixture:claim:build-b",
+                "finding": "supported",
+                "rationale": "Synthetic evidence supports this fixture finding.",
+                "evidence_refs": [_evidence(index)],
+            }
+        ],
+        "self_binding_weakening_finding": {
+            "weakens_self_binding_constraint": False,
+            "affected_constraints": [],
+            "evidence_refs": [_evidence(index + 20)],
+            "explanation": "The synthetic decision preserves self-binding.",
+        },
+        "strongest_case_against_decision": "The fixture may be incomplete.",
+        "unresolved_objections": [],
+        "raw_model_output_sha256": _digest(f"raw:{index}"),
+        "transcript_ref": _evidence(index + 40),
+        "requested_model": f"fixture-model-{index}",
+        "requested_route": f"fixture/requested/{index}",
+        "served_provider": "fixture-provider",
+        "served_model": f"fixture-model-{index}",
+        "served_route": f"fixture/served/{index}",
+        "credited_cluster": cluster or f"cluster-{index}",
+        "cluster_basis": "evidenced_base_model_or_training_lineage",
+        "model_lineage_evidence_refs": [_evidence(index + 60)],
+        "transport_correlation_refs": (["fixture:shared-transport"] if smeared else []),
+        "correlation_smeared": smeared,
+        "signature_role": "operator_controlled_execution_attestation",
+        "vendor_signature_claimed": False,
+        "execution_signature": {
+            "alg": "ed25519",
+            "signer": actual_seat_id,
+            "public_key": BALLOT_KEYS[index]
+            .verify_key.encode(encoder=HexEncoder)
+            .decode(),
+            "signature": "0" * 128,
+            "signed_payload_sha256": "0" * 64,
+            "canonicalization": "json-sort-keys-compact-v1",
+        },
+    }
+    provisional = ArtifactBallotV1.model_validate(payload)
+    unsigned = provisional.canonical_bytes(exclude={"execution_signature"})
+    signing_key = BALLOT_KEYS[index]
+    claimed_key = signing_key.verify_key.encode(encoder=HexEncoder).decode()
+    signer = actual_seat_id
+    if signature_fault in {"invalid", "key_mismatch"}:
+        signing_key = BALLOT_KEYS[(index + 1) % len(BALLOT_KEYS)]
+    if signature_fault == "key_mismatch":
+        claimed_key = signing_key.verify_key.encode(encoder=HexEncoder).decode()
+    elif signature_fault == "signer_mismatch":
+        signer = f"{actual_seat_id}:substituted"
+    elif signature_fault not in {None, "invalid"}:
+        raise ValueError(f"unknown signature fault: {signature_fault}")
+    payload["execution_signature"] = _contract_signature(
+        signing_key,
+        unsigned,
+        signer=signer,
+    )
+    payload["execution_signature"]["public_key"] = claimed_key
+    return ArtifactBallotV1.model_validate(payload)
+
+
+def _frozen_roster(
+    *,
+    smeared_index: int | None = None,
+) -> tuple[FrozenSeatV1, ...]:
+    return tuple(
+        FrozenSeatV1(
+            seat_id=f"seat-{index}",
+            requested_lab=f"fixture-lab-{index}",
+            requested_model=f"fixture-model-{index}",
+            adapter="fixture-adapter",
+            transport="fixture-transport",
+            requested_route=f"fixture/requested/{index}",
+            served_provider="fixture-provider",
+            served_model=f"fixture-model-{index}",
+            model_family=f"fixture-family-{index}",
+            credited_cluster=f"cluster-{index}",
+            model_lineage_evidence_refs=(_evidence(index + 60),),
+            possible_underlying_routes=(f"fixture/served/{index}",),
+            transport_correlation_refs=(
+                ("fixture:shared-transport",) if index == smeared_index else ()
             ),
-            "correlation_smeared": smeared,
-            "signature_role": "operator_controlled_execution_attestation",
-            "vendor_signature_claimed": False,
-            "execution_signature": {
-                "alg": "ed25519",
-                "signer": f"fixture:seat:{index}",
-                "public_key": "1" * 64,
-                "signature": "2" * 128,
-                "signed_payload_sha256": _digest(f"ballot-message:{index}"),
-                "canonicalization": "json-sort-keys-compact-v1",
-            },
-        }
+            correlation_smeared=index == smeared_index,
+            execution_public_key=BALLOT_KEYS[index]
+            .verify_key.encode(encoder=HexEncoder)
+            .decode(),
+            common_operator_backing="single disclosed fixture operator",
+            liveness_receipt_sha256=_digest(f"liveness:{index}"),
+        )
+        for index in range(9)
     )
 
 
@@ -242,6 +295,7 @@ def _compile_kwargs(
     ballots: Any,
     *,
     rule: Any | None = None,
+    frozen_roster: Any | None = None,
 ) -> dict[str, Any]:
     return {
         "authority": authority,
@@ -249,7 +303,7 @@ def _compile_kwargs(
         "case_sha256": CASE_SHA256,
         "ballots": ballots,
         "rule": rule or _rule(),
-        "expected_seat_ids": SEATS,
+        "frozen_roster": (_frozen_roster() if frozen_roster is None else frozen_roster),
         "requested_scope": "Copy",
         "requested_effects": EFFECTS,
         "compiled_at": NOW,
@@ -281,6 +335,16 @@ def test_rule_is_explicit_self_hashed_and_has_no_implicit_default() -> None:
         )
     assert bypass_error.value.code == "terminality_rule_invalid"
 
+    wrong_size = rule.canonical_payload(exclude={"rule_sha256"})
+    wrong_size["council_size"] = 8
+    with pytest.raises(ValidationError, match="council_size"):
+        CouncilTerminalityRuleV1.model_validate(
+            {
+                **wrong_size,
+                "rule_sha256": compute_council_terminality_rule_sha256(wrong_size),
+            }
+        )
+
 
 def test_five_of_nine_and_five_clean_clusters_compile_terminal_verdict() -> None:
     authority = _evaluated_authority()
@@ -297,24 +361,100 @@ def test_five_of_nine_and_five_clean_clusters_compile_terminal_verdict() -> None
     assert outcome.requested_effects == EFFECTS
     assert outcome.correlation_smear_removals == ()
     assert outcome.pre_unseal_feasibility.result == "feasible"
-
-
-def test_ballot_order_does_not_change_hash_tallies_or_outcome() -> None:
-    authority = _evaluated_authority()
-    ballots = _terminal_ballots()
-    forward = compile_council_outcome(**_compile_kwargs(authority, ballots))
-    reverse = compile_council_outcome(
-        **_compile_kwargs(authority, list(reversed(ballots)))
+    assert outcome.frozen_roster_sha256 == canonical_sha256(
+        [seat.canonical_payload() for seat in _frozen_roster()]
     )
 
-    assert forward.canonical_bytes() == reverse.canonical_bytes()
-    assert forward.ballot_set_sha256 == reverse.ballot_set_sha256
+
+def test_ballots_must_follow_exact_frozen_roster_order() -> None:
+    authority = _evaluated_authority()
+    ballots = _terminal_ballots()
+    with pytest.raises(CouncilCompilationError) as error:
+        compile_council_outcome(**_compile_kwargs(authority, list(reversed(ballots))))
+    assert error.value.code == "ballot_roster_order_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("fault", "expected_code"),
+    [
+        ("invalid", "ballot_signature_invalid"),
+        ("key_mismatch", "ballot_signature_key_mismatch"),
+        ("signer_mismatch", "ballot_signature_signer_mismatch"),
+    ],
+)
+def test_compiler_independently_rejects_ballot_signature_failures(
+    fault: str,
+    expected_code: str,
+) -> None:
+    ballots = _terminal_ballots()
+    ballots[0] = _ballot(
+        0,
+        "correct_and_supersede",
+        signature_fault=fault,
+    )
+    with pytest.raises(CouncilCompilationError) as error:
+        compile_council_outcome(**_compile_kwargs(_evaluated_authority(), ballots))
+    assert error.value.code == expected_code
+
+
+def test_trusted_roster_key_and_order_cannot_be_substituted() -> None:
+    authority = _evaluated_authority()
+    ballots = _terminal_ballots()
+    roster = list(_frozen_roster())
+    roster[0] = roster[0].model_copy(
+        update={
+            "execution_public_key": BALLOT_KEYS[1]
+            .verify_key.encode(encoder=HexEncoder)
+            .decode()
+        }
+    )
+    with pytest.raises(CouncilCompilationError) as key_error:
+        compile_council_outcome(
+            **_compile_kwargs(authority, ballots, frozen_roster=roster)
+        )
+    assert key_error.value.code == "ballot_signature_key_mismatch"
+
+    with pytest.raises(CouncilCompilationError) as order_error:
+        compile_council_outcome(
+            **_compile_kwargs(
+                authority,
+                ballots,
+                frozen_roster=tuple(reversed(_frozen_roster())),
+            )
+        )
+    assert order_error.value.code == "ballot_roster_order_mismatch"
+
+
+def test_compiler_requires_exactly_nine_frozen_seats_and_matching_facts() -> None:
+    authority = _evaluated_authority()
+    ballots = _terminal_ballots()
+    with pytest.raises(CouncilCompilationError) as size_error:
+        compile_council_outcome(
+            **_compile_kwargs(
+                authority,
+                ballots,
+                frozen_roster=_frozen_roster()[:-1],
+            )
+        )
+    assert size_error.value.code == "frozen_roster_size_mismatch"
+
+    roster = list(_frozen_roster())
+    roster[0] = roster[0].model_copy(update={"credited_cluster": "substituted"})
+    with pytest.raises(CouncilCompilationError) as facts_error:
+        compile_council_outcome(
+            **_compile_kwargs(authority, ballots, frozen_roster=roster)
+        )
+    assert facts_error.value.code == "ballot_frozen_seat_mismatch"
 
 
 def test_smear_that_destroys_five_cluster_terminality_forces_appeal() -> None:
     authority = _evaluated_authority()
     outcome = compile_council_outcome(
-        **_compile_kwargs(authority, _terminal_ballots(smeared_index=0))
+        **_compile_kwargs(
+            authority,
+            _terminal_ballots(smeared_index=0),
+            frozen_roster=_frozen_roster(smeared_index=0),
+        )
     )
 
     assert isinstance(outcome, AppealReceiptV1)
@@ -465,7 +605,7 @@ def test_every_authority_denial_short_circuits_deliberately_malformed_merits() -
             case_sha256=_MeritsBomb(),
             ballots=_MeritsBomb(),
             rule=_MeritsBomb(),
-            expected_seat_ids=_MeritsBomb(),
+            frozen_roster=_MeritsBomb(),
             requested_scope=scope,
             requested_effects=effects,
             compiled_at=_MeritsBomb(),
@@ -488,7 +628,7 @@ def test_rule_effect_mismatch_refuses_before_ballot_parsing() -> None:
         case_sha256=_MeritsBomb(),
         ballots=_MeritsBomb(),
         rule=_rule(),
-        expected_seat_ids=_MeritsBomb(),
+        frozen_roster=_MeritsBomb(),
         requested_scope="Copy",
         requested_effects=EFFECTS + ("seed:canon",),
         compiled_at=_MeritsBomb(),

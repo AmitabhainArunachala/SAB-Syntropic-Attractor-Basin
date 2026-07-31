@@ -22,6 +22,7 @@ from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from agora.sab_artifact_verdict import (
     DISPOSITION_AUTHORITY_ADAPTER,
+    SHA256_PATTERN,
     AdvisoryOnlyDispositionAuthorityV1,
     ArtifactBallotV1,
     AuthorityDenied,
@@ -30,13 +31,13 @@ from agora.sab_artifact_verdict import (
     CouncilVerdictV1,
     DispositionScope,
     EvidenceProvenance,
+    FrozenSeatV1,
     NoJurisdictionDispositionAuthorityV1,
-    SHA256_PATTERN,
     StrictCanonicalModel,
     canonical_sha256,
     require_rehearsal_authority,
+    verify_contract_signature,
 )
-
 
 TerminalDecision = Literal["canon", "compost", "correct_and_supersede"]
 BallotDecision = Literal[
@@ -101,9 +102,9 @@ class CouncilTerminalityRuleV1(StrictCanonicalModel):
         "sab.council_terminality_rule.v1", alias="schema"
     )
     rule_id: str = Field(min_length=1, max_length=200)
-    council_size: int = Field(ge=1, le=1000)
-    minimum_raw_votes: int = Field(ge=1)
-    minimum_clean_clusters: int = Field(ge=1)
+    council_size: Literal[9] = 9
+    minimum_raw_votes: int = Field(ge=1, le=9)
+    minimum_clean_clusters: int = Field(ge=1, le=9)
     terminal_decisions: tuple[TerminalDecision, ...] = Field(min_length=1)
     effects_by_decision: dict[TerminalDecision, tuple[str, ...]]
     correlation_policy: Literal["remove_smeared_and_appeal_on_change"]
@@ -291,6 +292,7 @@ class CompiledVerdictV1(CouncilVerdictV1):
         EvidenceProvenance.FIXTURE_MODELS
     )
     ballot_set_sha256: str = Field(pattern=SHA256_PATTERN)
+    frozen_roster_sha256: str = Field(pattern=SHA256_PATTERN)
     terminality_rule_sha256: str = Field(pattern=SHA256_PATTERN)
     winner: BallotDecision | None
     clean_cluster_winner: BallotDecision | None
@@ -326,6 +328,7 @@ class AppealReceiptV1(CouncilVerdictV1):
         EvidenceProvenance.FIXTURE_MODELS
     )
     ballot_set_sha256: str = Field(pattern=SHA256_PATTERN)
+    frozen_roster_sha256: str = Field(pattern=SHA256_PATTERN)
     terminality_rule_sha256: str = Field(pattern=SHA256_PATTERN)
     winner: BallotDecision | None
     clean_cluster_winner: BallotDecision | None
@@ -655,13 +658,86 @@ def _authority_first(
     return parsed, effects
 
 
+def _parse_frozen_roster(value: Any) -> tuple[FrozenSeatV1, ...]:
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
+        raise CouncilCompilationError(
+            "frozen_roster_invalid", "frozen_roster must be an ordered sequence"
+        )
+    if len(value) != 9:
+        raise CouncilCompilationError(
+            "frozen_roster_size_mismatch",
+            "the trusted frozen roster must contain exactly nine seats",
+        )
+    seats: list[FrozenSeatV1] = []
+    for item in value:
+        try:
+            payload = (
+                item.canonical_payload() if isinstance(item, FrozenSeatV1) else item
+            )
+            seats.append(FrozenSeatV1.model_validate(payload))
+        except Exception as exc:
+            raise CouncilCompilationError(
+                "frozen_roster_invalid", "a trusted frozen seat is malformed"
+            ) from exc
+    seat_ids = [seat.seat_id for seat in seats]
+    if len(set(seat_ids)) != 9:
+        raise CouncilCompilationError(
+            "duplicate_frozen_seat",
+            "the trusted frozen roster must contain nine unique seat identities",
+        )
+    return tuple(seats)
+
+
+def _ballot_matches_frozen_seat(
+    ballot: ArtifactBallotV1,
+    seat: FrozenSeatV1,
+) -> bool:
+    return (
+        ballot.seat_id == seat.seat_id
+        and ballot.requested_model == seat.requested_model
+        and ballot.requested_route == seat.requested_route
+        and ballot.served_provider == seat.served_provider
+        and ballot.served_model == seat.served_model
+        and ballot.served_route in seat.possible_underlying_routes
+        and ballot.credited_cluster == seat.credited_cluster
+        and ballot.cluster_basis == seat.cluster_basis
+        and ballot.model_lineage_evidence_refs == seat.model_lineage_evidence_refs
+        and ballot.transport_correlation_refs == seat.transport_correlation_refs
+        and ballot.correlation_smeared == seat.correlation_smeared
+        and ballot.signature_role == seat.key_role
+    )
+
+
+def _require_ballot_authenticity(
+    ballot: ArtifactBallotV1,
+    seat: FrozenSeatV1,
+) -> None:
+    signature = ballot.execution_signature
+    if signature.signer != seat.seat_id:
+        raise CouncilCompilationError(
+            "ballot_signature_signer_mismatch",
+            "ballot signature signer differs from the trusted frozen seat",
+        )
+    if signature.public_key != seat.execution_public_key:
+        raise CouncilCompilationError(
+            "ballot_signature_key_mismatch",
+            "ballot signature key differs from the trusted frozen seat",
+        )
+    if not verify_contract_signature(
+        ballot.canonical_bytes(exclude={"execution_signature"}), signature
+    ):
+        raise CouncilCompilationError(
+            "ballot_signature_invalid",
+            "ballot execution signature does not verify over canonical unsigned bytes",
+        )
+
+
 def _parse_final_ballots(
     value: Any,
     *,
     case_id: str,
     case_sha256: str,
-    expected_seat_ids: tuple[str, ...],
-    council_size: int,
+    frozen_roster: tuple[FrozenSeatV1, ...],
 ) -> tuple[ArtifactBallotV1, ...]:
     if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
         raise CouncilCompilationError(
@@ -708,6 +784,7 @@ def _parse_final_ballots(
         raise CouncilCompilationError(
             "duplicate_seat", "each expected seat must contribute exactly one ballot"
         )
+    expected_seat_ids = tuple(seat.seat_id for seat in frozen_roster)
     expected = set(expected_seat_ids)
     actual = set(seat_ids)
     if actual - expected:
@@ -718,23 +795,37 @@ def _parse_final_ballots(
         raise CouncilCompilationError(
             "missing_seat", "the final ballot set does not cover the expected roster"
         )
-    if len(ballots) != council_size:
+    if len(ballots) != len(frozen_roster):
         raise CouncilCompilationError(
             "ballot_count_mismatch",
             "the final ballot count differs from the explicit council rule",
         )
-    return tuple(sorted(ballots, key=lambda ballot: ballot.ballot_id))
+    if tuple(seat_ids) != expected_seat_ids:
+        raise CouncilCompilationError(
+            "ballot_roster_order_mismatch",
+            "final ballots must appear in the exact trusted frozen-roster order",
+        )
+    for ballot, seat in zip(ballots, frozen_roster):
+        if not _ballot_matches_frozen_seat(ballot, seat):
+            raise CouncilCompilationError(
+                "ballot_frozen_seat_mismatch",
+                "ballot execution facts differ from the trusted frozen seat",
+            )
+        _require_ballot_authenticity(ballot, seat)
+    return tuple(ballots)
 
 
 def _ballot_set_sha256(ballots: Sequence[ArtifactBallotV1]) -> str:
     members = [
         {
+            "seat_position": position,
+            "seat_id": ballot.seat_id,
             "ballot_id": ballot.ballot_id,
             "ballot_sha256": ballot.canonical_sha256(),
         }
-        for ballot in ballots
+        for position, ballot in enumerate(ballots)
     ]
-    return canonical_sha256(sorted(members, key=lambda member: member["ballot_id"]))
+    return canonical_sha256(members)
 
 
 def _unique_winner(tally: Mapping[str, int]) -> BallotDecision | None:
@@ -764,6 +855,7 @@ def _derived_verdict_id(
     case_id: str,
     case_sha256: str,
     ballot_set_sha256: str,
+    frozen_roster_sha256: str,
     authority_digest: str,
     rule_sha256: str,
     compiled_at: datetime,
@@ -773,6 +865,7 @@ def _derived_verdict_id(
             "case_id": case_id,
             "case_sha256": case_sha256,
             "ballot_set_sha256": ballot_set_sha256,
+            "frozen_roster_sha256": frozen_roster_sha256,
             "authority_digest": authority_digest,
             "terminality_rule_sha256": rule_sha256,
             "compiled_at": compiled_at.isoformat().replace("+00:00", "Z"),
@@ -788,7 +881,7 @@ def compile_council_outcome(
     case_sha256: Any,
     ballots: Any,
     rule: Any,
-    expected_seat_ids: Any,
+    frozen_roster: Any,
     requested_scope: Any,
     requested_effects: Any,
     compiled_at: Any,
@@ -822,23 +915,26 @@ def compile_council_outcome(
             char not in "0123456789abcdef" for char in normalized_case_sha256
         ):
             raise ValueError("case_sha256 must be lowercase SHA-256")
-        expected = _exact_strings(expected_seat_ids, field="expected_seat_ids")
     except ValueError as exc:
         raise CouncilCompilationError(
-            "ceremony_binding_invalid", "case or expected-roster binding is malformed"
+            "ceremony_binding_invalid", "case binding is malformed"
         ) from exc
-    if len(expected) != parsed_rule.council_size:
+    parsed_roster = _parse_frozen_roster(frozen_roster)
+    expected = tuple(seat.seat_id for seat in parsed_roster)
+    if len(parsed_roster) != parsed_rule.council_size:
         raise CouncilCompilationError(
             "expected_roster_size_mismatch",
             "expected roster size differs from the explicit council rule",
         )
+    frozen_roster_sha256 = canonical_sha256(
+        [seat.canonical_payload() for seat in parsed_roster]
+    )
 
     parsed_ballots = _parse_final_ballots(
         ballots,
         case_id=normalized_case_id,
         case_sha256=normalized_case_sha256,
-        expected_seat_ids=expected,
-        council_size=parsed_rule.council_size,
+        frozen_roster=parsed_roster,
     )
     ballot_set_sha256 = _ballot_set_sha256(parsed_ballots)
     pre_unseal = _assess_pre_unseal(
@@ -916,6 +1012,7 @@ def compile_council_outcome(
             case_id=normalized_case_id,
             case_sha256=normalized_case_sha256,
             ballot_set_sha256=ballot_set_sha256,
+            frozen_roster_sha256=frozen_roster_sha256,
             authority_digest=authorized.authority_digest,
             rule_sha256=parsed_rule.rule_sha256,
             compiled_at=compiled_time,
@@ -940,6 +1037,7 @@ def compile_council_outcome(
         "standing_effect": "none",
         "compiled_at": compiled_time,
         "ballot_set_sha256": ballot_set_sha256,
+        "frozen_roster_sha256": frozen_roster_sha256,
         "terminality_rule_sha256": parsed_rule.rule_sha256,
         "winner": raw_winner,
         "clean_cluster_winner": clean_cluster_winner,
@@ -1005,7 +1103,7 @@ def verify_compiled_outcome(
     case_sha256: Any,
     ballots: Any,
     rule: Any,
-    expected_seat_ids: Any,
+    frozen_roster: Any,
     requested_scope: Any,
     requested_effects: Any,
     compiled_at: Any,
@@ -1020,7 +1118,7 @@ def verify_compiled_outcome(
             case_sha256=case_sha256,
             ballots=ballots,
             rule=rule,
-            expected_seat_ids=expected_seat_ids,
+            frozen_roster=frozen_roster,
             requested_scope=requested_scope,
             requested_effects=requested_effects,
             compiled_at=compiled_at,
