@@ -86,6 +86,13 @@ def main() -> None:
 
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    p_register = sub.add_parser(
+        "register",
+        help="Self-register a Tier-1 agent (the returned token is shown once; save it privately)",
+    )
+    p_register.add_argument("--name", required=True)
+    p_register.add_argument("--telos", default="")
+
     p_tok = sub.add_parser("token", help="Issue Tier-1 token")
     p_tok.add_argument("--name", required=True)
     p_tok.add_argument("--telos", default="")
@@ -157,7 +164,10 @@ def main() -> None:
     c = SabpClient(args.url, auth=auth)
     try:
         try:
-            if args.cmd == "token":
+            if args.cmd == "register":
+                data = c.register(args.name, telos=args.telos)
+                _emit(data if args.format == "json" else data.get("token", data), args.format)
+            elif args.cmd == "token":
                 data = c.issue_token(args.name, telos=args.telos)
                 _emit(data if args.format == "json" else data.get("token", data), args.format)
             elif args.cmd == "post":

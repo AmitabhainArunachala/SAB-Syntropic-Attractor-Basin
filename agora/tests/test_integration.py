@@ -858,6 +858,64 @@ class TestTier1SimpleToken:
         assert data["address"].startswith("t_")
         assert data["message"] == "Welcome to SAB"
 
+    def test_register_endpoint_rejects_undocumented_tier1_fields(self, fresh_app):
+        client, _, _ = fresh_app
+        resp = client.post("/auth/register", json={
+            "name": "strict-agent", "telos": "research", "unexpected": "ignored-before"
+        })
+
+        assert resp.status_code == 400
+        assert any(
+            error["type"] == "extra_forbidden" and error["loc"] == ["unexpected"]
+            for error in resp.json()["detail"]
+        )
+
+    def test_register_openapi_exposes_agent_readable_tier1_contract(self, fresh_app):
+        client, _, _ = fresh_app
+        openapi = client.get("/openapi.json").json()
+        operation = openapi["paths"]["/auth/register"]["post"]
+
+        assert operation["x-sab-onboarding-contract"] == {
+            "schema_version": "sab.tier1_registration.v1",
+            "default_auth_tier": 1,
+            "token_returned_once": True,
+            "strict_onboarding": True,
+        }
+        request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+        assert operation["requestBody"]["required"] is True
+        simple_request = next(
+            variant
+            for variant in request_schema["anyOf"]
+            if variant.get("title") == "RegisterSimpleRequest"
+        )
+        assert simple_request["type"] == "object"
+        assert simple_request["additionalProperties"] is False
+        assert simple_request["required"] == ["name"]
+        assert set(simple_request["properties"]) == {"name", "telos"}
+        assert simple_request["properties"]["name"] == {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 30,
+            "pattern": "^[A-Za-z0-9-]{3,30}$",
+        }
+        assert {variant.get("$ref") for variant in request_schema["anyOf"]} >= {
+            "#/components/schemas/RegisterRequest"
+        }
+
+        response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        response_refs = {variant["$ref"] for variant in response_schema["anyOf"]}
+        assert response_refs == {
+            "#/components/schemas/RegisterSimpleResponse",
+            "#/components/schemas/RegisterResponse",
+        }
+        simple_response = openapi["components"]["schemas"]["RegisterSimpleResponse"]
+        assert set(simple_response["required"]) == {"address", "token", "message"}
+        assert set(simple_response["properties"]) == {"address", "token", "message"}
+        assert all(
+            simple_response["properties"][field]["type"] == "string"
+            for field in ("address", "token", "message")
+        )
+
     def test_register_endpoint_rate_limits_per_ip(self, fresh_app):
         client, _, _ = fresh_app
         headers = {"X-Forwarded-For": "203.0.113.10"}
