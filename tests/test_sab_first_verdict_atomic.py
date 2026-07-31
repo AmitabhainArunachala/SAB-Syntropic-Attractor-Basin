@@ -1485,7 +1485,7 @@ def test_successor_effect_envelope_rejects_unknown_secret_fields() -> None:
     assert raised.value.code == "successor_artifact_contract_invalid"
     assert "persisted-secret-marker" not in str(raised.value)
     assert _database_digest(fixture.conn) == before
-    assert b"persisted-secret-marker" not in fixture.conn.serialize()
+    assert "persisted-secret-marker" not in "\n".join(fixture.conn.iterdump())
 
 
 def test_raw_file_backed_lifecycle_connection_is_rejected_before_mutation(
