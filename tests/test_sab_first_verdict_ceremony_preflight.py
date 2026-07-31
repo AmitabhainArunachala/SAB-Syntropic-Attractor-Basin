@@ -883,8 +883,20 @@ def test_direct_serialized_and_tampered_copies_of_readiness_are_unverifiable() -
     tampered_copy = genuine.model_copy(
         update={"valid_until": NOW + timedelta(minutes=3)}
     )
+    privately_resealed_copy = genuine.model_copy(
+        update={
+            "verified_receipt_sha256s": ("1" * 64,),
+            "trust_anchor_set_sha256s": ("2" * 64,),
+        }
+    )
+    object.__setattr__(privately_resealed_copy, "_verifier_token", object())
+    object.__setattr__(
+        privately_resealed_copy,
+        "_sealed_payload_sha256",
+        privately_resealed_copy.canonical_sha256(),
+    )
 
-    for forged in (direct, serialized, tampered_copy):
+    for forged in (direct, serialized, tampered_copy, privately_resealed_copy):
         result = _live(packet, frozen_facts=forged)
         assert isinstance(result, Blocked)
         assert "frozen_facts_unverifiable" in _codes(result)

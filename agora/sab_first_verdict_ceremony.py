@@ -16,10 +16,11 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
+import weakref
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Collection, Literal, Mapping, Sequence, Union, cast
 
-from pydantic import Field, PrivateAttr, TypeAdapter, field_validator, model_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from agora.sab_artifact_verdict import (
     ContractSignatureV1,
@@ -44,7 +45,7 @@ ZERO_SHA256 = "0" * 64
 ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$"
 ISSUE_CODE_PATTERN = r"^[a-z][a-z0-9_]{0,119}$"
 CEREMONY_COUNCIL_SIZE = 9
-_READINESS_SEAL = object()
+_READINESS_REGISTRY: dict[int, tuple[weakref.ReferenceType[Any], str]] = {}
 
 
 def _utc(value: datetime) -> datetime:
@@ -987,8 +988,6 @@ class StructurallyCompleteAwaitingAuthority(StrictCanonicalModel):
         "fresh_authority_capability_and_operator_signature"
     )
     standing_effect: Literal["none"] = "none"
-    _verifier_token: object | None = PrivateAttr(default=None)
-    _sealed_payload_sha256: str | None = PrivateAttr(default=None)
 
     @field_validator("checked_at", "valid_until")
     @classmethod
@@ -1014,8 +1013,15 @@ def _seal_readiness(
 ) -> StructurallyCompleteAwaitingAuthority:
     """Attach evaluator-local provenance without serializing a forgeable bearer token."""
 
-    value._verifier_token = _READINESS_SEAL
-    value._sealed_payload_sha256 = value.canonical_sha256()
+    identity = id(value)
+
+    def discard(reference: weakref.ReferenceType[Any]) -> None:
+        current = _READINESS_REGISTRY.get(identity)
+        if current is not None and current[0] is reference:
+            _READINESS_REGISTRY.pop(identity, None)
+
+    reference = weakref.ref(value, discard)
+    _READINESS_REGISTRY[identity] = (reference, value.canonical_sha256())
     return value
 
 
@@ -1024,10 +1030,13 @@ def readiness_is_locally_verified(
 ) -> bool:
     """Return whether this exact in-memory value was emitted by this evaluator."""
 
-    return (
-        isinstance(value, StructurallyCompleteAwaitingAuthority)
-        and value._verifier_token is _READINESS_SEAL
-        and value._sealed_payload_sha256 == value.canonical_sha256()
+    if not isinstance(value, StructurallyCompleteAwaitingAuthority):
+        return False
+    registered = _READINESS_REGISTRY.get(id(value))
+    return bool(
+        registered is not None
+        and registered[0]() is value
+        and registered[1] == value.canonical_sha256()
         and (phase is None or value.phase == phase)
     )
 
