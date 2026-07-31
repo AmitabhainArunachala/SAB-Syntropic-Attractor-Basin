@@ -1283,9 +1283,7 @@ _IMMUTABLE_DIGEST_QUERIES: Dict[str, str] = {
         "SELECT disposition_sha256 FROM sab_rehearsal_dispositions_v1 "
         "WHERE disposition_id = ?"
     ),
-    "lineage": (
-        "SELECT edge_sha256 FROM sab_seed_lineage_edges_v1 WHERE edge_id = ?"
-    ),
+    "lineage": ("SELECT edge_sha256 FROM sab_seed_lineage_edges_v1 WHERE edge_id = ?"),
 }
 
 _JSON_RECORD_QUERIES: Dict[tuple[str, str, str], str] = {

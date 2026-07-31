@@ -1642,13 +1642,16 @@ def test_json_record_lookup_uses_only_frozen_identifier_combinations(
 ) -> None:
     records = _insert_graph(conn)
     case_id, _ = records["case"]
-    assert get_json_record(
-        conn,
-        table="sab_artifact_cases_v1",
-        id_column="case_id",
-        json_column="case_json",
-        object_id=case_id,
-    ) is not None
+    assert (
+        get_json_record(
+            conn,
+            table="sab_artifact_cases_v1",
+            id_column="case_id",
+            json_column="case_json",
+            object_id=case_id,
+        )
+        is not None
+    )
 
     with pytest.raises(ValueError, match="unsupported first-verdict record lookup"):
         get_json_record(

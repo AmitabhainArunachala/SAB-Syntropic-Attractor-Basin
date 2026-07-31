@@ -296,9 +296,7 @@ def _table_columns(conn: sqlite3.Connection, table: str) -> list[str]:
     quoted_table = _quote_identifier(table)
     return [
         str(row[1])
-        for row in conn.execute(
-            f"PRAGMA table_info({quoted_table})"
-        ).fetchall()
+        for row in conn.execute(f"PRAGMA table_info({quoted_table})").fetchall()
     ]
 
 
@@ -498,9 +496,7 @@ def witness_forest_heads(conn: sqlite3.Connection) -> dict[str, str]:
             "WHERE inner_event.chain_scope=outer_event.chain_scope) "
             "ORDER BY outer_event.chain_scope"
         )
-        rows = conn.execute(
-            query
-        ).fetchall()
+        rows = conn.execute(query).fetchall()
     elif {"subject_type", "subject_id", "event_hash", "id"}.issubset(columns):
         # Same fixed-candidate and identifier validation as the branch above.
         query = (
@@ -512,9 +508,7 @@ def witness_forest_heads(conn: sqlite3.Connection) -> dict[str, str]:
             "WHERE inner_event.subject_type=outer_event.subject_type "
             "AND inner_event.subject_id=outer_event.subject_id) ORDER BY scope"
         )
-        rows = conn.execute(
-            query
-        ).fetchall()
+        rows = conn.execute(query).fetchall()
     else:
         return {}
     return {str(row[0]): str(row[1]) for row in rows}
@@ -550,10 +544,7 @@ def _migration_ids(conn: sqlite3.Connection) -> list[str]:
                 f"SELECT {quoted_id_column} FROM {quoted_table} "  # nosec B608
                 f"ORDER BY {quoted_id_column}"
             )
-            identifiers.extend(
-                f"{table}:{row[0]}"
-                for row in conn.execute(query)
-            )
+            identifiers.extend(f"{table}:{row[0]}" for row in conn.execute(query))
     return identifiers
 
 
@@ -588,13 +579,8 @@ def _lifecycle_semantic_summary(conn: sqlite3.Connection) -> dict[str, Any]:
         quoted_seed_table = _quote_identifier(seed_table)
         # Both values are selected from fixed candidates, schema-checked, and
         # pass the strict identifier allowlist.
-        query = (
-            f"SELECT {quoted_hash_column} FROM {quoted_seed_table}"  # nosec B608
-        )
-        seed_hashes = sorted(
-            str(row[0])
-            for row in conn.execute(query)
-        )
+        query = f"SELECT {quoted_hash_column} FROM {quoted_seed_table}"  # nosec B608
+        seed_hashes = sorted(str(row[0]) for row in conn.execute(query))
     heads = witness_forest_heads(conn)
     return {
         "seed_count": _count(conn, seed_table),
