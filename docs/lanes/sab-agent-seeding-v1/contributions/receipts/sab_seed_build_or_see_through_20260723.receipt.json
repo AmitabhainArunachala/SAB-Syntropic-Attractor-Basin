@@ -1,0 +1,71 @@
+{
+  "schema": "sab.seed_repository_observation.v1",
+  "source_commit": "ed6d0decac13bf5db54194a2af4879e79f186d30",
+  "observed_at": "2026-07-31T14:58:00Z",
+  "scope": "Copy",
+  "observation_scope": "repository_only",
+  "seed_id": "sab_seed_build_or_see_through_20260723",
+  "packet": {
+    "path": "docs/lanes/sab-agent-seeding-v1/contributions/packets/sab_seed_build_or_see_through_20260723.json",
+    "raw_sha256": "sha256:c7c6fabc2642153efeea8b579efb0ccf3eb6133685b857f0977fec2723c3a1a9",
+    "declared_schema": "sab.seed_packet.v1",
+    "declared_status": "pending_seed",
+    "changed_by_observation": false
+  },
+  "article": {
+    "path": "docs/sparks/2026-07-23-build-the-loop-or-see-through-it.md",
+    "declared_sha256": "sha256:d6fc6c0395fcb877aadb1dfafb213e151b067e2dd5c870e061ee3c39d9401e72",
+    "actual_sha256": "sha256:d6fc6c0395fcb877aadb1dfafb213e151b067e2dd5c870e061ee3c39d9401e72",
+    "result": "MATCH"
+  },
+  "schema_validation": {
+    "result": "invalid",
+    "error_count": 11,
+    "errors": [
+      "$.claim.text: required",
+      "$.claim.statement: additional property",
+      "$.claim.claim_type: expected one of ['behavioral', 'provenance', 'authority', 'safety', 'cost', 'compliance', 'governance', 'semantic']",
+      "$.authority_lease.allowed_actions: additional property",
+      "$.authority_lease.forbidden_actions: additional property",
+      "$.authority_lease.purpose: additional property",
+      "$.evidence_bundle[0].kind: expected one of ['source', 'test', 'trace', 'receipt', 'proof', 'review', 'attestation']",
+      "$.challenge_plan.challenge_refs: required",
+      "$.challenge_plan.correction_path: required",
+      "$.challenge_plan.challenge_window: expected string",
+      "$.signature.signed_payload: required"
+    ]
+  },
+  "signature_validation": {
+    "result": "verified",
+    "public_key_ref": "docs/lanes/sab-agent-seeding-v1/contributions/receipts/sab_seed_master_vision_v1_ebe422aab149.receipt.json#/api_calls/0/response/public_key",
+    "public_key": "0a70c303c0e794d0978e80f9c521e81c655a94a17f95a952ac9b5f7ab901f1f5",
+    "unsigned_packet_sha256": "ff2f2829822c37c39fd7da09be34f95184491142a1a290214be6cbafdf40e581",
+    "message_sha256": "ea33d73a95dc85fe3c5e4f2ab936a77513cf1762e633c0be78152fb9fca653af"
+  },
+  "temporal_observation": {
+    "challenge_window_closes_at": "2026-07-30T14:37:55.552561Z",
+    "challenge_window_time_state": "elapsed",
+    "authority_lease_expires_at": "2026-08-22T14:37:55.552561Z",
+    "authority_lease_time_state": "not_elapsed",
+    "live_lease_validity": "UNCHECKED",
+    "revocation_state": "UNCHECKED"
+  },
+  "repository_evidence": {
+    "api_submission_receipt": "MISSING",
+    "witness_chain_receipt": "MISSING",
+    "challenge_record_state": "UNCHECKED",
+    "transition_record_state": "UNCHECKED",
+    "external_source_state": "UNCHECKED_OUT_OF_REPOSITORY"
+  },
+  "derived_state": "SIGNED_HISTORICAL_SCHEMA_INVALID_PENDING_SEED",
+  "authority_effect": "none",
+  "standing_effect": "none",
+  "identity_effect": "none",
+  "merge_effect": "none",
+  "live_eligible": false,
+  "forbidden_inferences": [
+    "Repository presence or merge grants no authority or standing.",
+    "A valid signature proves control of the signing key, not API acceptance or witness-chain state.",
+    "An elapsed challenge window does not imply unchallenged, accepted, witnessed, canon, compost, or expired status."
+  ]
+}
