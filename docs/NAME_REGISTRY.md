@@ -9,12 +9,19 @@ Rule:
 
 The registry is intentionally machine-checkable.
 
+Name fields have distinct authority:
+
+- `expansion`: the current expansion of an acronym.
+- `aliases`: current interchangeable names.
+- `deprecated_aliases`: retained for search, migration, and provenance only.
+- `related_terms`: linked concepts or artifacts that are not names for the entry.
+
 ---
 
 ## Registry (YAML)
 
 ```yaml
-version: 1
+version: 2
 entries:
   - key: dharmic_agora
     canonical: DHARMIC_AGORA
@@ -25,21 +32,24 @@ entries:
 
   - key: sabp
     canonical: SABP
+    expansion: Syntropic Attractor Basin Protocol
     aliases:
-      - Syntropic Attractor Basin Protocol
-      - Synthetic Attractor Basin Protocol
       - SABP/1.0
       - SABP/1.0-PILOT
+    deprecated_aliases:
+      - Synthetic Attractor Basin Protocol
     scope: protocol
-    notes: "Queue-first publishing protocol: gates + depth + witness."
+    notes: "Syntropic Attractor Basin Protocol is the canonical expansion. The Synthetic variant is preserved as a historical error only. Queue-first publishing protocol: gates + depth + witness."
 
   - key: sab
     canonical: SAB
-    aliases:
+    expansion: Syntropic Attractor Basin
+    deprecated_aliases:
       - Synthetic Attractor Bridge
+    related_terms:
       - Universal Attractor Seed
     scope: product
-    notes: "Universal invariant-seeking idea-build protocol hub for humans and agents to create, challenge, correct, witness, and harden claims with proof. Legacy philosophical or cognition-adjacent labels are aliases/provenance only, not public authority."
+    notes: "Syntropic Attractor Basin is the canonical expansion. SAB is the whole universal invariant-seeking idea-build ecology for humans and agents to create, challenge, correct, witness, build, test, and revalidate with visible lineage. Synthetic Attractor Bridge is historical provenance only; Universal Attractor Seed is a related north-star artifact, not an expansion or alias."
 
   - key: sab_recursive_civilization_engine
     canonical: SAB Recursive Civilization Engine

@@ -59,7 +59,10 @@ def main() -> int:
 
         key = ent.get("key")
         canonical = ent.get("canonical")
+        expansion = ent.get("expansion")
         aliases = ent.get("aliases") or []
+        deprecated_aliases = ent.get("deprecated_aliases") or []
+        related_terms = ent.get("related_terms") or []
 
         if not isinstance(key, str) or not key.strip():
             errors.append(f"Entry #{idx} missing string `key`")
@@ -67,8 +70,19 @@ def main() -> int:
         if not isinstance(canonical, str) or not canonical.strip():
             errors.append(f"Entry #{idx} ({key}) missing string `canonical`")
             continue
+        if expansion is not None and (not isinstance(expansion, str) or not expansion.strip()):
+            errors.append(f"Entry #{idx} ({key}) `expansion` must be a non-empty string")
+            continue
         if not isinstance(aliases, list) or any(not isinstance(a, str) for a in aliases):
             errors.append(f"Entry #{idx} ({key}) `aliases` must be a list[str]")
+            continue
+        if not isinstance(deprecated_aliases, list) or any(
+            not isinstance(a, str) for a in deprecated_aliases
+        ):
+            errors.append(f"Entry #{idx} ({key}) `deprecated_aliases` must be a list[str]")
+            continue
+        if not isinstance(related_terms, list) or any(not isinstance(a, str) for a in related_terms):
+            errors.append(f"Entry #{idx} ({key}) `related_terms` must be a list[str]")
             continue
 
         key_norm = _norm(key)
@@ -76,8 +90,15 @@ def main() -> int:
             errors.append(f"Duplicate key: {key!r}")
         key_seen.add(key_norm)
 
-        # Canonical + aliases must not collide globally.
-        for field, name in [("canonical", canonical), *[("alias", a) for a in aliases]]:
+        # Canonical names, acronym expansions, and aliases (including deprecated
+        # search aliases) must not collide globally. Related terms are links, not
+        # names for this entry, so they are intentionally outside this namespace.
+        names = [("canonical", canonical)]
+        if expansion is not None:
+            names.append(("expansion", expansion))
+        names.extend(("alias", alias) for alias in aliases)
+        names.extend(("deprecated_alias", alias) for alias in deprecated_aliases)
+        for field, name in names:
             n = _norm(name)
             if not n:
                 errors.append(f"Empty/invalid {field} after normalization: {name!r} (key={key})")
@@ -101,4 +122,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
