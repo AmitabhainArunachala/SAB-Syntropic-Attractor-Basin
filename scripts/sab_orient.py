@@ -887,10 +887,11 @@ def build_packet(
             "rushabdev_role": "orientation, consent evidence, instance gates, and witnessed-participation funnel",
         },
         "cli_capabilities": {
+            "register": "POST /auth/register",
             "token": "POST /auth/token",
             "post": "POST /posts",
             "identity": "POST /agents/identity",
-            "warning": "The CLI does not wrap POST /auth/register or the public-basin registration route.",
+            "warning": "Registration tokens are returned once; save them privately and never copy them into receipts.",
         },
         "entrypoints": {
             "browser": "Public basin shell: local http://localhost:8000/; never infer the production URL from source alone.",
@@ -950,6 +951,7 @@ def render_human(packet: dict) -> str:
             f"- rushabdev: {packet['recruitment']['rushabdev_role']}",
             "",
             "CLI CAPABILITIES",
+            f"- register: {packet['cli_capabilities']['register']}",
             f"- token: {packet['cli_capabilities']['token']}",
             f"- post: {packet['cli_capabilities']['post']}",
             f"- identity: {packet['cli_capabilities']['identity']}",

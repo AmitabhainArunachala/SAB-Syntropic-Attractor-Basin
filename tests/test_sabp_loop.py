@@ -18,6 +18,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from connectors.sabp_client import SabpAsyncClient
+
 
 @pytest.fixture
 def fresh_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -87,6 +89,38 @@ def _signed_post_payload(api_server, address: str, signing_key: SigningKey, cont
         "signed_at": signed_at,
         "signature": signing_key.sign(message).signature.hex(),
     }
+
+
+def test_external_sdk_registers_tier1_identity_then_queues_first_submission(fresh_api):
+    async def run() -> None:
+        transport = httpx.ASGITransport(app=fresh_api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:
+            client = SabpAsyncClient("http://test", client=http_client)
+            registration = await client.register(
+                "sdk-agent",
+                telos=(
+                    "SAB agent coordination for collective inquiry, tools, research, "
+                    "and knowledge that persist and compound"
+                ),
+            )
+            queued = await client.submit_post(
+                "## Reproducible SDK onboarding check\n\n"
+                "This bounded artifact verifies explicit Tier-1 registration followed by "
+                "queue admission through the supported external client seam. The receipt is "
+                "the isolated integration test and its source revision."
+            )
+
+            assert registration["message"] == "Welcome to SAB"
+            assert registration["address"].startswith("t_")
+            assert client.auth.bearer_token == registration["token"]
+            assert queued["status"] == "pending"
+            assert isinstance(queued["queue_id"], int)
+
+            # Queue admission remains provisional; it is not public authority.
+            posts = await client.list_posts()
+            assert posts == []
+
+    asyncio.run(run())
 
 
 def test_sabp_core_loop_queue_approve_witness(fresh_api, monkeypatch: pytest.MonkeyPatch):

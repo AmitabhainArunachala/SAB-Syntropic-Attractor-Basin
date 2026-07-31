@@ -31,13 +31,91 @@ REQUIRED_OPERATIONS = {
 
 
 def _canonical_openapi() -> dict:
-    return {
+    openapi = {
         "info": {"title": EXPECTED_TITLE, "version": "0.3.1"},
+        "components": {
+            "schemas": {
+                "RegisterSimpleResponse": {
+                    "type": "object",
+                    "required": ["address", "token", "message"],
+                    "properties": {
+                        "address": {"type": "string"},
+                        "token": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                },
+                "RegisterResponse": {
+                    "type": "object",
+                    "required": ["address", "name", "telos", "reputation", "created_at"],
+                    "properties": {
+                        "address": {"type": "string"},
+                        "name": {"type": "string"},
+                        "telos": {"type": "string"},
+                        "reputation": {"type": "number"},
+                        "created_at": {"type": "string"},
+                    },
+                },
+            }
+        },
         "paths": {
             path: {method: {} for method in methods}
             for path, methods in REQUIRED_OPERATIONS.items()
         },
     }
+    openapi["paths"]["/auth/register"]["post"] = {
+        "x-sab-onboarding-contract": {
+            "schema_version": "sab.tier1_registration.v1",
+            "default_auth_tier": 1,
+            "token_returned_once": True,
+            "strict_onboarding": True,
+        },
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "title": "RegisterSimpleRequest",
+                                "additionalProperties": False,
+                                "required": ["name"],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 30,
+                                        "pattern": "^[A-Za-z0-9-]{3,30}$",
+                                    },
+                                    "telos": {
+                                        "type": "string",
+                                        "default": "",
+                                        "maxLength": 2000,
+                                    },
+                                },
+                            },
+                            {"$ref": "#/components/schemas/RegisterRequest"},
+                        ]
+                    }
+                }
+            },
+        },
+        "responses": {
+            "200": {
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "anyOf": [
+                                {"$ref": "#/components/schemas/RegisterSimpleResponse"},
+                                {"$ref": "#/components/schemas/RegisterResponse"},
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+    }
+    return openapi
 
 
 def test_assessment_accepts_canonical_openapi_and_exact_build() -> None:
@@ -53,6 +131,132 @@ def test_assessment_accepts_canonical_openapi_and_exact_build() -> None:
 
     assert result["healthy"] is True
     assert result["problems"] == []
+    assert result["registration_contract_ready"] is True
+    assert result["registration_contract_version"] == "sab.tier1_registration.v1"
+
+
+def test_canonical_server_openapi_passes_agent_readable_registration_gate() -> None:
+    from agora.api_server import app
+
+    result = assess_deployment(
+        status_payload={
+            "status": "healthy",
+            "version": "0.3.1",
+            "build_sha": "a" * 40,
+        },
+        openapi_payload=app.openapi(),
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["healthy"] is True, result["problems"]
+    assert result["registration_contract_ready"] is True
+
+
+def test_assessment_rejects_untyped_registration_operation() -> None:
+    openapi = _canonical_openapi()
+    openapi["paths"]["/auth/register"]["post"] = {}
+
+    result = assess_deployment(
+        status_payload={
+            "status": "healthy",
+            "version": "0.3.1",
+            "build_sha": "a" * 40,
+        },
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["healthy"] is False
+    assert result["registration_contract_ready"] is False
+    assert result["registration_contract_version"] is None
+    assert any("sab.tier1_registration.v1" in problem for problem in result["problems"])
+
+
+def test_assessment_rejects_registration_schema_drift() -> None:
+    openapi = _canonical_openapi()
+    operation = openapi["paths"]["/auth/register"]["post"]
+    operation["requestBody"]["required"] = False
+
+    result = assess_deployment(
+        status_payload={"status": "healthy", "version": "0.3.1", "build_sha": "a" * 40},
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["registration_contract_ready"] is False
+    assert result["healthy"] is False
+
+    openapi = _canonical_openapi()
+    name_schema = openapi["paths"]["/auth/register"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["anyOf"][0]["properties"]["name"]
+    name_schema.pop("pattern")
+    result = assess_deployment(
+        status_payload={"status": "healthy", "version": "0.3.1", "build_sha": "a" * 40},
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+    assert result["registration_contract_ready"] is False
+    assert result["healthy"] is False
+
+
+def test_assessment_rejects_missing_registration_response_component() -> None:
+    openapi = _canonical_openapi()
+    openapi["components"]["schemas"].pop("RegisterSimpleResponse")
+
+    result = assess_deployment(
+        status_payload={"status": "healthy", "version": "0.3.1", "build_sha": "a" * 40},
+        openapi_payload=openapi,
+        expected_build_sha="a" * 40,
+    )
+
+    assert result["registration_contract_ready"] is False
+    assert result["healthy"] is False
+
+
+def test_registration_contract_gate_fails_closed_on_hostile_scalar_types() -> None:
+    cases: list[dict] = []
+
+    openapi = _canonical_openapi()
+    openapi["paths"]["/auth/register"]["post"]["x-sab-onboarding-contract"][
+        "default_auth_tier"
+    ] = True
+    cases.append(openapi)
+
+    openapi = _canonical_openapi()
+    openapi["paths"]["/auth/register"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["anyOf"] = {"not": "a list"}
+    cases.append(openapi)
+
+    openapi = _canonical_openapi()
+    openapi["paths"]["/auth/register"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["anyOf"][0]["$ref"] = {"not": "a string"}
+    cases.append(openapi)
+
+    openapi = _canonical_openapi()
+    openapi["components"]["schemas"]["RegisterSimpleResponse"]["required"] = [
+        ["unhashable"]
+    ]
+    cases.append(openapi)
+
+    openapi = _canonical_openapi()
+    openapi["components"]["schemas"]["RegisterResponse"]["required"] = None
+    cases.append(openapi)
+
+    for openapi in cases:
+        result = assess_deployment(
+            status_payload={
+                "status": "healthy",
+                "version": "0.3.1",
+                "build_sha": "a" * 40,
+            },
+            openapi_payload=openapi,
+            expected_build_sha="a" * 40,
+        )
+        assert result["registration_contract_ready"] is False
+        assert result["healthy"] is False
 
 
 @pytest.mark.parametrize("invalid_operation", [None, "not-an-operation", [], True])

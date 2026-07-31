@@ -114,6 +114,54 @@ def test_cli_default_output_is_json(monkeypatch: pytest.MonkeyPatch, capsys: pyt
     assert parsed["name"] == "agent-x"
 
 
+def test_cli_register_uses_explicit_onboarding_route_and_emits_once_token(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class DummyClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def register(self, name, telos=""):
+            calls.append((name, telos))
+            return {
+                "address": "t_registered",
+                "token": "sab_t_return_once",
+                "message": "Welcome to SAB",
+            }
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(sabp_cli, "SabpClient", DummyClient)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "sabp_cli.py",
+            "--url",
+            "https://sab.example",
+            "register",
+            "--name",
+            "agent-opted-in",
+            "--telos",
+            "correction research",
+        ],
+    )
+
+    sabp_cli.main()
+
+    assert calls == [("agent-opted-in", "correction research")]
+    parsed = json.loads(capsys.readouterr().out.strip())
+    assert parsed == {
+        "address": "t_registered",
+        "message": "Welcome to SAB",
+        "token": "sab_t_return_once",
+    }
+
+
 def test_cli_text_output_mode(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     class DummyClient:
         def __init__(self, *_args, **_kwargs):

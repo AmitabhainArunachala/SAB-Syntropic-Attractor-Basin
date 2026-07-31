@@ -75,6 +75,7 @@ def test_json_cli_orients_agents_without_network_access():
     assert packet["recruitment"]["agni"]["public_profile_url"] == (
         "https://www.moltbook.com/u/DHARMIC_AGORA_Bridge"
     )
+    assert packet["cli_capabilities"]["register"] == "POST /auth/register"
     assert packet["cli_capabilities"]["token"] == "POST /auth/token"
     assert packet["cli_capabilities"]["post"] == "POST /posts"
     assert packet["cli_capabilities"]["identity"] == "POST /agents/identity"

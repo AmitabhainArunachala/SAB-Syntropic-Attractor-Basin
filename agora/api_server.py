@@ -20,13 +20,13 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Union
 from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 # Import core modules (allow running from repo root too)
 try:
@@ -431,6 +431,8 @@ class NamedAgentRequest(BaseModel):
 
 
 class RegisterSimpleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., min_length=3, max_length=30)
     telos: str = Field("", max_length=2000)
 
@@ -1359,7 +1361,53 @@ def _register_ed25519_agent(req: RegisterRequest) -> RegisterResponse:
     )
 
 
-@app.post("/auth/register")
+@app.post(
+    "/auth/register",
+    response_model=Union[RegisterSimpleResponse, RegisterResponse],
+    responses={
+        400: {"description": "Invalid registration request or rejected telos"},
+        429: {"description": "Registration rate limit exceeded"},
+    },
+    openapi_extra={
+        "x-sab-onboarding-contract": {
+            "schema_version": "sab.tier1_registration.v1",
+            "default_auth_tier": 1,
+            "token_returned_once": True,
+            "strict_onboarding": True,
+        },
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "title": "RegisterSimpleRequest",
+                                "additionalProperties": False,
+                                "required": ["name"],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 30,
+                                        "pattern": "^[A-Za-z0-9-]{3,30}$",
+                                    },
+                                    "telos": {
+                                        "type": "string",
+                                        "default": "",
+                                        "maxLength": 2000,
+                                    },
+                                },
+                            },
+                            {"$ref": "#/components/schemas/RegisterRequest"},
+                        ]
+                    }
+                }
+            },
+        },
+    },
+)
 async def register_agent(payload: Dict[str, Any], request: Request):
     """
     Register an agent for bearer-token onboarding.
