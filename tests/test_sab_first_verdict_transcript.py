@@ -5,7 +5,7 @@ import json
 import sqlite3
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import pytest
 from nacl.encoding import HexEncoder
@@ -37,6 +37,7 @@ from agora.sab_first_verdict_transcript import (
     TranscriptStoredRecordError,
     TranscriptValidationFailure,
     ballot_commitment_preimage_sha256,
+    ballot_commitment_signing_bytes,
     canonical_commitment_set_sha256,
     canonical_reveal_set_sha256,
     init_transcript_storage,
@@ -67,6 +68,51 @@ def _digest(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()
 
 
+def _dummy_signature(seat: FrozenSeatV1) -> dict[str, str]:
+    return {
+        "alg": "ed25519",
+        "signer": seat.seat_id,
+        "public_key": seat.execution_public_key,
+        "signature": "0" * 128,
+        "signed_payload_sha256": "0" * 64,
+        "canonicalization": "json-sort-keys-compact-v1",
+    }
+
+
+def _seat_signature(
+    message: bytes,
+    *,
+    position: int,
+    seat: FrozenSeatV1,
+) -> dict[str, str]:
+    return {
+        "alg": "ed25519",
+        "signer": seat.seat_id,
+        "public_key": seat.execution_public_key,
+        "signature": SIGNING_KEYS[position].sign(message).signature.hex(),
+        "signed_payload_sha256": hashlib.sha256(message).hexdigest(),
+        "canonicalization": "json-sort-keys-compact-v1",
+    }
+
+
+def _resign_commitment(
+    commitment: BallotCommitmentV1,
+    *,
+    updates: Mapping[str, Any] | None = None,
+) -> BallotCommitmentV1:
+    unsigned = commitment.canonical_payload(exclude={"commitment_signature"})
+    unsigned.update(updates or {})
+    seat = _roster()[commitment.seat_position]
+    return BallotCommitmentV1(
+        **unsigned,
+        commitment_signature=_seat_signature(
+            ballot_commitment_signing_bytes(unsigned),
+            position=commitment.seat_position,
+            seat=seat,
+        ),
+    )
+
+
 def _roster() -> tuple[FrozenSeatV1, ...]:
     roster: list[FrozenSeatV1] = []
     for position, source in enumerate(CASE_TEMPLATE["frozen_roster"]):
@@ -74,6 +120,13 @@ def _roster() -> tuple[FrozenSeatV1, ...]:
         item["execution_public_key"] = (
             SIGNING_KEYS[position].verify_key.encode(encoder=HexEncoder).decode()
         )
+        for reference_index, reference in enumerate(
+            item["model_lineage_evidence_refs"]
+        ):
+            if reference["content_sha256"] == "0" * 64:
+                reference["content_sha256"] = _digest(
+                    f"lineage-evidence:{position}:{reference_index}"
+                )
         roster.append(FrozenSeatV1.model_validate(item))
     return tuple(roster)
 
@@ -112,14 +165,7 @@ def _ballot(
                 "content_sha256": _digest(f"transcript:{stage}:{position}"),
                 "proof_class": "offline_fixture",
             },
-            "execution_signature": {
-                "alg": "ed25519",
-                "signer": seat.seat_id,
-                "public_key": seat.execution_public_key,
-                "signature": "0" * 128,
-                "signed_payload_sha256": "0" * 64,
-                "canonicalization": "json-sort-keys-compact-v1",
-            },
+            "execution_signature": _dummy_signature(seat),
         }
     )
     provisional = ArtifactBallotV1.model_validate(payload)
@@ -204,13 +250,21 @@ def _stage(
             "seat_position": position,
             "execution_facts": facts,
         }
+        unsigned_commitment = {
+            **draft,
+            "committed_preimage_sha256": ballot_commitment_preimage_sha256(
+                draft,
+                nonce=nonce,
+                ballot=ballot,
+            ),
+        }
         commitments.append(
             BallotCommitmentV1(
-                **draft,
-                committed_preimage_sha256=ballot_commitment_preimage_sha256(
-                    draft,
-                    nonce=nonce,
-                    ballot=ballot,
+                **unsigned_commitment,
+                commitment_signature=_seat_signature(
+                    ballot_commitment_signing_bytes(unsigned_commitment),
+                    position=position,
+                    seat=seat,
                 ),
             )
         )
@@ -335,6 +389,88 @@ def test_commitment_and_reveal_are_stable_strict_canonical_contracts(
         commitment.case_id = "mutated"  # type: ignore[misc]
 
 
+def test_fully_rehashed_and_resigned_zero_context_roots_are_rejected(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+) -> None:
+    commitment = ceremony[2].commitments[0]
+    reveal = ceremony[2].reveals[0]
+    payload = commitment.canonical_payload()
+    for field in (
+        "case_sha256",
+        "frozen_roster_sha256",
+        "frozen_seat_sha256",
+        "authority_digest",
+        "rule_digest",
+        "stage_input_sha256",
+        "final_deliberation_subject_sha256",
+    ):
+        payload[field] = "0" * 64
+    payload["committed_preimage_sha256"] = ballot_commitment_preimage_sha256(
+        payload,
+        nonce=reveal.nonce,
+        ballot=reveal.ballot,
+    )
+    unsigned = {
+        key: value for key, value in payload.items() if key != "commitment_signature"
+    }
+    payload["commitment_signature"] = _seat_signature(
+        ballot_commitment_signing_bytes(unsigned),
+        position=0,
+        seat=ceremony[2].frozen_roster[0],
+    )
+
+    with pytest.raises(ValidationError, match="all-zero placeholder digest"):
+        BallotCommitmentV1.model_validate(payload)
+
+    subject_payload = ceremony[2].final_deliberation_subject.canonical_payload()  # type: ignore[union-attr]
+    for field in (
+        "case_sha256",
+        "frozen_roster_sha256",
+        "authority_digest",
+        "rule_digest",
+        "cross_examination_reveal_set_sha256",
+        "stage_input_sha256",
+        "deliberation_material_sha256",
+    ):
+        subject_payload[field] = "0" * 64
+    with pytest.raises(ValidationError, match="all-zero placeholder digest"):
+        FinalDeliberationSubjectV1.model_validate(subject_payload)
+
+
+def test_nested_zero_roots_in_imported_evidence_ballot_and_roster_are_rejected(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+) -> None:
+    first = ceremony[0]
+    facts_payload = first.commitments[0].execution_facts.canonical_payload()
+    facts_payload["model_lineage_evidence_refs"][0]["content_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="all-zero placeholder digest"):
+        BallotExecutionFactsV1.model_validate(facts_payload)
+
+    ballot_payload = first.reveals[0].ballot.canonical_payload()
+    ballot_payload["raw_model_output_sha256"] = "0" * 64
+    provisional_ballot = ArtifactBallotV1.model_validate(ballot_payload)
+    ballot_payload["execution_signature"] = _seat_signature(
+        provisional_ballot.canonical_bytes(exclude={"execution_signature"}),
+        position=0,
+        seat=first.frozen_roster[0],
+    )
+    zero_ballot = ArtifactBallotV1.model_validate(ballot_payload)
+    reveal_payload = first.reveals[0].canonical_payload()
+    reveal_payload.update(
+        {
+            "ballot": zero_ballot.canonical_payload(),
+            "ballot_sha256": zero_ballot.canonical_sha256(),
+        }
+    )
+    with pytest.raises(ValidationError, match="all-zero placeholder digest"):
+        BallotRevealV1.model_validate(reveal_payload)
+
+    envelope_payload = first.canonical_payload()
+    envelope_payload["frozen_roster"][0]["liveness_receipt_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="all-zero placeholder digest"):
+        CeremonyStageEnvelopeV1.model_validate(envelope_payload)
+
+
 def test_verify_commit_reveal_accepts_exact_preimage_but_grants_no_authority(
     ceremony: tuple[CeremonyStageEnvelopeV1, ...],
 ) -> None:
@@ -361,7 +497,7 @@ def test_verify_commit_reveal_requires_the_trusted_frozen_seat(
     assert _codes(result) == {"frozen_seat_required"}
 
 
-def test_full_transcript_cryptographically_checks_all_twenty_seven_ballots(
+def test_full_transcript_cryptographically_checks_all_ballots_and_commitments(
     ceremony: tuple[CeremonyStageEnvelopeV1, ...],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -379,7 +515,104 @@ def test_full_transcript_cryptographically_checks_all_twenty_seven_ballots(
     )
     result = verify_ceremony_transcript(ceremony, expected_roster=_roster())
     assert result.ok is True
-    assert len(calls) == 27
+    assert len(calls) == 54
+
+
+@pytest.mark.parametrize(
+    ("stage_index", "context_updates", "new_nonce"),
+    [
+        (0, {}, "attacker-selected-public-nonce"),
+        (0, {"authority_digest": _digest("attacker-authority")}, None),
+        (0, {"rule_digest": _digest("attacker-rule")}, None),
+        (0, {"frozen_roster_sha256": _digest("attacker-roster")}, None),
+        (0, {"stage_input_sha256": _digest("attacker-stage-input")}, None),
+        (
+            1,
+            {"preceding_reveal_set_sha256": _digest("attacker-predecessor")},
+            None,
+        ),
+        (
+            2,
+            {"final_deliberation_subject_sha256": _digest("attacker-final-subject")},
+            None,
+        ),
+    ],
+)
+def test_signed_ballot_cannot_be_rewrapped_in_new_commitment_context(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+    stage_index: int,
+    context_updates: Mapping[str, Any],
+    new_nonce: str | None,
+) -> None:
+    commitment = ceremony[stage_index].commitments[0]
+    reveal = ceremony[stage_index].reveals[0]
+    nonce = new_nonce or reveal.nonce
+    unsigned = commitment.canonical_payload(exclude={"commitment_signature"})
+    unsigned.update(context_updates)
+    unsigned["committed_preimage_sha256"] = ballot_commitment_preimage_sha256(
+        unsigned,
+        nonce=nonce,
+        ballot=reveal.ballot,
+    )
+    rewrapped_commitment = BallotCommitmentV1(
+        **unsigned,
+        commitment_signature=commitment.commitment_signature,
+    )
+    reveal_payload = reveal.canonical_payload()
+    reveal_payload.update(context_updates)
+    reveal_payload.update(
+        {
+            "nonce": nonce,
+            "commitment_sha256": rewrapped_commitment.canonical_sha256(),
+        }
+    )
+    rewrapped_reveal = BallotRevealV1.model_validate(reveal_payload)
+
+    result = verify_commit_reveal(
+        rewrapped_commitment,
+        rewrapped_reveal,
+        frozen_seat=ceremony[stage_index].frozen_roster[0],
+    )
+
+    assert _codes(result) == {"commitment_signature_invalid"}
+
+
+@pytest.mark.parametrize(
+    ("signature_update", "expected_code"),
+    [
+        (
+            {"signer": "seat:substituted"},
+            "commitment_signature_signer_mismatch",
+        ),
+        (
+            {
+                "public_key": SIGNING_KEYS[1]
+                .verify_key.encode(encoder=HexEncoder)
+                .decode()
+            },
+            "commitment_signature_key_mismatch",
+        ),
+    ],
+)
+def test_commitment_signature_identity_must_match_exact_frozen_seat(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+    signature_update: Mapping[str, str],
+    expected_code: str,
+) -> None:
+    commitment = ceremony[0].commitments[0]
+    signature = commitment.commitment_signature.model_copy(update=signature_update)
+    substituted = commitment.model_copy(update={"commitment_signature": signature})
+    reveal = (
+        ceremony[0]
+        .reveals[0]
+        .model_copy(update={"commitment_sha256": substituted.canonical_sha256()})
+    )
+    result = verify_commit_reveal(
+        substituted,
+        reveal,
+        frozen_seat=ceremony[0].frozen_roster[0],
+    )
+    assert expected_code in _codes(result)
 
 
 @pytest.mark.parametrize(
@@ -787,7 +1020,11 @@ def test_commit_before_reveal_and_final_after_cross_are_enforced(
 ) -> None:
     conn = _connect()
     init_transcript_storage(conn)
-    store_ballot_commitment(conn, ceremony[0].commitments[0])
+    store_ballot_commitment(
+        conn,
+        ceremony[0].commitments[0],
+        frozen_seat=ceremony[0].frozen_roster[0],
+    )
     with pytest.raises(
         TranscriptImmutableConflict, match="all nine ordered commitments"
     ):
@@ -797,8 +1034,46 @@ def test_commit_before_reveal_and_final_after_cross_are_enforced(
             frozen_seat=ceremony[0].frozen_roster[0],
         )
     with pytest.raises(TranscriptImmutableConflict, match="predecessor"):
-        store_ballot_commitment(conn, ceremony[2].commitments[0])
+        store_ballot_commitment(
+            conn,
+            ceremony[2].commitments[0],
+            frozen_seat=ceremony[2].frozen_roster[0],
+        )
     assert conn.execute("SELECT COUNT(*) FROM sab_ballot_reveals_v1").fetchone()[0] == 0
+    conn.close()
+
+
+def test_direct_commitment_storage_rejects_rewrapped_signed_ballot_context(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+) -> None:
+    commitment = ceremony[0].commitments[0]
+    reveal = ceremony[0].reveals[0]
+    unsigned = commitment.canonical_payload(exclude={"commitment_signature"})
+    unsigned["authority_digest"] = _digest("storage-attacker-authority")
+    unsigned["committed_preimage_sha256"] = ballot_commitment_preimage_sha256(
+        unsigned,
+        nonce=reveal.nonce,
+        ballot=reveal.ballot,
+    )
+    rewrapped = BallotCommitmentV1(
+        **unsigned,
+        commitment_signature=commitment.commitment_signature,
+    )
+    conn = _connect()
+    init_transcript_storage(conn)
+
+    with pytest.raises(TranscriptValidationFailure) as caught:
+        store_ballot_commitment(
+            conn,
+            rewrapped,
+            frozen_seat=ceremony[0].frozen_roster[0],
+        )
+
+    assert _codes(caught.value.result) == {"commitment_signature_invalid"}
+    assert (
+        conn.execute("SELECT COUNT(*) FROM sab_ballot_commitments_v1").fetchone()[0]
+        == 0
+    )
     conn.close()
 
 
@@ -807,19 +1082,24 @@ def test_direct_stage_storage_rejects_cross_stage_binding_substitution(
 ) -> None:
     conn = _connect()
     init_transcript_storage(conn)
-    for commitment in ceremony[0].commitments:
-        store_ballot_commitment(conn, commitment)
+    for seat, commitment in zip(
+        ceremony[0].frozen_roster, ceremony[0].commitments, strict=True
+    ):
+        store_ballot_commitment(conn, commitment, frozen_seat=seat)
     for seat, reveal in zip(ceremony[0].frozen_roster, ceremony[0].reveals):
         store_ballot_reveal(conn, reveal, frozen_seat=seat)
     store_stage_envelope(conn, ceremony[0])
 
-    substituted = (
-        ceremony[1]
-        .commitments[0]
-        .model_copy(update={"authority_digest": _digest("substituted-authority")})
+    substituted = _resign_commitment(
+        ceremony[1].commitments[0],
+        updates={"authority_digest": _digest("substituted-authority")},
     )
     with pytest.raises(TranscriptImmutableConflict, match="substitutes"):
-        store_ballot_commitment(conn, substituted)
+        store_ballot_commitment(
+            conn,
+            substituted,
+            frozen_seat=ceremony[1].frozen_roster[0],
+        )
     assert (
         conn.execute(
             "SELECT COUNT(*) FROM sab_ballot_commitments_v1 "
@@ -836,17 +1116,22 @@ def test_immutable_identity_and_stage_slot_conflicts_are_rejected(
     conn = _connect()
     init_transcript_storage(conn)
     original = ceremony[0].commitments[0]
-    store_ballot_commitment(conn, original)
-    conflict = original.model_copy(
-        update={"committed_preimage_sha256": _digest("different-preimage")}
+    frozen_seat = ceremony[0].frozen_roster[0]
+    store_ballot_commitment(conn, original, frozen_seat=frozen_seat)
+    conflict = _resign_commitment(
+        original,
+        updates={"committed_preimage_sha256": _digest("different-preimage")},
     )
     with pytest.raises(
         TranscriptImmutableConflict, match="different transcript content"
     ):
-        store_ballot_commitment(conn, conflict)
-    slot_conflict = original.model_copy(update={"commitment_id": "different-identity"})
+        store_ballot_commitment(conn, conflict, frozen_seat=frozen_seat)
+    slot_conflict = _resign_commitment(
+        original,
+        updates={"commitment_id": "different-identity"},
+    )
     with pytest.raises(TranscriptImmutableConflict, match="already has different"):
-        store_ballot_commitment(conn, slot_conflict)
+        store_ballot_commitment(conn, slot_conflict, frozen_seat=frozen_seat)
     assert (
         conn.execute("SELECT COUNT(*) FROM sab_ballot_commitments_v1").fetchone()[0]
         == 1

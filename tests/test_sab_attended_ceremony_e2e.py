@@ -74,6 +74,7 @@ from agora.sab_first_verdict_transcript import (
     CeremonyStageEnvelopeV1,
     FinalDeliberationSubjectV1,
     ballot_commitment_preimage_sha256,
+    ballot_commitment_signing_bytes,
     canonical_commitment_set_sha256,
     canonical_reveal_set_sha256,
     init_transcript_storage,
@@ -694,13 +695,21 @@ def _stage(
             "seat_position": position,
             "execution_facts": facts,
         }
+        unsigned_commitment = {
+            **draft,
+            "committed_preimage_sha256": ballot_commitment_preimage_sha256(
+                draft,
+                nonce=nonce,
+                ballot=ballot,
+            ),
+        }
         commitments.append(
             BallotCommitmentV1(
-                **draft,
-                committed_preimage_sha256=ballot_commitment_preimage_sha256(
-                    draft,
-                    nonce=nonce,
-                    ballot=ballot,
+                **unsigned_commitment,
+                commitment_signature=_signature(
+                    key,
+                    seat.seat_id,
+                    ballot_commitment_signing_bytes(unsigned_commitment),
                 ),
             )
         )
@@ -940,7 +949,16 @@ def test_offline_attended_ceremony_is_copy_only_non_authorizing_and_sealed(
         assert readiness.standing_effect == "none"
 
     for envelope in transcript:
-        for reveal, frozen_seat in zip(envelope.reveals, roster, strict=True):
+        for commitment, reveal, frozen_seat in zip(
+            envelope.commitments, envelope.reveals, roster, strict=True
+        ):
+            assert commitment.commitment_signature.public_key == (
+                frozen_seat.execution_public_key
+            )
+            assert verify_contract_signature(
+                commitment.signing_bytes(),
+                commitment.commitment_signature,
+            )
             ballot = reveal.ballot
             assert ballot.execution_signature.public_key == (
                 frozen_seat.execution_public_key

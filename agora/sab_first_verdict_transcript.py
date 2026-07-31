@@ -32,9 +32,11 @@ from pydantic import (
 from .sab_artifact_verdict import (
     SHA256_PATTERN,
     ArtifactBallotV1,
+    ContractSignatureV1,
     EvidenceRefV1,
     FrozenSeatV1,
     StrictCanonicalModel,
+    canonical_json_bytes,
     canonical_sha256,
     verify_contract_signature,
 )
@@ -54,6 +56,7 @@ EMPTY_REVEAL_SET_SHA256 = (
 )
 COMMITMENT_DOMAIN = "sab.ballot_commitment.preimage.v1"
 TRANSCRIPT_MIGRATION_ID = "20260801_first_verdict_transcript_v1"
+ZERO_SHA256 = "0" * 64
 
 
 def _utc_now_text() -> str:
@@ -66,6 +69,29 @@ def _exact_nonblank(value: str, *, field: str) -> str:
     if any(ord(character) < 0x20 for character in value):
         raise ValueError(f"{field} cannot contain control characters")
     return value
+
+
+def _first_zero_digest_path(value: Any, *, path: str = "") -> str | None:
+    """Return the first nested digest field carrying the zero placeholder."""
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            item_path = f"{path}.{key}" if path else str(key)
+            if (
+                isinstance(item, str)
+                and item == ZERO_SHA256
+                and (str(key).endswith("_sha256") or str(key).endswith("_digest"))
+            ):
+                return item_path
+            nested = _first_zero_digest_path(item, path=item_path)
+            if nested is not None:
+                return nested
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            nested = _first_zero_digest_path(item, path=f"{path}[{index}]")
+            if nested is not None:
+                return nested
+    return None
 
 
 def _stage_rules(
@@ -105,6 +131,17 @@ class TranscriptCanonicalModel(StrictCanonicalModel):
         populate_by_name=True,
         use_enum_values=True,
     )
+
+    @model_validator(mode="after")
+    def reject_placeholder_digests(self) -> "TranscriptCanonicalModel":
+        """Reject all-zero placeholders at every transcript trust boundary."""
+
+        zero_path = _first_zero_digest_path(self.canonical_payload())
+        if zero_path is not None:
+            raise ValueError(
+                f"{zero_path} must not use the all-zero placeholder digest"
+            )
+        return self
 
 
 class BallotExecutionFactsV1(TranscriptCanonicalModel):
@@ -224,6 +261,7 @@ class BallotCommitmentV1(TranscriptCanonicalModel):
     seat_position: int = Field(ge=0, le=8)
     execution_facts: BallotExecutionFactsV1
     committed_preimage_sha256: str = Field(pattern=SHA256_PATTERN)
+    commitment_signature: ContractSignatureV1
 
     @field_validator("commitment_id", "case_id", "seat_id")
     @classmethod
@@ -239,6 +277,72 @@ class BallotCommitmentV1(TranscriptCanonicalModel):
             final_deliberation_subject_sha256=self.final_deliberation_subject_sha256,
         )
         return self
+
+    def signing_bytes(self) -> bytes:
+        """Canonical commitment context authenticated by the frozen seat."""
+
+        return ballot_commitment_signing_bytes(self)
+
+
+_COMMITMENT_SIGNING_FIELDS = (
+    "schema",
+    "commitment_id",
+    "case_id",
+    "case_sha256",
+    "frozen_roster_sha256",
+    "frozen_seat_sha256",
+    "authority_digest",
+    "rule_digest",
+    "stage",
+    "stage_index",
+    "stage_input_sha256",
+    "preceding_reveal_set_sha256",
+    "final_deliberation_subject_sha256",
+    "seat_id",
+    "seat_position",
+    "execution_facts",
+    "committed_preimage_sha256",
+)
+
+
+def ballot_commitment_signing_payload(
+    commitment: BallotCommitmentV1 | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the exact unsigned commitment payload for frozen-seat signing."""
+
+    if isinstance(commitment, BallotCommitmentV1):
+        return commitment.canonical_payload(exclude={"commitment_signature"})
+    source = dict(commitment)
+    source.pop("commitment_signature", None)
+    if "schema_" in source:
+        if "schema" in source:
+            raise ValueError("commitment signing payload cannot duplicate schema")
+        source["schema"] = source.pop("schema_")
+    source.setdefault("schema", "sab.ballot_commitment.v1")
+    missing = [field for field in _COMMITMENT_SIGNING_FIELDS if field not in source]
+    unknown = sorted(set(source).difference(_COMMITMENT_SIGNING_FIELDS))
+    if missing or unknown:
+        details = []
+        if missing:
+            details.append(f"missing fields: {', '.join(missing)}")
+        if unknown:
+            details.append(f"unknown fields: {', '.join(unknown)}")
+        raise ValueError(
+            "invalid commitment signing payload (" + "; ".join(details) + ")"
+        )
+    payload: dict[str, Any] = {}
+    for field in _COMMITMENT_SIGNING_FIELDS:
+        item = source[field]
+        if isinstance(item, StrictCanonicalModel):
+            item = item.canonical_payload()
+        payload[field] = item
+    return payload
+
+
+def ballot_commitment_signing_bytes(
+    commitment: BallotCommitmentV1 | Mapping[str, Any],
+) -> bytes:
+    return canonical_json_bytes(ballot_commitment_signing_payload(commitment))
 
 
 class BallotRevealV1(TranscriptCanonicalModel):
@@ -652,6 +756,13 @@ def verify_commit_reveal(
                     )
                 )
             errors.extend(
+                _verify_commitment_authenticity(
+                    parsed_commitment,
+                    parsed_seat,
+                    path="pair.commitment.commitment_signature",
+                )
+            )
+            errors.extend(
                 _verify_ballot_authenticity(
                     parsed_reveal.ballot,
                     parsed_seat,
@@ -718,6 +829,45 @@ def _verify_ballot_authenticity(
                 path,
                 "ballot execution signature does not verify over canonical "
                 "unsigned bytes",
+            )
+        )
+    return errors
+
+
+def _verify_commitment_authenticity(
+    commitment: BallotCommitmentV1,
+    seat: FrozenSeatV1,
+    *,
+    path: str,
+) -> list[TranscriptValidationErrorV1]:
+    """Bind a commitment signature to its exact frozen seat and full context."""
+
+    errors: list[TranscriptValidationErrorV1] = []
+    signature = commitment.commitment_signature
+    if signature.signer != seat.seat_id:
+        errors.append(
+            _error(
+                "commitment_signature_signer_mismatch",
+                f"{path}.signer",
+                "commitment signature signer differs from the frozen seat identity",
+            )
+        )
+    if signature.public_key != seat.execution_public_key:
+        errors.append(
+            _error(
+                "commitment_signature_key_mismatch",
+                f"{path}.public_key",
+                "commitment signature key differs from the frozen seat key",
+            )
+        )
+    if not errors and not verify_contract_signature(
+        commitment.signing_bytes(), signature
+    ):
+        errors.append(
+            _error(
+                "commitment_signature_invalid",
+                path,
+                "commitment signature does not verify over canonical unsigned bytes",
             )
         )
     return errors
@@ -1134,9 +1284,24 @@ def verify_ceremony_transcript(
                     "stage index differs from transcript position",
                 )
             )
-        for position, (seat, reveal) in enumerate(
-            zip(envelope.frozen_roster, envelope.reveals)
+        for position, (seat, commitment, reveal) in enumerate(
+            zip(
+                envelope.frozen_roster,
+                envelope.commitments,
+                envelope.reveals,
+                strict=True,
+            )
         ):
+            errors.extend(
+                _verify_commitment_authenticity(
+                    commitment,
+                    seat,
+                    path=(
+                        f"envelopes[{index}].commitments[{position}]"
+                        ".commitment_signature"
+                    ),
+                )
+            )
             errors.extend(
                 _verify_ballot_authenticity(
                     reveal.ballot,
@@ -1742,6 +1907,7 @@ def store_ballot_commitment(
     conn: sqlite3.Connection,
     commitment: BallotCommitmentV1 | Mapping[str, Any],
     *,
+    frozen_seat: FrozenSeatV1 | Mapping[str, Any],
     recorded_at: str | None = None,
 ) -> tuple[BallotCommitmentV1, str, bool]:
     require_copy_or_fixture_connection(conn)
@@ -1755,6 +1921,38 @@ def store_ballot_commitment(
         raise TranscriptImmutableConflict(
             f"invalid ballot commitment: {_safe_validation_detail(exc)}"
         ) from exc
+    try:
+        parsed_seat = (
+            FrozenSeatV1.model_validate(frozen_seat.canonical_payload())
+            if isinstance(frozen_seat, FrozenSeatV1)
+            else FrozenSeatV1.model_validate(frozen_seat)
+        )
+    except Exception as exc:
+        raise TranscriptImmutableConflict(
+            f"invalid frozen seat: {_safe_validation_detail(exc)}"
+        ) from exc
+    commitment_errors: list[TranscriptValidationErrorV1] = []
+    if (
+        model.seat_id != parsed_seat.seat_id
+        or model.frozen_seat_sha256 != parsed_seat.canonical_sha256()
+        or not _facts_match_frozen_seat(model.execution_facts, parsed_seat)
+    ):
+        commitment_errors.append(
+            _error(
+                "frozen_seat_mismatch",
+                "frozen_seat",
+                "commitment differs from the trusted frozen seat",
+            )
+        )
+    commitment_errors.extend(
+        _verify_commitment_authenticity(
+            model,
+            parsed_seat,
+            path="commitment.commitment_signature",
+        )
+    )
+    if commitment_errors:
+        raise TranscriptValidationFailure(_result(commitment_errors))
     _require_commitment_predecessor_binding(conn, model)
     digest = model.canonical_sha256()
     replay = _record_replay(
@@ -2052,9 +2250,14 @@ def store_ceremony_transcript(
     replays: list[bool] = []
     try:
         for envelope in parsed:
-            for commitment in envelope.commitments:
+            for seat, commitment in zip(
+                envelope.frozen_roster, envelope.commitments, strict=True
+            ):
                 _, _, replay = store_ballot_commitment(
-                    conn, commitment, recorded_at=recorded_at
+                    conn,
+                    commitment,
+                    frozen_seat=seat,
+                    recorded_at=recorded_at,
                 )
                 replays.append(replay)
                 if failure_hook is not None:
@@ -2186,6 +2389,8 @@ __all__ = [
     "TranscriptValidationResultV1",
     "ballot_commitment_preimage_payload",
     "ballot_commitment_preimage_sha256",
+    "ballot_commitment_signing_bytes",
+    "ballot_commitment_signing_payload",
     "canonical_commitment_set_sha256",
     "canonical_reveal_set_sha256",
     "init_ceremony_transcript_storage",
