@@ -39,6 +39,7 @@ GIT_SHA_PATTERN = r"^[0-9a-f]{40}$"
 HEX_PUBLIC_KEY_PATTERN = r"^[0-9a-f]{64}$"
 HEX_SIGNATURE_PATTERN = r"^[0-9a-f]{128}$"
 CANONICALIZATION = "json-sort-keys-compact-v1"
+StrictNonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
 MASTER_VISION_SEED_ID = "sab_seed_master_vision_v1_ebe422aab149"
 MASTER_VISION_CHALLENGE_ID = "sab_challenge_master_vision_v1_ebe422aab149"
 MASTER_VISION_SOURCE_COMMIT = "bc9d2f6f8b8a17964a94d627a0e2d6917c375611"
@@ -1544,6 +1545,13 @@ class ArtifactBallotV1(StrictCanonicalModel):
     vendor_signature_claimed: Literal[False] = False
     execution_signature: ContractSignatureV1
 
+    @field_validator("round_no", mode="before")
+    @classmethod
+    def exact_round_type(cls, value: Any) -> int:
+        if type(value) is not int:
+            raise ValueError("round_no must be an exact integer")
+        return value
+
     @field_validator(
         "unresolved_objections", "transport_correlation_refs", mode="before"
     )
@@ -1573,8 +1581,8 @@ class CouncilVerdictV1(StrictCanonicalModel):
         "no_terminal_verdict",
         "appeal_required",
     ]
-    raw_tally: dict[str, int]
-    clean_routing_tally: dict[str, int]
+    raw_tally: dict[str, StrictNonNegativeInt]
+    clean_routing_tally: dict[str, StrictNonNegativeInt]
     credited_clusters_by_result: dict[str, tuple[str, ...]]
     smeared_seats: tuple[str, ...]
     correlation_removal_result: Literal[
@@ -1593,6 +1601,13 @@ class CouncilVerdictV1(StrictCanonicalModel):
     effect_domain: Literal["artifact"] = "artifact"
     standing_effect: Literal["none"] = "none"
     compiled_at: datetime
+
+    @field_validator("round_no", mode="before")
+    @classmethod
+    def exact_round_type(cls, value: Any) -> int:
+        if type(value) is not int:
+            raise ValueError("round_no must be an exact integer")
+        return value
 
     @field_validator(
         "smeared_seats", "appeal_reasons", "requested_effects", mode="before"

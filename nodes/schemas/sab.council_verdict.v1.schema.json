@@ -54,6 +54,7 @@
     },
     "clean_routing_tally": {
       "additionalProperties": {
+        "minimum": 0,
         "type": "integer"
       },
       "title": "Clean Routing Tally",
@@ -111,6 +112,7 @@
     },
     "raw_tally": {
       "additionalProperties": {
+        "minimum": 0,
         "type": "integer"
       },
       "title": "Raw Tally",

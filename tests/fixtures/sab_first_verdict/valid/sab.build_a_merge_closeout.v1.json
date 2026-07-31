@@ -1,0 +1,54 @@
+{
+  "schema": "sab.first_verdict.build_a_merge_closeout.v1",
+  "created_at_utc": "2026-07-31T15:31:25Z",
+  "repository": "AmitabhainArunachala/SAB-Syntropic-Attractor-Basin",
+  "pull_request": {
+    "number": 11,
+    "url": "https://github.com/AmitabhainArunachala/SAB-Syntropic-Attractor-Basin/pull/11",
+    "state": "MERGED",
+    "head": "ab4e0d0fc15cf0712cdd4c81f328174f07f7ee7a",
+    "head_tree": "92e523eec91c8dc52573835625bf1fb2ddc30b3a",
+    "merge_commit": "6ad237af3414288cee52148a5f0dec7c69f32b71",
+    "merge_tree": "92e523eec91c8dc52573835625bf1fb2ddc30b3a",
+    "merged_at_utc": "2026-07-31T15:31:25Z"
+  },
+  "github_ci": {
+    "run_id": 30643074765,
+    "test_python_3_10": "PASS",
+    "test_python_3_11": "PASS",
+    "test_python_3_12": "PASS",
+    "security": "PASS",
+    "lint": "PASS",
+    "docker": "PASS"
+  },
+  "final_local_verification": {
+    "full_pytest": "732 passed, 33 warnings in 35.46s",
+    "atomic_pytest": "31 passed",
+    "bandit": "0 high, 0 medium, 0 low",
+    "ruff_check": "PASS",
+    "ruff_format_check": "PASS",
+    "compileall": "PASS",
+    "governance_and_orientation": "PASS",
+    "worktree_clean": true
+  },
+  "ci_repairs": {
+    "7d3fe7af6d74e4bd059112eb297bf294dcd708e1": "test checkout now fetches pinned ancestor evidence required by the signed Master Vision proof",
+    "ab4e0d0fc15cf0712cdd4c81f328174f07f7ee7a": "SQLite secret-persistence assertion uses Python-3.10-compatible iterdump inspection"
+  },
+  "prior_receipts": {
+    "integration_replay": "/Users/dhyana/handoffs/SAB_FIRST_VERDICT_BUILD_V2/runs/20260731T151943Z_integration_replay/INTEGRATION_REPLAY_CLOSEOUT.json",
+    "integration_replay_sha256": "a8d9558114c8c513ade2319ee1ba2c0273b56066eb78c1c4256132c655b9f5f6",
+    "linux_portability": "/Users/dhyana/handoffs/SAB_FIRST_VERDICT_BUILD_V2/runs/20260731T143251Z_linux_portability/LINUX_PORTABILITY_CLOSEOUT.json",
+    "linux_portability_sha256": "b73ebaa81d6e3188045b5464585889bd4b678c4f1fa6be81d9422eb30c3cc406"
+  },
+  "terminal_claim": {
+    "engineering_status": "proven_on_copy_and_merged",
+    "historic_live_win": false,
+    "live_mutations": 0,
+    "service_mutations": 0,
+    "provider_calls": 0,
+    "standing_effect": "none",
+    "master_vision_effect": "none",
+    "build_b": "not_run_at_build_a_merge"
+  }
+}
