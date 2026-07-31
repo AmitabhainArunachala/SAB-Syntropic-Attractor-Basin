@@ -346,6 +346,25 @@ def test_rule_is_explicit_self_hashed_and_has_no_implicit_default() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "malformed_effects",
+    [
+        ("challenge:resolve", "challenge:resolve", "seed:supersede"),
+        (" challenge:resolve", "seed:supersede"),
+        ("seed:supersede", "challenge:resolve"),
+    ],
+)
+def test_rule_rejects_noncanonical_effect_lists(
+    malformed_effects: tuple[str, ...],
+) -> None:
+    body = _rule().canonical_payload(exclude={"rule_sha256"})
+    body["effects_by_decision"] = {"correct_and_supersede": list(malformed_effects)}
+    with pytest.raises(ValidationError):
+        CouncilTerminalityRuleV1.model_validate(
+            {**body, "rule_sha256": _digest("malformed-rule")}
+        )
+
+
 def test_five_of_nine_and_five_clean_clusters_compile_terminal_verdict() -> None:
     authority = _evaluated_authority()
     outcome = compile_council_outcome(**_compile_kwargs(authority, _terminal_ballots()))
@@ -571,6 +590,37 @@ class _MeritsBomb:
         raise AssertionError("authority refusal measured merit-bearing input")
 
 
+@pytest.mark.parametrize(
+    "malformed_effects",
+    [
+        ("challenge:resolve", "challenge:resolve", "seed:supersede"),
+        ("challenge:resolve ", "seed:supersede"),
+        ("seed:supersede", "challenge:resolve"),
+    ],
+)
+def test_malformed_requested_effects_refuse_before_merit_parsing(
+    malformed_effects: tuple[str, ...],
+) -> None:
+    outcome = compile_council_outcome(
+        authority=_evaluated_authority(),
+        case_id=_MeritsBomb(),
+        case_sha256=_MeritsBomb(),
+        ballots=_MeritsBomb(),
+        rule=_MeritsBomb(),
+        frozen_roster=_MeritsBomb(),
+        requested_scope="Copy",
+        requested_effects=malformed_effects,
+        compiled_at=_MeritsBomb(),
+    )
+    assert isinstance(outcome, RefusalReceiptV1)
+    assert outcome.reason == "requested_effects_malformed"
+    assert outcome.effects == ()
+    assert outcome.authority_inspected is False
+    assert outcome.terminality_rule_inspected is False
+    assert outcome.ballots_inspected is False
+    assert outcome.merits_parsed is False
+
+
 def test_every_authority_denial_short_circuits_deliberately_malformed_merits() -> None:
     authorized = _evaluated_authority()
     cases = (
@@ -621,7 +671,8 @@ def test_every_authority_denial_short_circuits_deliberately_malformed_merits() -
 
 
 def test_rule_effect_mismatch_refuses_before_ballot_parsing() -> None:
-    authority = _evaluated_authority(effects=EFFECTS + ("seed:canon",))
+    extra_effects = tuple(sorted(EFFECTS + ("seed:canon",)))
+    authority = _evaluated_authority(effects=extra_effects)
     outcome = compile_council_outcome(
         authority=authority,
         case_id=_MeritsBomb(),
@@ -630,7 +681,7 @@ def test_rule_effect_mismatch_refuses_before_ballot_parsing() -> None:
         rule=_rule(),
         frozen_roster=_MeritsBomb(),
         requested_scope="Copy",
-        requested_effects=EFFECTS + ("seed:canon",),
+        requested_effects=extra_effects,
         compiled_at=_MeritsBomb(),
     )
     assert isinstance(outcome, RefusalReceiptV1)

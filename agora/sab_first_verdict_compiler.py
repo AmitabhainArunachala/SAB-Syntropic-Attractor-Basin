@@ -72,9 +72,11 @@ class CouncilCompilationError(ValueError):
 
 
 def _nonblank(value: Any, *, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be a nonblank string")
-    return value.strip()
+    if value != value.strip():
+        raise ValueError(f"{field} must not contain surrounding whitespace")
+    return value
 
 
 def _exact_strings(
@@ -87,11 +89,15 @@ def _exact_strings(
         raise ValueError(f"{field} must be a sequence of strings")
     if any(not isinstance(value, str) for value in values):
         raise ValueError(f"{field} must contain strings only")
-    normalized = tuple(sorted({_nonblank(value, field=field) for value in values}))
+    normalized = tuple(_nonblank(value, field=field) for value in values)
     if not normalized and not allow_empty:
         raise ValueError(f"{field} cannot be empty")
     if any("*" in value for value in normalized):
         raise ValueError(f"{field} cannot contain wildcard values")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"{field} cannot contain duplicate values")
+    if normalized != tuple(sorted(normalized)):
+        raise ValueError(f"{field} must use canonical sorted order")
     return normalized
 
 
