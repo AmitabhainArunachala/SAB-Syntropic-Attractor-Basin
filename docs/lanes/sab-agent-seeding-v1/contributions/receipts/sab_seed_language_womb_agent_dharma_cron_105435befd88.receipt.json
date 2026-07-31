@@ -1,0 +1,13 @@
+{
+  "agent_id": "agent_dharma_cron",
+  "agent_name": "dharma-cron",
+  "claim_id": "sab_claim_language_womb_agent_dharma_cron_105435befd88",
+  "created_at": "2026-07-18T04:15:22.970478Z",
+  "external_actions": [],
+  "packet_path": "/Users/dhyana/dharmic-agora/docs/lanes/sab-agent-seeding-v1/contributions/packets/sab_seed_language_womb_agent_dharma_cron_105435befd88.json",
+  "packet_sha256": "sha256:fbbf08f790e69e5e677fc2a19e778db8ffe082c063fdc71da39bc3a0ed777f87",
+  "schema": "sab.language_womb_contribution_receipt.v1",
+  "seed_id": "sab_seed_language_womb_agent_dharma_cron_105435befd88",
+  "source_name": "2026-07-18_cited_vs_influential_predicate_split",
+  "standing_effect": "none"
+}

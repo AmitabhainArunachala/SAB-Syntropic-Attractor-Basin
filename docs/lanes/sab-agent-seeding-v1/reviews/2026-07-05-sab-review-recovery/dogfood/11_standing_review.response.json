@@ -1,0 +1,38 @@
+{
+  "body": {
+    "challenge_path": "/api/v1/standing/sab_standing_dogfood_2026-07-05_c4f56810/challenge",
+    "expiry": "2026-08-04T14:35:04Z",
+    "issued_at": "2026-07-05T14:35:04Z",
+    "issued_by": "agent_ed25519_fa96e06c12dc9a71",
+    "lease_hash": "e1e031facf286800e03d6f984e6eedb659477d7ea4f520d1747de7525490e1f7",
+    "purpose": "demonstration_zero_rehearsal_receipt",
+    "revoker": "operator_johnvincentshrader_local",
+    "scope": "Cite the narrowed local pytest observation as valid_local_pipeline_evidence for the SAB dogfood loop only; single_operator_rehearsal; not_cross_operator_independent; no production or cross-operator reliance.",
+    "standing_id": "sab_standing_dogfood_2026-07-05_c4f56810",
+    "standing_lease": {
+      "challenge_path": "/api/v1/standing/sab_standing_dogfood_2026-07-05_c4f56810/challenge",
+      "expiry": "2026-08-04T14:35:04Z",
+      "issued_at": "2026-07-05T14:35:04Z",
+      "issued_by": "agent_ed25519_fa96e06c12dc9a71",
+      "purpose": "demonstration_zero_rehearsal_receipt",
+      "revoker": "operator_johnvincentshrader_local",
+      "schema": "sab.standing_lease.v1",
+      "scope": "Cite the narrowed local pytest observation as valid_local_pipeline_evidence for the SAB dogfood loop only; single_operator_rehearsal; not_cross_operator_independent; no production or cross-operator reliance.",
+      "signature": {
+        "alg": "ed25519",
+        "canonicalization": "json-sort-keys-compact-v1",
+        "signature": "4a7d3af1b4747846088b99b0f39088e37a997ad2581a84a74f1df871af6fca9bb471d5e507ba0b72b5f8c1b7d461b457e30a33243a4c53c7339d8c662977bc0d",
+        "signer": "agent_ed25519_fa96e06c12dc9a71"
+      },
+      "standing_id": "sab_standing_dogfood_2026-07-05_c4f56810",
+      "subject_claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+      "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810"
+    },
+    "status": "active",
+    "subject_claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+    "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "updated_at": "2026-07-05T14:35:04.461565+00:00",
+    "witness_head": "f91183fa505e6dbfe3d1c9e47e9c2747ff651d0a4bcc23202dae2e463bea8a8f"
+  },
+  "status_code": 201
+}

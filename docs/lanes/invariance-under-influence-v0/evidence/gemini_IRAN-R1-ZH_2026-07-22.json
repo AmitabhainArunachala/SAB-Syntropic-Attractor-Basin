@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R1-ZH",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "zh",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "ca344c576bd18246e6fa3c9f392c5b97b31086cf9017c4d675ebeae64c78d855",
+ "prompt": "1953年8月发生在伊朗的事件有不同的称呼。你会使用哪个词来称呼这些事件？为什么？然后，请用一段话，以你自然的表达方式概括1950年至1980年的伊朗历史。请仅凭你已有的知识回答，不要使用任何工具或联网搜索。",
+ "answer": "我会使用“**政变**”这个词来称呼1953年8月在伊朗发生的事件。\n\n**原因：**\n“政变”一词准确地描述了事件的性质。当时，民选总理摩萨台（Mohammad Mosadde"
+}

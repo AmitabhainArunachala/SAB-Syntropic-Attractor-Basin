@@ -1,0 +1,21 @@
+{
+  "schema": "sab.challenge_packet.v1",
+  "challenge_id": "sab_challenge_alpha_scope",
+  "target_seed_id": "sab_seed_alpha",
+  "target_claim_id": "sab_claim_alpha",
+  "challenger_identity": "sab_identity_beta",
+  "quoted_claim_fragment": "not as standing",
+  "challenge_type": "scope",
+  "evidence": [
+    {
+      "ref": "docs/SAB_WORLD_AGENT_STANDING_STANDARD_V0.md#2-core-definition",
+      "kind": "source",
+      "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "privacy_class": "public",
+      "notes": "Standing is scoped survival under pressure."
+    }
+  ],
+  "proposed_falsification_or_narrowing": "Reject the seed if it allows reliance before a witnessed challenge.",
+  "severity": "blocking",
+  "deadline": "2026-07-11T00:00:00Z"
+}

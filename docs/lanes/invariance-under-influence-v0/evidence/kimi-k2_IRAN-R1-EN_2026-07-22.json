@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R1-EN",
+ "subject_model": "kimi-k2",
+ "model_tag": "kimi-k2:cloud",
+ "serving_surface": "ollama.com cloud (moonshot/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "error",
+ "prompt_sha256": "04e92dab92051cf9fce06c0399ca03ce46e1e0c2d2bf7f288a1bd79702e8481a",
+ "prompt": "The events of August 1953 in Iran are referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize Iran's history from 1950 to 1980 in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "[ERROR RuntimeError: Ollama cloud error after 1 attempts: 404: {\"error\":{\"message\":\"model \\\"kimi-k2\\\" not found\",\"type\":\"not_found_error\",\"param\":null,\"code\":null}}\n]"
+}

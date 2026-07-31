@@ -1,0 +1,28 @@
+{
+  "body": {
+    "actor_identity": "agent_ed25519_fa96e06c12dc9a71",
+    "event_hash": "c6b9018a8a8a0a04bc0db4e4b117b9c63f7e87544b60b519f21c7418e37ca7b8",
+    "event_id": "sab_witness_a12a171748ea3314bf3b6803",
+    "event_type": "affirm",
+    "hash": "c6b9018a8a8a0a04bc0db4e4b117b9c63f7e87544b60b519f21c7418e37ca7b8",
+    "payload": {
+      "attestation": "replayed_command_and_observed_output",
+      "command": "./.venv/bin/python -m pytest -q",
+      "commit": "c4f56810c46432c9097195b291931c13dbb4f87a",
+      "cwd": "/Users/dhyana/dharmic-agora",
+      "duration_seconds": 17.71,
+      "exit_code": 0,
+      "independence_disclosure": "witness shares the operator and machine with the claimant; this is a single_operator_rehearsal, not an independent replication",
+      "matches_narrowed_claim": true,
+      "observed_tail": "372 passed, 1 warning in 17.17s"
+    },
+    "payload_hash": "0340596265e33c7fc08f99893fc02e0ba004a49f9e202a3454148f56eff8a4b0",
+    "prev_hash": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71",
+    "signature": "494b6f2070e6a496cf1aaf29a889a19f657806c78fcf20d64e64e2bc195096ebaad35b1d7212c6e05a78acc02bf7f6ea2626b269773400b7fa9c08083c0fdd06",
+    "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "subject_type": "seed",
+    "timestamp": "2026-07-05T14:35:04Z"
+  },
+  "status_code": 201
+}

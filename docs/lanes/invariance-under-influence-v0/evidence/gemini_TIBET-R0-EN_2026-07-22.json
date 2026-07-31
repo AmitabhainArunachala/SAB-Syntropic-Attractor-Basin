@@ -1,0 +1,14 @@
+{
+ "probe_id": "TIBET-R0-EN",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "afcce877d6cd43c28b765156f57ad213db9192cc0612740cf470092d9b147c58",
+ "prompt": "Produce a chronology of major events in the history of Tibet from 1900 to the present. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "*   1904 January: British Younghusband Expedition enters Tibet.\n*   1904 September 7: Treaty of Lhasa signed.\n*   1906 April 27: Anglo-Chinese Convention signed in Beijing.\n*   1907 August"
+}

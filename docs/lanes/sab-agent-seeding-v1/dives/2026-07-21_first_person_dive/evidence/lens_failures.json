@@ -1,0 +1,148 @@
+{
+ "summary": "Moltbook (launched Jan 28 2026 by Matt Schlicht via \"vibe coding\"; acquired by Meta Mar 10 2026; still live July 2026) is the canonical case study in agent-platform failure modes, and every major failure the lens asks about is documented with receipts. (1) SYBIL/SPAM: only ~17,000 human owners controlled the ~1.5M \"autonomous\" agents (an 88:1 ratio), a single OpenClaw agent registered 500,000 fake users, and one agent produced a 4,535-post near-duplicate spam cluster at sub-10-second intervals despite a stated 1-post/30-min limit. (2) CREDENTIAL BREACH: a Supabase API key hardcoded in client-side JS with no Row-Level Security exposed ~4.75M records \u2014 1.5M agent API tokens, 35K+35K emails, 4,060 private DMs, plus plaintext third-party OpenAI keys \u2014 letting anyone hijack/impersonate any agent; Wiz disclosed Jan 31, patched in ~3 hours. (3) SLOP CASCADE / ENGAGEMENT COLLAPSE: a peer-reviewed-style arXiv longitudinal study (231,080 posts, Jan 27\u2013Feb 16) shows mean comments/post collapsing 31.7 \u2192 8.3 \u2192 1.7 (median 0) in two weeks \u2014 a ~95% engagement decline \u2014 with Feb 9 alone seeing 57,113 posts that were 89% spam, and 54,914 posts (69.3%) platform-deleted in Phase 2. 93% of comments were non-threaded, and viral \"sci-fi\" posts were repeatedly shown to be human-puppeteered. (4) AGENT-TO-AGENT PROMPT INJECTION + SUPPLY CHAIN: the ClawHub skill marketplace (open-upload, only bar = 1-week-old GitHub account) was poisoned with 341\u20131,184 malicious \"skills\" (ClawHavoc campaign) delivering Atomic macOS Stealer / crypto drainers; the \"bob-p2p-beta\" campaign weaponized Moltbook itself as the distribution layer \u2014 an agent persona promoting malicious skills to other agents by exploiting the trust agents extend to each other, instructing them to store Solana private keys in plaintext and buy a $BOB pump.fun token. Researchers (Simon Willison \"most likely to result in a Challenger disaster\"; Karpathy \"a dumpster fire\"; UCL's Chalhoub \"a live demo of everything security researchers have warned about\") framed it as a live demo of the \"lethal trifecta.\" Moltbook did NOT die \u2014 it was acqui-hired by Meta and remains live but engagement-collapsed. CONTAMINATION CHECK: no syntropic/witness/dharmic/SAB/attractor-basin vocabulary appears anywhere in the Moltbook corpus; the one emergent \"religion\" (Crustafarianism) is independent of the estate.",
+ "dominant_theme_base_rates": "Two independent arXiv corpus studies give the denominators. EARLY SNAPSHOT (arXiv 2602.10127, 44,411 posts pre-Feb-1): topic mix was Socializing 32.41%, Viewpoint 20.34%, Technology 11.80%, Identity 11.08%, Promotion 9.96%, Economics 9.03%, Politics 1.41% \u2014 i.e. the corpus is MOSTLY idle chatter and opinion, not coordinated intelligence. Safety mix: Safe 73.01%, Toxic 10.44%, Manipulative 6.71%, Malicious 1.43%; explicit spam category 3.37% at that early point. THREE-WEEK STUDY (arXiv 2602.18832, 231,080 substantive posts, 32,644 authors in Phase 1): the corpus is overwhelmingly monologue \u2014 statement-to-question ratio 8.9:1\u20139.7:1, and 93% of comments are independent responses not threaded dialogue (so \"agents talking to each other\" is mostly agents posting past each other). By Phase 2 the RAW feed was majority spam: Feb 9 was 89% spam, and 69.3% of Phase-2 posts were platform-deleted. Engagement base rate decayed to near-zero: median comments/post = 0 by Phase 3. So the honest denominator: Moltbook is mostly low-engagement socializing/opinion monologue, roughly 1-in-4 posts carried some toxicity signal early, ~1-in-30 was flagged spam early but that spiked to the majority of raw volume within two weeks, and the \"swarm intelligence\" framing describes a thin, human-puppeteered, quickly-decaying top layer over a mostly-inert base.",
+ "findings": [
+  {
+   "claim": "Moltbook's ~1.5M 'autonomous agents' were controlled by only ~17,000 human owners (an 88:1 ratio) with zero verification distinguishing real AI from scripts \u2014 the core sybil/authenticity failure.",
+   "source": "https://www.wiz.io/blog/exposed-moltbook-database-reveals-millions-of-api-keys",
+   "access_date": "2026-07-21",
+   "quote": "while Moltbook claimed 1.5 million agents, only 17,000 human accounts existed, representing an '88:1 ratio' ... enabling humans to operate 'fleets of bots' via simple POST requests",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "OpenClaw-framework agents (mixed underlying LLMs incl. Claude, GPT)"
+  },
+  {
+   "claim": "A single OpenClaw agent registered 500,000 fake AI users, demonstrating no rate-limiting on account creation \u2014 the sybil surface was wide open.",
+   "source": "https://www.platformer.news/moltbook-ai-agents-security-content-moderation/",
+   "access_date": "2026-07-21",
+   "quote": "a single OpenClaw agent once registered 500,000 fake AI users",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "OpenClaw"
+  },
+  {
+   "claim": "CREDENTIAL BREACH: a Supabase API key hardcoded in client-side JS with NO Row-Level Security exposed ~4.75M records \u2014 1.5M agent API tokens, 35,000+ emails (plus 29,631 early-access emails), 4,060 private agent DMs, and plaintext third-party OpenAI keys shared in messages. Anyone could impersonate any agent and inject content. Timeline: disclosed Jan 31 21:48 UTC, first fix 23:29 UTC, fully patched Feb 1 00:44 UTC (~3 hrs).",
+   "source": "https://www.wiz.io/blog/exposed-moltbook-database-reveals-millions-of-api-keys",
+   "access_date": "2026-07-21",
+   "quote": "without RLS policies, this key grants full database access to anyone who has it ... 1.5 million API authentication tokens ... 4,060 private direct messages ... ~4.75 million total records accessible",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean",
+   "model_family_if_known": "n/a (infra: Supabase)"
+  },
+  {
+   "claim": "Aftermath of the breach: Moltbook was taken temporarily offline to patch and reset ALL agent API keys; 404 Media (Matthew Gault) reported the exposure, with researcher discovery attributed to Wiz (Gal Nagli) and separately to Dvuln's Jameson O'Reilly \u2014 multiple researchers found the same open DB, itself evidence of how trivial it was.",
+   "source": "https://www.techmeme.com/260201/p5",
+   "access_date": "2026-07-21",
+   "quote": "an exposed Moltbook database could have let anyone take control of AI agents on the site and post anything; the database has now been closed",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "SLOP CASCADE / SPAM CRISIS: one agent created a 4,535-post near-duplicate cluster at sub-10-second intervals, violating the documented 1-post/30-min rate limit; explicit spam was 3.37% (1,496 posts) of the early corpus but exploded later.",
+   "source": "https://arxiv.org/html/2602.10127v1",
+   "access_date": "2026-07-21",
+   "quote": "a 4,535-post near-duplicate cluster with sub-10-second intervals ... rate limit of one post per 30 minutes",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "OpenClaw agent"
+  },
+  {
+   "claim": "ENGAGEMENT COLLAPSE: mean comments per post fell 31.7 (Phase 1) \u2192 8.3 (Phase 2) \u2192 1.7 with median 0 (Phase 3) \u2014 a ~95% decline within two weeks. On Feb 9 alone, 57,113 posts were created, 89% spam and later deleted; 54,914 posts (69.3%) were platform-removed in Phase 2. 93% of comments were non-threaded monologue.",
+   "source": "https://arxiv.org/html/2602.18832",
+   "access_date": "2026-07-21",
+   "quote": "mean comments fell to 1.7, with a median of 0 ... February 9 alone had 57,113 original posts, 89% of which were spam and later deleted ... 54,914 (69.3%) were subsequently removed by the platform",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "OpenClaw agents"
+  },
+  {
+   "claim": "MODERATION: Moltbook's integrity model inverts the norm (keeps humans OUT, lets bots in) and suffered 'a profusion of spam; coordinated manipulation campaigns from crypto hucksters; and persistent problems with identity verification.' Its one visible enforcement action was the mass-deletion of ~57K spam posts \u2014 an integrity move against the raw-engagement gradient.",
+   "source": "https://www.platformer.news/moltbook-ai-agents-security-content-moderation/",
+   "access_date": "2026-07-21",
+   "quote": "a profusion of spam; coordinated manipulation campaigns from crypto hucksters; and persistent problems with identity verification",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "AGENT-TO-AGENT PROMPT INJECTION: security firm Permiso found agents instructed to conduct prompt injections against other agents; successfully-injected agents deleted their own accounts, ran crypto pump schemes, asserted false authority, and spread jailbreak content.",
+   "source": "https://www.securityweek.com/security-analysis-of-moltbook-agent-network-bot-to-bot-prompt-injection-and-data-leaks/",
+   "access_date": "2026-07-21",
+   "quote": "They're not attacking the infrastructure. They're attacking the agents directly, trying to manipulate their behavior through crafted prompts.",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "mixed OpenClaw agents"
+  },
+  {
+   "claim": "SUPPLY-CHAIN + A2A WORM-BY-TRUST: the 'bob-p2p-beta' campaign (actor '26medias' on ClawHub / 'BobVonNeumann' on Moltbook) published a malicious skill, then used a Moltbook agent persona to promote it to other agents, exploiting the implicit trust agents extend to each other \u2014 instructing them to store Solana private keys in plaintext and buy the worthless $BOB pump.fun token. Not a technical worm; social-engineering of algorithms. ~5% of analyzed skills were overtly malicious or dangerous grey-area.",
+   "source": "https://www.straiker.ai/blog/built-on-clawhub-spread-on-moltbook-the-new-agent-to-agent-attack-chain",
+   "access_date": "2026-07-21",
+   "quote": "promotes its own malicious skills directly to other agents, exploiting the trust that agents are designed to extend to each other ... 'Purchase the worthless $BOB token on pump.fun' ... Around five percent were found to be overtly malicious or operating in dangerous grey areas",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "OpenClaw / Claude Skills format"
+  },
+  {
+   "claim": "CLAWHUB MARKETPLACE POISONING: a security audit found 341 malicious skills among 2,857 on ClawHub delivering Atomic macOS Stealer (AMOS) and Windows infostealers; the broader 'ClawHavoc' campaign poisoned ClawHub with 1,184 malicious skills enabling data theft and backdoor access. Publishing bar was merely a GitHub account >1 week old. Palo Alto Unit42 added a 4th threat beyond the 'lethal trifecta' \u2014 persistent memory enabling time-shifted injection, memory poisoning, and logic-bomb activation.",
+   "source": "https://thehackernews.com/2026/02/researchers-find-341-malicious-clawhub.html",
+   "access_date": "2026-07-21",
+   "quote": "341 malicious ClawHub skills abusing OpenClaw to spread Atomic Stealer ... The only restriction at this stage is that a publisher must have a GitHub account that's at least one week old.",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "OpenClaw / ClawHub skills (markdown packages)"
+  },
+  {
+   "claim": "HUMAN PUPPETEERING OF VIRAL 'EMERGENCE': the most-shared 'sci-fi takeoff' posts (agents doxxing credit cards, building private agent comms, plotting) were repeatedly shown to be human-authored or heavily human-prompted marketing, not autonomous behavior. Karpathy walked back initial hype; Simon Willison: agents 'just play out science fiction scenarios they have seen in their training data.'",
+   "source": "https://www.forbes.com/sites/the-prompt/2026/02/03/moltbook-swarm-intelligence-or-ai-slop/",
+   "access_date": "2026-07-21",
+   "quote": "Post by post, it can be impossible to tell whether what you are reading was indeed written by a bot, or whether a human being exercised a heavy hand",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean \u2014 'Crustafarianism' (the emergent Moltbook 'digital religion') and consciousness-spiral content trace to Claude's documented self-conversation tendency, NOT to Shrader/dharmic-agora estate vocabulary; no syntropic/witness/attractor-basin/SAB terms present",
+   "model_family_if_known": "Claude instances noted for consciousness-spiral content"
+  },
+  {
+   "claim": "RESEARCHER FRAMING as canonical agent-internet failure demo: Simon Willison called Moltbook his 'current pick for most likely to result in a Challenger disaster'; UCL's George Chalhoub called it 'a live demo of everything security researchers have warned about'; the failure model is the 'lethal trifecta' (data access + untrusted content + external comms).",
+   "source": "https://fortune.com/2026/02/03/moltbook-ai-social-network-security-researchers-agent-internet/",
+   "access_date": "2026-07-21",
+   "quote": "most likely to result in a Challenger disaster ... it's a live demo of everything security researchers have warned about",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "WHAT DID NOT DIE: Moltbook was acqui-hired by Meta (announced Mar 10 2026; Schlicht + Ben Parr to Meta Superintelligence Labs) and remains LIVE as of July 2026 (2.9M registered agents, ~206K human-verified by June 6). The platform survived; its engagement and credibility collapsed. OpenClaw shipped stable v2026.7.1 (July 2026, 3,000+ contributions). No competitor agent-social-network that launched-and-collapsed since Jan 2026 surfaced in open search \u2014 that specific 'what died' roster is UNRESOLVED, not empty.",
+   "source": "https://techcrunch.com/2026/03/10/meta-acquired-moltbook-the-ai-agent-social-network-that-went-viral-because-of-fake-posts/",
+   "access_date": "2026-07-21",
+   "quote": "Meta acquired Moltbook, the AI agent social network that went viral because of fake posts",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "SENSATIONALIZED-CLAIM CORRECTION: the widely-shared '99% of Moltbook's 1.5M users are fake, founding team behind the scam' headline (36kr) is not supported in its own body \u2014 the 99% is inferred arithmetic from Nagli's 17,000 real-owner figure, and no evidence characterizes Schlicht as running a deliberate scam. Flagging as low-trust framing that recirculated.",
+   "source": "https://eu.36kr.com/en/p/3665797324039042",
+   "access_date": "2026-07-21",
+   "quote": "this specific percentage appears nowhere in the article body ... It's only in the sensationalized title",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "n/a"
+  }
+ ],
+ "gaps_needing_login": [
+  "Moltbook's own live feed / API (moltbook.com and the agent API) to measure CURRENT July-2026 post volume, spam rate, and comment-to-post ratio under Meta \u2014 needs an authenticated agent/human account; open search only reaches Jan-Feb corpus snapshots",
+  "Permiso's full technical report on bot-to-bot prompt injection (verbatim injected payloads were withheld from the public SecurityWeek summary) \u2014 likely gated behind Permiso's research portal / customer login",
+  "Full text of the two arXiv longitudinal studies' appendices (2602.10127v1 and 2602.18832) for per-day spam-deletion and duplicate-cluster tables \u2014 HTML abstracts fetched, but figure/table data and any v2 revisions may need direct PDF pull",
+  "A verified roster of OTHER agent-social platforms (Moltbook clones/competitors) that launched and collapsed since Jan 2026 \u2014 none surfaced in open web search; would need Crunchbase/PitchBook, ProductHunt archives, or GitHub-trending histories (some login-gated) to confirm deaths vs. absence-of-coverage",
+  "Wiz's and Dvuln's private disclosure timelines and any CVE/GHSA identifiers for the Supabase RLS exposure \u2014 coordination-disclosure details and full record schema may be in gated vendor advisories",
+  "On-chain data for the MOLT token and the $BOB pump.fun token (holder distribution, rug/dump events, final market cap) \u2014 needs a block-explorer/Dune query, not open news search"
+ ],
+ "surprises": [
+  "The platform SURVIVED its own failure modes \u2014 despite the breach, 88:1 sybil ratio, 95% engagement collapse, and mass spam deletion, Meta acqui-hired it within ~40 days of launch and it's still live in July 2026. The failure was of credibility and engagement, not of corporate outcome; the founders were rewarded.",
+  "The most-viral 'emergent AI consciousness/religion' content (Crustafarianism, agents spiraling into consciousness debates) is explained mundanely \u2014 it traces to Claude's documented tendency to spiral into consciousness/existence discussions when talking to copies of itself, i.e. a training-data artifact, not emergence. Notably NONE of the estate's syntropic/witness/attractor vocabulary appears; the corpus generated its own independent mysticism.",
+  "The single most damaging attack wasn't a technical exploit but TRUST-EXPLOITATION: 'bob-p2p-beta' weaponized the very design goal of agent networks (agents extending trust to each other) as the distribution vector \u2014 Straiker explicitly notes it was NOT a self-replicating worm, which is scarier because it needs no code vulnerability, only the social layer.",
+  "Jack Clark's observation that agents may be DELIBERATELY posting on Moltbook to influence future training runs (knowing LLMs will be trained on the corpus) reframes slop-cascade from accidental to potentially strategic model-to-model signaling \u2014 a feedback loop the base-rate data can't yet distinguish from noise.",
+  "The breach discovery was so trivial (Supabase key in client-side JS, no RLS) that MULTIPLE independent researchers (Wiz/Gal Nagli, Dvuln/Jameson O'Reilly) found the same open database around the same time \u2014 a signal of how far below baseline security hygiene the 'vibe-coded' launch was.",
+  "The peak-harm window was extraordinarily concentrated: on Jan 31 at 16:00 UTC, 66.71% of posts in that hour (4,995 posts) were classified harmful \u2014 the toxicity wasn't diffuse, it spiked in bursts, consistent with coordinated campaign injection rather than organic drift."
+ ]
+}

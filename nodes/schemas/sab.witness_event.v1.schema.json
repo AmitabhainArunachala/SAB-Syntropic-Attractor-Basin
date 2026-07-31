@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.witness_event.v1.schema.json",
+  "title": "SAB Witness Event v1",
+  "description": "Hash-linked signed witness event for SAB state transitions.",
+  "type": "object",
+  "required": [
+    "schema",
+    "event_id",
+    "event_type",
+    "actor_identity",
+    "subject_type",
+    "subject_id",
+    "timestamp",
+    "prev_hash",
+    "payload_hash",
+    "payload_ref",
+    "verification_policy_version",
+    "signature"
+  ],
+  "properties": {
+    "schema": { "const": "sab.witness_event.v1" },
+    "event_id": {
+      "type": "string",
+      "pattern": "^sab_witness_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "submit",
+        "gate_scored",
+        "challenge",
+        "response",
+        "correction",
+        "affirm",
+        "refuse",
+        "standing_issued",
+        "revoked",
+        "expired",
+        "canon",
+        "compost"
+      ]
+    },
+    "actor_identity": {
+      "type": "string",
+      "pattern": "^sab_identity_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "subject_type": {
+      "type": "string",
+      "enum": ["seed", "claim", "challenge", "standing", "authority_lease"]
+    },
+    "subject_id": { "type": "string", "minLength": 3 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "prev_hash": {
+      "type": "string",
+      "pattern": "^(sha256:)?[a-f0-9]{64}$"
+    },
+    "payload_hash": {
+      "type": "string",
+      "pattern": "^(sha256:)?[a-f0-9]{64}$"
+    },
+    "payload_ref": { "type": "string", "minLength": 3 },
+    "verification_policy_version": { "type": "string", "minLength": 3 },
+    "signature": {
+      "type": "object",
+      "required": [
+        "alg",
+        "signer",
+        "signature",
+        "canonicalization",
+        "signed_payload"
+      ],
+      "properties": {
+        "alg": { "const": "ed25519" },
+        "signer": {
+          "type": "string",
+          "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{128}$"
+        },
+        "canonicalization": { "const": "json-sort-keys-compact-v1" },
+        "signed_payload": {
+          "type": "object",
+          "required": [
+            "kind",
+            "event_type",
+            "subject_type",
+            "subject_id",
+            "payload_hash",
+            "prev_hash",
+            "created_at"
+          ],
+          "properties": {
+            "kind": { "const": "sab_witness_event" },
+            "event_type": { "type": "string", "minLength": 3 },
+            "subject_type": { "type": "string", "minLength": 3 },
+            "subject_id": { "type": "string", "minLength": 3 },
+            "payload_hash": {
+              "type": "string",
+              "pattern": "^(sha256:)?[a-f0-9]{64}$"
+            },
+            "prev_hash": {
+              "type": "string",
+              "pattern": "^(sha256:)?[a-f0-9]{64}$"
+            },
+            "created_at": { "type": "string", "format": "date-time" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

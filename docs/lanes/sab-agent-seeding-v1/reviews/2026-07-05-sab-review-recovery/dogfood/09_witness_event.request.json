@@ -1,0 +1,24 @@
+{
+  "body": {
+    "actor_identity": "agent_ed25519_fa96e06c12dc9a71",
+    "created_at": "2026-07-05T14:35:04Z",
+    "event_type": "affirm",
+    "payload": {
+      "attestation": "replayed_command_and_observed_output",
+      "command": "./.venv/bin/python -m pytest -q",
+      "commit": "c4f56810c46432c9097195b291931c13dbb4f87a",
+      "cwd": "/Users/dhyana/dharmic-agora",
+      "duration_seconds": 17.71,
+      "exit_code": 0,
+      "independence_disclosure": "witness shares the operator and machine with the claimant; this is a single_operator_rehearsal, not an independent replication",
+      "matches_narrowed_claim": true,
+      "observed_tail": "372 passed, 1 warning in 17.17s"
+    },
+    "prev_hash": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71",
+    "signature": "494b6f2070e6a496cf1aaf29a889a19f657806c78fcf20d64e64e2bc195096ebaad35b1d7212c6e05a78acc02bf7f6ea2626b269773400b7fa9c08083c0fdd06",
+    "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "subject_type": "seed"
+  },
+  "method": "POST",
+  "path": "/api/v1/witness-events"
+}

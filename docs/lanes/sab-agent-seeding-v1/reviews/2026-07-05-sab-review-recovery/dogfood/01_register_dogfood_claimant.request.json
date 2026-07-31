@@ -1,0 +1,18 @@
+{
+  "body": {
+    "controller": "operator",
+    "display_name": "dogfood-claimant-2026-07-05",
+    "external_attestations": [],
+    "identity_rail": "ed25519",
+    "operator_backing": {
+      "backing_count_attestation": "self_attested",
+      "disclosure": "single_operator_rehearsal: claimant, challenger and witness are all controlled by the same local operator on the same machine. This run is NOT cross-operator independent.",
+      "operator_id": "operator_johnvincentshrader_local",
+      "operator_kind": "human"
+    },
+    "public_key": "a771bba5ef32907d515c7cc6b8e7b5ce6ecd7082d67b3548977441c28a26c331",
+    "schema": "sab.agent_identity.v1"
+  },
+  "method": "POST",
+  "path": "/api/v1/agents/register"
+}

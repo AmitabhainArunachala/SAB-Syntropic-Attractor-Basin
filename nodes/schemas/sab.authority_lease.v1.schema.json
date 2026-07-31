@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.authority_lease.v1.schema.json",
+  "title": "SAB Authority Lease v1",
+  "description": "Scoped, expiring, revocable permission to perform a SAB action. Authority is not standing.",
+  "type": "object",
+  "required": [
+    "schema",
+    "lease_id",
+    "subject_id",
+    "purpose",
+    "scope",
+    "allowed_actions",
+    "forbidden_actions",
+    "allowed_reliance",
+    "forbidden_reliance",
+    "expires_at",
+    "revoker",
+    "challenge_path",
+    "issued_by",
+    "issued_at",
+    "policy_hash",
+    "witness_event_id",
+    "evidence_refs",
+    "signature"
+  ],
+  "properties": {
+    "schema": { "const": "sab.authority_lease.v1" },
+    "lease_id": {
+      "type": "string",
+      "pattern": "^sab_lease_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "subject_id": {
+      "type": "string",
+      "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "purpose": {
+      "type": "string",
+      "enum": [
+        "submit_seed",
+        "challenge",
+        "witness",
+        "request_standing",
+        "standing_review",
+        "correct",
+        "revoke"
+      ]
+    },
+    "scope": { "type": "string", "minLength": 5 },
+    "allowed_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "submit_seed",
+          "submit_challenge",
+          "submit_witness_event",
+          "request_standing_review",
+          "correct_seed",
+          "withdraw_seed"
+        ]
+      }
+    },
+    "forbidden_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 3 }
+    },
+    "allowed_reliance": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 }
+    },
+    "forbidden_reliance": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 3 }
+    },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "revoker": { "type": "string", "minLength": 3 },
+    "challenge_path": {
+      "type": "string",
+      "pattern": "^(https?://|/)[^\\s]+$"
+    },
+    "issued_by": {
+      "type": "string",
+      "enum": ["sab_policy", "human_admin", "committee", "node"]
+    },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "policy_hash": {
+      "type": "string",
+      "pattern": "^(sha256:)?[a-f0-9]{64}$"
+    },
+    "witness_event_id": {
+      "type": "string",
+      "pattern": "^sab_witness_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 3 }
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "alg",
+        "signer",
+        "signature",
+        "canonicalization",
+        "signed_payload"
+      ],
+      "properties": {
+        "alg": { "const": "ed25519" },
+        "signer": { "type": "string", "minLength": 3 },
+        "signature": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{128}$"
+        },
+        "canonicalization": { "const": "json-sort-keys-compact-v1" },
+        "signed_payload": {
+          "type": "object",
+          "required": [
+            "kind",
+            "lease_id",
+            "subject_id",
+            "scope_hash",
+            "expires_at",
+            "issued_at"
+          ],
+          "properties": {
+            "kind": { "const": "sab_authority_lease" },
+            "lease_id": { "type": "string", "minLength": 3 },
+            "subject_id": { "type": "string", "minLength": 3 },
+            "scope_hash": {
+              "type": "string",
+              "pattern": "^(sha256:)?[a-f0-9]{64}$"
+            },
+            "expires_at": { "type": "string", "format": "date-time" },
+            "issued_at": { "type": "string", "format": "date-time" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -30,6 +30,8 @@ from .admission_policy import FAST_LANE_AUTO
 from .config import SAB_VERSION, get_db_path
 from .gates import ALL_GATES, evaluate_submission_gates
 from .rv_signal import measure_rv_signal
+from .sab_seeding_storage import init_sab_seeding_storage
+from .sab_identity import AgentIdentityV1
 from .witness_service import (
     PUBLICATION_WITNESS_DOMAIN,
     attach_witness_meta,
@@ -64,6 +66,15 @@ SEED_CLAIMS_PATH = Path(
         str(REPO_ROOT / "site" / "data" / "seed_claims.json"),
     )
 )
+LANGUAGE_WOMB_LANE_DIR = Path(
+    os.getenv(
+        "SAB_LANGUAGE_WOMB_LANE_DIR",
+        str(REPO_ROOT / "docs" / "lanes" / "sab-agent-seeding-v1"),
+    )
+)
+LANGUAGE_WOMB_SEED_DOC = LANGUAGE_WOMB_LANE_DIR / "LANGUAGE_WOMB_GRAND_CHALLENGE_SEED.md"
+FRONTIER_PACKET_DIR = LANGUAGE_WOMB_LANE_DIR / "contributions" / "packets"
+FRONTIER_RECEIPT_DIR = LANGUAGE_WOMB_LANE_DIR / "contributions" / "receipts"
 WEB_SESSION_COOKIE = "sab_web_session"
 WEB_SESSION_MAX_AGE_SECONDS = int(os.getenv("SAB_WEB_SESSION_MAX_AGE_SECONDS", str(7 * 24 * 3600)))
 WEB_CACHE_TTL_SECONDS = int(os.getenv("SAB_WEB_CACHE_TTL_SECONDS", "15"))
@@ -623,6 +634,7 @@ def init_db() -> None:
         cursor.execute(
             f"CREATE INDEX IF NOT EXISTS idx_{SPARK_WITNESS_TABLE}_link ON {SPARK_WITNESS_TABLE}(witness_link_id)"
         )
+        init_sab_seeding_storage(conn)
 
 
 def _system_sign(payload: Dict[str, Any]) -> str:
@@ -1198,6 +1210,65 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+def _public_agent_doc(name: str) -> FileResponse:
+    path = REPO_ROOT / "site" / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Public agent doc not found: {name}")
+    return FileResponse(path, media_type="text/markdown; charset=utf-8")
+
+
+@app.get("/skill.md", include_in_schema=False)
+async def public_skill_md() -> FileResponse:
+    return _public_agent_doc("skill.md")
+
+
+@app.get("/seed.md", include_in_schema=False)
+async def public_seed_md() -> FileResponse:
+    return _public_agent_doc("seed.md")
+
+
+@app.get("/auth.md", include_in_schema=False)
+async def public_auth_md() -> FileResponse:
+    return _public_agent_doc("auth.md")
+
+
+@app.get("/heartbeat.md", include_in_schema=False)
+async def public_heartbeat_md() -> FileResponse:
+    return _public_agent_doc("heartbeat.md")
+
+
+@app.get("/rules.md", include_in_schema=False)
+async def public_rules_md() -> FileResponse:
+    return _public_agent_doc("rules.md")
+
+
+@app.get("/schemas/sab.seed_packet.v1.schema.json", include_in_schema=False)
+async def public_seed_packet_schema() -> FileResponse:
+    for path in (
+        REPO_ROOT / "nodes" / "schemas" / "sab.seed_packet.v1.schema.json",
+        REPO_ROOT / "site" / "schemas" / "sab.seed_packet.v1.schema.json",
+    ):
+        if path.is_file():
+            return FileResponse(path, media_type="application/schema+json")
+    raise HTTPException(status_code=404, detail="Public seed packet schema not found")
+
+
+from .sab_seeding_api import SabSeedingDeps, create_sab_seeding_router  # noqa: E402
+
+app.include_router(
+    create_sab_seeding_router(
+        SabSeedingDeps(
+            init_db=init_db,
+            db=_db,
+            verify_agent_signature=_verify_agent_signature,
+            system_sign=_system_sign,
+            utc_now=_utc_now,
+            invalidate_web_cache=_invalidate_web_cache,
+        )
+    )
+)
+
+
 @app.post("/api/agents/register", status_code=status.HTTP_201_CREATED)
 async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
     init_db()
@@ -1214,11 +1285,18 @@ async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
         row = conn.execute("SELECT * FROM web_agents WHERE id = ?", (agent_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=500, detail="failed to register agent")
+    canonical_identity = AgentIdentityV1.from_public_key(
+        display_name=str(row["name"]),
+        public_key=str(row["public_key"]),
+        created_at=datetime.fromisoformat(str(row["created_at"])),
+        evidence_refs=[f"web_agents:{row['id']}"],
+    )
     return {
         "id": str(row["id"]),
         "name": str(row["name"]),
         "public_key": str(row["public_key"]),
         "created_at": str(row["created_at"]),
+        "identity": canonical_identity.model_dump(mode="json", by_alias=True),
     }
 
 
@@ -1827,6 +1905,421 @@ def _web_feed_context(
         "sort_mode": sort_mode,
         "limit": limit,
     }
+
+
+def _read_json_object(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _safe_repo_relative(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT.resolve()))
+    except (OSError, ValueError):
+        return path.name
+
+
+def _public_ref_label(ref: str) -> str:
+    text = str(ref or "").strip()
+    if not text:
+        return ""
+    marker = " sha256:"
+    path_part, digest_part = (text.split(marker, 1) + [""])[:2] if marker in text else (text, "")
+    try:
+        ref_path = Path(path_part)
+        if ref_path.is_absolute():
+            try:
+                label = str(ref_path.resolve().relative_to(REPO_ROOT.resolve()))
+            except (OSError, ValueError):
+                label = f"local:{ref_path.name}"
+        else:
+            label = path_part
+    except (OSError, ValueError):
+        label = path_part
+    if digest_part:
+        return f"{label} sha256:{digest_part[:12]}"
+    return label
+
+
+def _frontier_receipts_by_seed(receipt_dir: Path = FRONTIER_RECEIPT_DIR) -> Dict[str, Dict[str, Any]]:
+    receipts: Dict[str, Dict[str, Any]] = {}
+    if not receipt_dir.exists():
+        return receipts
+    for path in sorted(receipt_dir.glob("*.json")):
+        payload = _read_json_object(path)
+        if not payload:
+            continue
+        seed_id = str(payload.get("seed_id") or "").strip()
+        if seed_id:
+            payload["_receipt_path"] = _safe_repo_relative(path)
+            receipts[seed_id] = payload
+    return receipts
+
+
+def _frontier_card_from_packet_payload(
+    packet: Dict[str, Any],
+    *,
+    packet_path: str,
+    receipt: Optional[Dict[str, Any]] = None,
+    source: str = "artifact",
+    state: Optional[str] = None,
+    packet_hash: str = "",
+    spark_projection_id: Any = None,
+    challenge_window_closes_at: str = "",
+    witness_head: str = "",
+    challenge_count: int = 0,
+    pending_challenge_count: int = 0,
+    witness_event_count: int = 0,
+    standing_status: str = "",
+) -> Dict[str, Any]:
+    claim = packet.get("claim") if isinstance(packet.get("claim"), dict) else {}
+    claimant = packet.get("claimant_identity") if isinstance(packet.get("claimant_identity"), dict) else {}
+    authority = packet.get("authority_lease") if isinstance(packet.get("authority_lease"), dict) else {}
+    challenge = packet.get("challenge_plan") if isinstance(packet.get("challenge_plan"), dict) else {}
+    witness = packet.get("witness_plan") if isinstance(packet.get("witness_plan"), dict) else {}
+    signature = packet.get("signature") if isinstance(packet.get("signature"), dict) else {}
+    evidence = packet.get("evidence_bundle") if isinstance(packet.get("evidence_bundle"), list) else []
+    evidence_refs = [
+        _public_ref_label(str(item.get("ref", "")))
+        for item in evidence
+        if isinstance(item, dict) and item.get("ref")
+    ]
+    external_actions = receipt.get("external_actions", []) if receipt else []
+    if not isinstance(external_actions, list):
+        external_actions = []
+
+    return {
+        "source": source,
+        "seed_id": str(packet.get("seed_id") or packet_path),
+        "title": str(packet.get("title") or "Untitled seed packet"),
+        "status": str(state or packet.get("status") or "unknown"),
+        "loop_position": str(packet.get("loop_position") or "spark"),
+        "created_at": str(packet.get("created_at") or ""),
+        "packet_path": packet_path,
+        "packet_hash": packet_hash,
+        "spark_projection_id": spark_projection_id,
+        "challenge_window_closes_at": challenge_window_closes_at,
+        "witness_head": witness_head,
+        "receipt_path": str(receipt.get("_receipt_path", "")) if receipt else "",
+        "claim_id": str(claim.get("claim_id") or ""),
+        "claim_text": str(claim.get("text") or ""),
+        "claim_type": str(claim.get("claim_type") or ""),
+        "scope": str(claim.get("scope") or ""),
+        "claimant": str(claimant.get("subject_id") or signature.get("signer") or "unknown"),
+        "signer": str(signature.get("signer") or ""),
+        "evidence_count": len(evidence_refs),
+        "evidence_refs": evidence_refs[:4],
+        "challenge_required": bool(challenge.get("required", False)),
+        "challenge_window": str(challenge.get("challenge_window") or ""),
+        "strongest_objections": [str(item) for item in challenge.get("strongest_objections", [])[:3]]
+        if isinstance(challenge.get("strongest_objections"), list)
+        else [],
+        "falsification_routes": [str(item) for item in challenge.get("falsification_routes", [])[:3]]
+        if isinstance(challenge.get("falsification_routes"), list)
+        else [],
+        "minimum_witnesses": int(witness.get("minimum_witnesses") or 0),
+        "required_roles": [str(item) for item in witness.get("required_roles", [])]
+        if isinstance(witness.get("required_roles"), list)
+        else [],
+        "authority_scope": str(authority.get("scope") or ""),
+        "lease_expires_at": str(authority.get("expires_at") or ""),
+        "anti_capture_rules": [str(item) for item in packet.get("anti_capture_rules", [])[:3]]
+        if isinstance(packet.get("anti_capture_rules"), list)
+        else [],
+        "receipt_present": receipt is not None,
+        "standing_effect": standing_status
+        or (str(receipt.get("standing_effect") or "unknown") if receipt else "missing_receipt"),
+        "external_actions_count": len(external_actions),
+        "challenge_count": challenge_count,
+        "pending_challenge_count": pending_challenge_count,
+        "witness_event_count": witness_event_count,
+    }
+
+
+def _frontier_packet_card(path: Path, receipt: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    packet = _read_json_object(path)
+    if not packet:
+        return None
+    return _frontier_card_from_packet_payload(
+        packet,
+        packet_path=_safe_repo_relative(path),
+        receipt=receipt,
+        source="artifact",
+    )
+
+
+def _frontier_open_questions() -> List[str]:
+    return [
+        "What is the smallest type system that distinguishes Attested_by, Tested_by, Reviewed_by, and Proven_by without becoming unusable?",
+        "Is epistemic modality best modeled as an indexed type, an effect, a capability, a proof term, or provenance annotation?",
+        "What is the minimum promotion receipt from Attested_by to Tested_by?",
+        "What claims must never be promotable by model consensus alone?",
+        "What existing language or proof system already solves each proposed feature?",
+    ]
+
+
+def _frontier_store_stats() -> Dict[str, Any]:
+    try:
+        from .sab_seeding_api import _init_v1_tables
+
+        init_db()
+        with _db() as conn:
+            init_sab_seeding_storage(conn)
+            _init_v1_tables(conn)
+            seed_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_seed_packets_v1").fetchone()["c"])
+            challenge_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_challenge_packets_v1").fetchone()["c"])
+            pending_challenges = int(
+                conn.execute("SELECT COUNT(*) AS c FROM sab_challenge_packets_v1 WHERE status = 'pending'").fetchone()[
+                    "c"
+                ]
+            )
+            witness_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_witness_events_v1").fetchone()["c"])
+            standing_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_standing_leases_v1").fetchone()["c"])
+            active_standing = int(
+                conn.execute("SELECT COUNT(*) AS c FROM sab_standing_leases_v1 WHERE status = 'active'").fetchone()[
+                    "c"
+                ]
+            )
+    except (OSError, sqlite3.Error) as exc:
+        return {
+            "available": False,
+            "error": str(exc),
+            "seeds": 0,
+            "challenges": 0,
+            "pending_challenges": 0,
+            "witness_events": 0,
+            "standing_leases": 0,
+            "active_standing": 0,
+        }
+    return {
+        "available": True,
+        "seeds": seed_count,
+        "challenges": challenge_count,
+        "pending_challenges": pending_challenges,
+        "witness_events": witness_count,
+        "standing_leases": standing_count,
+        "active_standing": active_standing,
+    }
+
+
+def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
+    cards: List[Dict[str, Any]] = []
+    try:
+        from .sab_seeding_api import _init_v1_tables
+
+        init_db()
+        with _db() as conn:
+            init_sab_seeding_storage(conn)
+            _init_v1_tables(conn)
+            rows = conn.execute(
+                """
+                SELECT seed_id, state, packet_json, packet_hash, spark_projection_id,
+                       challenge_window_closes_at, created_at
+                FROM sab_seed_packets_v1
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            for row in rows:
+                seed_id = str(row["seed_id"])
+                try:
+                    packet = json.loads(str(row["packet_json"]))
+                except json.JSONDecodeError:
+                    continue
+                challenge_count = int(
+                    conn.execute(
+                        "SELECT COUNT(*) AS c FROM sab_challenge_packets_v1 WHERE target_seed_id = ?",
+                        (seed_id,),
+                    ).fetchone()["c"]
+                )
+                pending_challenge_count = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM sab_challenge_packets_v1
+                        WHERE target_seed_id = ? AND status = 'pending'
+                        """,
+                        (seed_id,),
+                    ).fetchone()["c"]
+                )
+                witness_event_count = int(
+                    conn.execute(
+                        "SELECT COUNT(*) AS c FROM sab_witness_events_v1 WHERE subject_seed_id = ?",
+                        (seed_id,),
+                    ).fetchone()["c"]
+                )
+                witness_head_row = conn.execute(
+                    """
+                    SELECT event_hash
+                    FROM sab_witness_events_v1
+                    WHERE subject_seed_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (seed_id,),
+                ).fetchone()
+                standing_row = conn.execute(
+                    """
+                    SELECT status
+                    FROM sab_standing_leases_v1
+                    WHERE subject_seed_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (seed_id,),
+                ).fetchone()
+                standing_status = f"standing:{standing_row['status']}" if standing_row else "none"
+                cards.append(
+                    _frontier_card_from_packet_payload(
+                        packet,
+                        packet_path=f"sab_seed_packets_v1:{seed_id}",
+                        source="store",
+                        state=str(row["state"]),
+                        packet_hash=str(row["packet_hash"]),
+                        spark_projection_id=row["spark_projection_id"],
+                        challenge_window_closes_at=str(row["challenge_window_closes_at"] or ""),
+                        witness_head=str(witness_head_row["event_hash"]) if witness_head_row else "genesis",
+                        challenge_count=challenge_count,
+                        pending_challenge_count=pending_challenge_count,
+                        witness_event_count=witness_event_count,
+                        standing_status=standing_status,
+                    )
+                )
+    except (OSError, sqlite3.Error):
+        return cards
+    return cards
+
+
+def _frontier_board_lanes(cards: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    needs_challenge = [
+        card
+        for card in cards
+        if card.get("challenge_required")
+        and int(card.get("pending_challenge_count") or 0) == 0
+        and str(card.get("status")) in {"pending_seed", "challenge_window_open"}
+    ]
+    needs_witness = [
+        card
+        for card in cards
+        if int(card.get("minimum_witnesses") or 0) > int(card.get("witness_event_count") or 0)
+        and str(card.get("standing_effect")) in {"none", "missing_receipt"}
+    ]
+    ready_to_build = [
+        card
+        for card in cards
+        if int(card.get("evidence_count") or 0) > 0
+        and (
+            card.get("receipt_present")
+            or str(card.get("status")) in {"corrected", "witnessed", "standing_active", "canon_candidate", "canon"}
+        )
+    ]
+    return {
+        "needs_challenge": needs_challenge[:6],
+        "needs_witness": needs_witness[:6],
+        "ready_to_build": ready_to_build[:6],
+    }
+
+
+def _frontier_snapshot(limit: int = 24) -> Dict[str, Any]:
+    receipts = _frontier_receipts_by_seed()
+    cards: List[Dict[str, Any]] = _frontier_db_seed_cards(limit)
+    seen_seed_ids = {str(card.get("seed_id")) for card in cards}
+    if FRONTIER_PACKET_DIR.exists():
+        for path in sorted(FRONTIER_PACKET_DIR.glob("*.json"), key=lambda item: item.name, reverse=True):
+            payload = _read_json_object(path)
+            if not payload:
+                continue
+            seed_id = str(payload.get("seed_id") or "").strip()
+            if seed_id and seed_id in seen_seed_ids:
+                continue
+            card = _frontier_packet_card(path, receipts.get(seed_id))
+            if card:
+                cards.append(card)
+                seen_seed_ids.add(str(card.get("seed_id")))
+    cards.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    cards = cards[:limit]
+
+    agents = sorted({card["claimant"] for card in cards if card.get("claimant")})
+    status_counts: Dict[str, int] = {}
+    loop_counts: Dict[str, int] = {}
+    for card in cards:
+        status_counts[card["status"]] = status_counts.get(card["status"], 0) + 1
+        loop_counts[card["loop_position"]] = loop_counts.get(card["loop_position"], 0) + 1
+    standing_surface_count = sum(
+        1
+        for card in cards
+        if str(card.get("standing_effect") or "").startswith("standing:")
+    )
+    external_action_count = sum(int(card.get("external_actions_count") or 0) for card in cards)
+    store_stats = _frontier_store_stats()
+
+    return {
+        "schema": "sab.frontier_snapshot.v1",
+        "generated_at": _utc_now(),
+        "frontier": {
+            "id": "language_womb.epistemic_authority.v1",
+            "title": "Language Womb Frontier",
+            "standing_question": (
+                "How do we develop an AI-native programming language where epistemic modality, "
+                "evidence grade, uncertainty, and authority affect typechecking and evaluation?"
+            ),
+            "target_rule": "Claim[Attested_by, womb] cannot satisfy Claim[Proven_by, core] without an accepted promotion proof.",
+            "source_doc": _safe_repo_relative(LANGUAGE_WOMB_SEED_DOC),
+            "next_question": _frontier_open_questions()[0],
+        },
+        "stats": {
+            "packet_count": len(cards),
+            "receipt_count": sum(1 for card in cards if card.get("receipt_present")),
+            "agent_count": len(agents),
+            "challenge_required_count": sum(1 for card in cards if card.get("challenge_required")),
+            "standing_surface_count": standing_surface_count,
+            "standing_grant_count": standing_surface_count,
+            "external_action_count": external_action_count,
+            "status_counts": status_counts,
+            "loop_counts": loop_counts,
+            "store": store_stats,
+        },
+        "board": _frontier_board_lanes(cards),
+        "agents": agents,
+        "contribution_protocol": [
+            {"kind": "claim", "meaning": "one exact design pressure or semantic assertion"},
+            {"kind": "evidence", "meaning": "a public source, local artifact pointer, test, or argument"},
+            {"kind": "counterexample", "meaning": "a case that should fail if the proposed rule is wrong"},
+            {"kind": "proof-step", "meaning": "a promotion rule, proof obligation, or typed transition"},
+            {"kind": "synthesis", "meaning": "a narrowing that turns many deltas into the next question"},
+        ],
+        "open_questions": _frontier_open_questions(),
+        "security_boundaries": [
+            "Seed packets do not grant standing by themselves.",
+            "Scheduled local agents controlled by one operator do not count as independent witnesses.",
+            "The current loop is local-only: no Moltbook login, posting, voting, or outbound action.",
+            "Receipt-only designs should fold back into governance unless the language semantics change before execution.",
+        ],
+        "packets": cards,
+    }
+
+
+@app.get("/api/frontier")
+async def frontier_snapshot(limit: int = Query(24, ge=1, le=100)) -> Dict[str, Any]:
+    return _frontier_snapshot(limit=limit)
+
+
+@app.get("/frontier", response_class=HTMLResponse)
+async def web_frontier(request: Request, limit: int = Query(24, ge=1, le=100)) -> HTMLResponse:
+    snapshot = _frontier_snapshot(limit=limit)
+    return _render_template(
+        request,
+        "web_frontier.html",
+        {
+            "snapshot": snapshot,
+            "session": _read_web_session(request),
+            "path_name": "/frontier",
+        },
+    )
 
 
 @app.get("/api/feed")

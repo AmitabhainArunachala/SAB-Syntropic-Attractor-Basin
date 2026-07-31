@@ -1,0 +1,66 @@
+{
+  "body": {
+    "challenge": {
+      "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+      "challenge_packet": {
+        "authority_lease": {
+          "challenge_path": "/api/v1/seeds/sab_seed_dogfood_2026-07-05_pytest_c4f56810/challenges",
+          "expires_at": "2026-07-19T14:34:46Z",
+          "lease_ref": "sab_lease_dogfood_2026-07-05_challenge",
+          "purpose": "challenge",
+          "revoker": "operator_johnvincentshrader_local",
+          "scope": "Challenge one dogfood seed packet for scope narrowing only.",
+          "subject_id": "agent_ed25519_677b6ba0e077a379"
+        },
+        "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+        "challenge_text": "This claim is too broad unless scoped to local repo/test environment and does not imply production readiness or cross-operator independence.",
+        "challenge_type": "scope",
+        "challenger_identity": "agent_ed25519_677b6ba0e077a379",
+        "created_at": "2026-07-05T14:34:46Z",
+        "deadline": "2026-07-12T14:34:46Z",
+        "evidence": [
+          {
+            "kind": "review",
+            "notes": "All agents in this run share one operator; a green local suite is not production evidence.",
+            "ref": "docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/"
+          }
+        ],
+        "proposed_falsification_or_narrowing": "Narrow the claim to: this repo, this venv, this commit, this machine, single operator; explicitly disclaim production readiness and cross-operator independence.",
+        "quoted_claim_fragment": "passes the local test suite with 372 tests passing",
+        "schema": "sab.challenge_packet.v1",
+        "severity": "blocking",
+        "signature": {
+          "alg": "ed25519",
+          "canonicalization": "json-sort-keys-compact-v1",
+          "signature": "2ea6147feb6403b2db3ed475b263e0f853f6a8c419b861e35b549783f7bb26f9041e300f41114b43035af1a010fa2988299fd96af4f71f6298607e54eb468e0c",
+          "signer": "agent_ed25519_677b6ba0e077a379"
+        },
+        "target_claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+        "target_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810"
+      },
+      "challenger_identity": "agent_ed25519_677b6ba0e077a379",
+      "created_at": "2026-07-05T14:34:46Z",
+      "packet_hash": "af074c252a06a8b71a27c1ed2dc3f96290a8e1ed9101705aa4313533a44b7f96",
+      "response": {
+        "accepted_challenge": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+        "labels": [
+          "single_operator_rehearsal",
+          "not_cross_operator_independent"
+        ],
+        "narrowed_claim_text": "At commit c4f56810c46432c9097195b291931c13dbb4f87a, in the single checkout /Users/dhyana/dharmic-agora on one local machine (Darwin), using ./.venv/bin/python (3.13.12), the command './.venv/bin/python -m pytest -q' was observed by this operator to report '372 passed, 1 warning in 17.16s' with the single warning being StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead. (.venv/lib/python3.13/site-packages/fastapi/testclient.py:1) This says nothing about production readiness, other machines, other commits, or cross-operator independence; claimant, challenger, and witness share one operator.",
+        "response_type": "scope_narrowing"
+      },
+      "status": "responded",
+      "target_claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+      "target_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+      "updated_at": "2026-07-05T14:34:46.728551+00:00"
+    },
+    "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+    "response_id": "sab_witness_0fd9aa15d5fdd5bc91ac0ca6",
+    "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "seed_state": "corrected",
+    "state": "corrected",
+    "witness_head": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71"
+  },
+  "status_code": 201
+}

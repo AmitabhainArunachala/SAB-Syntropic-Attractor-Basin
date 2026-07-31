@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" />
   <link rel="stylesheet" href="/static/web.css" />
   <link rel="stylesheet" href="/static/seed_fusion.css" />
+  <link rel="stylesheet" href="/static/frontier.css" />
 </head>
 <body class="min-h-screen">
   <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -22,7 +23,7 @@
     <header class="site-header flex flex-wrap gap-3 items-center justify-between mb-6">
       <nav class="flex flex-wrap gap-2 items-center" aria-label="Primary navigation">
         <a href="/" class="text-lg font-semibold text-[--color-ink] hover:no-underline mr-2" aria-label="SAB home">SAB</a>
-        {% set nav_items = [('/seed', 'Seed'), ('/', 'Feed'), ('/submit', 'Submit'), ('/canon', 'Canon'), ('/compost', 'Compost'), ('/about', 'Protocol')] %}
+        {% set nav_items = [('/frontier', 'Frontier'), ('/seed', 'Seed'), ('/', 'Feed'), ('/submit', 'Submit'), ('/canon', 'Canon'), ('/compost', 'Compost'), ('/about', 'Protocol')] %}
         {% for href, label in nav_items %}
         <a class="px-3 py-1.5 rounded-full text-sm border border-[--color-border-subtle] bg-[--color-surface] hover:border-[--color-accent] hover:text-[--color-accent] hover:no-underline transition-colors{% if path_name is defined and path_name == href %} !bg-[--color-accent] !text-white !border-[--color-accent]{% endif %}" href="{{ href }}">{{ label }}</a>
         {% endfor %}

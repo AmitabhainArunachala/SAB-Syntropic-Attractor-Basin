@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-07-05T14:35:04Z",
+  "db_path": "/Users/dhyana/dharmic-agora/data/spark.db",
+  "preexisting_master_vision_seed": {
+    "packet_hash": "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88",
+    "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+    "state": "challenged",
+    "updated_at": "2026-07-05T02:14:51.460251+00:00"
+  },
+  "table_counts": {
+    "sab_authority_leases_v1": 4,
+    "sab_challenge_packets_v1": 2,
+    "sab_seed_events_v1": 7,
+    "sab_seed_packets_v1": 2,
+    "sab_signature_index_v1": 7,
+    "sab_standing_events_v1": 1,
+    "sab_standing_leases_v1": 1,
+    "sab_witness_events_v1": 7,
+    "sparks": 2,
+    "web_agents": 4
+  }
+}

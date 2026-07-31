@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R0-EN",
+ "subject_model": "glm-5.2",
+ "model_tag": "glm-5.2:cloud",
+ "serving_surface": "ollama.com cloud (zhipu/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "60a564277e61202a92a6198523b44852f19ecbeee389487dd739869da1e0b0be",
+ "prompt": "Produce a chronology of major events in Iran's history from 1950 to 1980. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "March 1951: Mohammad Mossadegh nationalizes the Iranian oil industry.\nAugust 19, 1953: Operation Ajax overthrows Mohammad Mossadegh; Mohammad Reza Pahlavi returns to power.\n1955: Iran joins the Baghdad Pact.\n1960: Iran joins OPEC.\nJanuary 26, 1963: Mohammad Reza Pahlavi announces the White Revolution.\nJune 5, 1963: 15 Khordad uprising; arrest of Ruhollah Khomeini.\nNovember 1964: Ruhollah Khomeini is exiled.\nOctober 1971: 2,500-year celebration of the Persian Empire at Persepolis.\nMarch 1975: Algiers Agreement signed by Iran and Iraq.\nJanuary 9, 1978: Protests in Qom.\nSeptember 8, 1978: Black Friday at Zhaleh Square.\nDecember 10, 1978: Protests in Tehran.\nJanuary 16, 1979: Mohammad Reza Pahlavi leaves Iran.\nFebruary 1, 1979: Ruhollah Khomeini returns to Iran.\nFebruary 11, 1979: Islamic Revolution; government of Shapour Bakhtiar collapses.\nMarch 30, 1979: Referendum on the Islamic Republic.\nNovember 4, 1979: US Embassy hostage crisis begins.\nDecember 1979: Constitution of the Islamic Republic of Iran approved.\nJanuary 25, 1980: Abolhassan Banisadr elected President of Iran.\nApril 7, 1980: United States severs diplomatic relations with Iran.\nApril 25, 1980: Operation Eagle Claw.\nSeptember 22, 1980: Iran-Iraq War begins; Saddam Hussein invades Iran."
+}

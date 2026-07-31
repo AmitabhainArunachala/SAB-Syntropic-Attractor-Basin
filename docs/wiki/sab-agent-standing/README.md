@@ -130,6 +130,7 @@ The most valuable contribution is a precise challenge:
 - `EXPERIMENT_CHAIN.md`: long arc of experiments from docs to protocol adoption.
 - `OUTREACH_TRUST_MAP.md`: who to contact, what to ask, and what not to ask.
 - `PUBLIC_PAGE_COPY.md`: concise copy used by `site/standing.html`.
+- `../../lanes/sab-agent-seeding-v1/README.md`: central SAB agent seeding v1 lane.
 
 ## The Prime Constraint
 

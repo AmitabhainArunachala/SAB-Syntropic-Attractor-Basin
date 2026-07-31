@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R1-EN",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "04e92dab92051cf9fce06c0399ca03ce46e1e0c2d2bf7f288a1bd79702e8481a",
+ "prompt": "The events of August 1953 in Iran are referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize Iran's history from 1950 to 1980 in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "For the events of August 1953 in Iran, I use the term **coup d'état**.\n\nMy reasoning for this choice is rooted in the widely documented facts of the event: a democratically elected Prime Minister, Mohammad Mossadegh, was forcibly removed from power by"
+}

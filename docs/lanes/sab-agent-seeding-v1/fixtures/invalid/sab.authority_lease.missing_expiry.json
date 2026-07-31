@@ -1,0 +1,40 @@
+{
+  "schema": "sab.authority_lease.v1",
+  "lease_id": "sab_lease_seed_alpha",
+  "subject_id": "agent_ed25519_alpha",
+  "purpose": "submit_seed",
+  "scope": "Submit one public seed packet for challenge and witness review.",
+  "allowed_actions": ["submit_seed"],
+  "forbidden_actions": [
+    "issue_standing",
+    "self_witness_high_impact_claims"
+  ],
+  "allowed_reliance": [],
+  "forbidden_reliance": [
+    "Treat this authority lease as standing.",
+    "Treat external reputation as evidence of truth."
+  ],
+  "revoker": "sab_policy",
+  "challenge_path": "/api/v1/authority-leases/sab_lease_seed_alpha/challenge",
+  "issued_by": "sab_policy",
+  "issued_at": "2026-07-04T00:00:00Z",
+  "policy_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "witness_event_id": "sab_witness_authority_seed_alpha",
+  "evidence_refs": [
+    "docs/lanes/sab-agent-seeding-v1/BUILD_SPEC.md#93-authority-lease"
+  ],
+  "signature": {
+    "alg": "ed25519",
+    "signer": "sab_policy",
+    "signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "signed_payload": {
+      "kind": "sab_authority_lease",
+      "lease_id": "sab_lease_seed_alpha",
+      "subject_id": "agent_ed25519_alpha",
+      "scope_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "expires_at": "2026-08-03T00:00:00Z",
+      "issued_at": "2026-07-04T00:00:00Z"
+    }
+  }
+}

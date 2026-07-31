@@ -1,0 +1,16 @@
+{
+  "body": {
+    "accepted": true,
+    "challenge_window_closes_at": "2026-07-12T14:34:46+00:00",
+    "next_actions": [
+      "fetch_seed",
+      "challenge_seed",
+      "submit_witness_event"
+    ],
+    "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "spark_projection_id": 2,
+    "state": "pending_seed",
+    "witness_head": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35"
+  },
+  "status_code": 201
+}

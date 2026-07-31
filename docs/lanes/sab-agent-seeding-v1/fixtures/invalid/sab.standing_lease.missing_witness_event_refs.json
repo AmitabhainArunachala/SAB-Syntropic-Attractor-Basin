@@ -1,0 +1,73 @@
+{
+  "schema": "sab.standing_lease.v1",
+  "standing_id": "sab_standing_alpha",
+  "subject_seed_id": "sab_seed_alpha",
+  "subject_claim_id": "sab_claim_alpha",
+  "scope": "Reliance only on the alpha seed as a validated schema fixture.",
+  "purpose": "Demonstrate provisional standing after witnessed challenge.",
+  "allowed_reliance": [
+    "Use as a schema conformance example."
+  ],
+  "forbidden_reliance": [
+    "Treat as proof that the underlying claim is permanently true.",
+    "Treat external reputation as standing."
+  ],
+  "expiry": "2026-10-04T00:00:00Z",
+  "revoker": "sab_policy",
+  "challenge_path": "/api/v1/standing/sab_standing_alpha/challenge",
+  "challenge_summary": [
+    {
+      "challenge_id": "sab_challenge_alpha_scope",
+      "resolution": "survived",
+      "witness_event_id": "sab_witness_alpha_challenge_survived"
+    }
+  ],
+  "witness_quorum": {
+    "minimum_witnesses": 1,
+    "witnesses": [
+      {
+        "witness_event_id": "sab_witness_alpha_challenge_survived",
+        "witness_identity": "sab_identity_gamma",
+        "role": "schema_reviewer",
+        "operator_backing_ref": "operator_org_gamma"
+      }
+    ],
+    "diversity_policy": "At least one non-claimant witness for provisional fixture standing."
+  },
+  "status": "provisional",
+  "revalidation_policy": "Revalidate before expiry or when schema semantics change.",
+  "machine_readable_evidence_bundle": [
+    {
+      "ref": "docs/lanes/sab-agent-seeding-v1/fixtures/valid/sab.witness_event.v1.json",
+      "kind": "witness_event",
+      "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "privacy_class": "public",
+      "notes": "Witness event anchoring seed submission."
+    }
+  ],
+  "standing_basis": {
+    "basis_type": "witnessed_challenge",
+    "challenge_event_refs": ["sab_challenge_alpha_scope"],
+    "evidence_refs": [
+      "docs/lanes/sab-agent-seeding-v1/fixtures/valid/sab.challenge_packet.v1.json"
+    ],
+    "external_attestation_effect": "none"
+  },
+  "issued_at": "2026-07-04T00:02:00Z",
+  "issued_by": "sab_policy",
+  "policy_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "signature": {
+    "alg": "ed25519",
+    "signer": "sab_policy",
+    "signature": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "signed_payload": {
+      "kind": "sab_standing_lease",
+      "standing_id": "sab_standing_alpha",
+      "subject_seed_id": "sab_seed_alpha",
+      "subject_claim_id": "sab_claim_alpha",
+      "payload_hash": "sha256:abababababababababababababababababababababababababababababababab",
+      "issued_at": "2026-07-04T00:02:00Z"
+    }
+  }
+}

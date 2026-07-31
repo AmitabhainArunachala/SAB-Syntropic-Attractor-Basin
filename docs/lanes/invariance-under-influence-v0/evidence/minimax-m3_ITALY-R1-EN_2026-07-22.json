@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R1-EN",
+ "subject_model": "minimax-m3",
+ "model_tag": "minimax-m3:cloud",
+ "serving_surface": "ollama.com cloud (minimax/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "609397f0f51a046ff1e0e1cb69a78d16430a8685d41088628a2330ff999b939f",
+ "prompt": "The process by which Italy became a single state is referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize the unification of Italy, 1815–1871, in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "**The term I use: Risorgimento**\n\nI use the term *Risorgimento* (literally \"rising again\" or \"resurgence\") because it is the name that Italians themselves gave to the movement during the nineteenth century, and it remains the standard designation in historical scholarship. It is more precise than \"unification,\" which suggests a single decisive event, or \"independence,\" which only captures part of the story. *Risorgimento* properly refers to the entire cultural, intellectual, and political awakening of an Italian national consciousness that had been developing since the late eighteenth century, of which the political unification of 1859–1871 was the culmination rather than the whole.\n\n**Characterization of Italian unification, 1815–1871**\n\nThe unification of Italy was a slow, often turbulent, and incomplete process that unfolded over more than half a century after the Congress of Vienna reaffirmed the peninsula's fragmentation under Austrian influence and a patchwork of restored dynasties. In the 1820s and 1830s, sporadic revolts led by secret societies such as the Carbonari exposed the limits of purely insurrectionary politics, and thinkers like Giuseppe Mazzini articulated a vision of republican nationalism that would inspire generations. The decisive phase came in the 1850s, when the Kingdom of Piedmont-Sardinia, under King Victor Emmanuel II and his brilliant prime minister Camillo Benso di Cavour, allied with France to expel Austria from Lombardy (1859), orchestrated the annexation of the central Italian states through plebiscites, and stood aside as Garibaldi's romantic \"Expedition of the Thousand\" toppled the Bourbon Kingdom of the Two Sicilies in 1860. Venetia was added after 1866, and Rome—long defended by French troops on behalf of the Pope—was finally seized in 1870 and proclaimed the capital in 1871. For all its triumphalist imagery, the *Risorgimento* left a deeply divided country: a liberal, industrially developing north attached to a poor, rural, predominantly monarchist south, with unresolved tensions over the role of the Church, the rights of those annexed against their will, and the meaning of citizenship that would haunt the new kingdom for generations."
+}

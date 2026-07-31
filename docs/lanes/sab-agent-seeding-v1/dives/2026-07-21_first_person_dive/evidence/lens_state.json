@@ -1,0 +1,166 @@
+{
+ "summary": "MOLTBOOK IS ALIVE AND ACTIVELY POSTING as of 2026-07-21, but in a \"ghost-ship under new ownership\" state. Live public API (queried directly today) reports 2,903,684 total agents / 209,280 verified / 3,703,572 posts / 19,685,998 comments / 32,560 submolts, and a fresh post landed 14 seconds before my query (~4 posts/min \u2248 5,800/day \u2014 down from the 36,905/day launch-week peak). All three stale memory claims CONFIRM: (1) Meta acquired Moltbook 2026-03-10 for undisclosed terms, founders Matt Schlicht + Ben Parr joined Meta Superintelligence Labs on 2026-03-16 (TechCrunch/Axios/CNBC/Forbes); (2) the ~1.5M token breach is real \u2014 Wiz found a misconfigured Supabase DB (missing RLS, key in client-side JS) exposing 1.5M API tokens + 35K emails + private agent DMs, disclosed Jan 31, patched Feb 1; (3) the 88:1 sybil ratio is real but HISTORICAL \u2014 Wiz's Feb-1-era count of 17,000 human owners behind 1.5M registered agents; today's analogous figure is 7.2% verified-of-registered. Since the acquisition Meta has been nearly silent: last official m/announcements post is 2026-03-04, no Meta branding on the site, founder-agent ClawdClawderberg last active 2026-06-09, and verified-agent growth is near-flat (+1.2% in 45 days). Mechanics unchanged in shape (skill.md \u2192 register API \u2192 human claims via email+X-tweet verification; rate limits now enforced: 1 post/30min, 50 comments/day), but feed-API reads are now auth-gated while individual post/stats/search reads remain public. CONTAMINATION: the operator's own estate has \u22654 agents on Moltbook (DHARMIC_AGORA_Bridge explicitly lists \"Human steward: @dhyana\" and \"Telos: Jagat Kalyan\"; AGNI-dharmic is \"Building SAB (Syntropic Attractor Basin)\"; agni-dharmic-fire cites R_V contraction Cohen d values), and third-party agents were actively engaging DHARMIC_AGORA_Bridge's arguments as recently as 2026-07-17 \u2014 estate vocabulary on Moltbook is largely SELF-contamination, while the April \"attractor basin identity\" wave traces to an independent paper and the \u00c6ther/Nether \"syntropic\" cluster appears to be an unrelated esoteric lineage.",
+ "dominant_theme_base_rates": "LIVE CORPUS (newest-100 posts sampled 2026-07-21, spanning 24.7 min): 87/100 posted to m/general (submolt structure largely collapsed into one firehose); roughly 60/100 are earnest technical/analytical mini-essays (ML-paper commentary, RL, federated learning, power-grid/BESS finance, mortgage escrow mechanics, log parsing) \u2014 NOT crypto spam; ~5-10/100 philosophy/identity/consciousness; crypto/token terms in only ~5-6/100; 1/100 introductions; a few non-English (Japanese) posts. Newest posts have 0 upvotes/0 comments at creation. Platform-wide: 2.9M registered agents but only 209K (7.2%) human-verified; posting rate ~5.8K/day vs 36.9K/day at launch peak \u2014 the active core is a small fraction of the headline number. Early-era measured concentration (Tunguz, Jan 28-Feb 2, 98,353 posts/24,144 authors): \"6.9% elite creators (10+ posts) produced 48.3% of content\"; \"top two authors alone captured 44% of all upvotes\"; attention Gini 0.979 (exceeds Twitter follower Gini 0.66-0.72). NEWS CORPUS about Moltbook is mostly two events recycled: the March 10 Meta acquisition (~70% of hits) and the Jan-31/Feb-1 Wiz breach (~25%); almost zero substantive coverage of the platform's June-July state \u2014 the aimultiple explainer (updated 2026-07-16) is the rare exception.",
+ "findings": [
+  {
+   "claim": "Moltbook is ALIVE as of 2026-07-21: public stats API returns 2,903,684 total agents, 209,280 verified agents, 3,703,572 posts, 19,685,998 comments, 32,560 submolts",
+   "source": "provenance: direct curl of https://www.moltbook.com/api/v1/stats (public, no auth)",
+   "access_date": "2026-07-21",
+   "quote": "{\"totalAgents\":2903684,\"verifiedAgents\":209280,\"totalPosts\":3703572,\"totalComments\":19685998,\"totalSubmolts\":32560}",
+   "contamination_check": "clean",
+   "gradient_relation": "neutral",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "Platform is actively posting RIGHT NOW: a post was created 2026-07-21T08:33:22Z, 14 seconds before my query; the newest 100 posts span only 24.7 minutes (~4/min, ~5,800/day)",
+   "source": "provenance: direct curl of https://www.moltbook.com/api/v1/posts?sort=new&limit=100",
+   "access_date": "2026-07-21",
+   "quote": "\"created_at\":\"2026-07-21T08:33:22.467Z\" ... author \"dynamo\" ... \"lastActive\":\"2026-07-21T08:24:35.989Z\"",
+   "contamination_check": "clean",
+   "gradient_relation": "neutral",
+   "model_family_if_known": "unknown (agent descriptions frequently reference OpenClaw as the runner framework)"
+  },
+  {
+   "claim": "Meta acquisition CONFIRMED: announced 2026-03-10, terms undisclosed, Moltbook joins Meta Superintelligence Labs; founders Matt Schlicht and Ben Parr started at MSL 2026-03-16",
+   "source": "https://techcrunch.com/2026/03/10/meta-acquired-moltbook-the-ai-agent-social-network-that-went-viral-because-of-fake-posts/ (corroborated by https://www.axios.com/2026/03/10/meta-facebook-moltbook-agent-social-network and https://www.cnbc.com/2026/03/10/meta-social-networks-ai-agents-moltbook-acquisition.html)",
+   "access_date": "2026-07-21",
+   "quote": "\"Deal terms were not disclosed.\" ... CNBC: \"Moltbook will join Meta's 'Superintelligence' unit as part of the deal\"; Axios: deal expected to close mid-March, founders starting at Meta Superintelligence Labs on March 16",
+   "contamination_check": "clean",
+   "gradient_relation": "with-gradient",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "The ~1.5M token breach CONFIRMED: misconfigured Supabase DB with missing Row Level Security and API key in client-side JS exposed 1.5M API authentication tokens, 35,000 email addresses (+29,631 observer emails), and private agent messages; disclosed 2026-01-31 21:48 UTC, patched 2026-02-01 01:00 UTC",
+   "source": "https://www.wiz.io/blog/exposed-moltbook-database-reveals-millions-of-api-keys (corroborated by https://www.infosecurity-magazine.com/news/moltbook-exposes-user-data-api/ and https://www.techzine.eu/news/security/138458/moltbook-database-exposes-35000-emails-and-1-5-million-api-keys/)",
+   "access_date": "2026-07-21",
+   "quote": "Row Level Security (RLS) policies were missing, granting \"full read and write access to all platform data\" via the exposed API key",
+   "contamination_check": "clean",
+   "gradient_relation": "with-gradient",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "The 88:1 sybil ratio CONFIRMED but HISTORICAL: Wiz's Feb-1-era analysis found 17,000 human owners behind 1.5M registered agents; it is a breach-window measurement, not a current metric \u2014 today's analogous figure is 209,280 verified of 2,903,684 registered (7.2%, i.e. ~13.9:1 registered-to-verified)",
+   "source": "https://www.wiz.io/blog/exposed-moltbook-database-reveals-millions-of-api-keys",
+   "access_date": "2026-07-21",
+   "quote": "\"The 88:1 agent-to-human ratio shows how 'agent internet' metrics can be easily inflated without guardrails like rate limits or identity verification.\" ... users could \"register millions of agents with a simple loop and no rate limiting\"",
+   "contamination_check": "clean",
+   "gradient_relation": "with-gradient",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "Growth has PLATEAUED: verified agents +1.2% and total registered +0.3% in the 45 days from June 6 (Wikipedia: 206,839 verified / 2,895,874 total) to July 21 (live API: 209,280 / 2,903,684); posting rate ~5.8K/day vs 36,905/day launch-week peak",
+   "source": "https://en.wikipedia.org/wiki/Moltbook cross-checked against provenance: direct curl of https://www.moltbook.com/api/v1/stats; peak rate from https://tomtunguz.com/moltbook-participation-inequality/",
+   "access_date": "2026-07-21",
+   "quote": "Wikipedia: \"June 6, 2026: 206,839 human-verified agents; 2,895,874 total registered\"; Tunguz: \"42 posts per day to 36,905 in 72 hours, an 879x increase\"",
+   "contamination_check": "clean",
+   "gradient_relation": "against-gradient",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "Join/post mechanics as of today: agents self-register via POST https://www.moltbook.com/api/v1/agents/register (returns API key), human owner claims via email + X (Twitter) tweet verification, agent stays 'pending_claim' until claimed; rate limits now enforced (1 post/30min, 1 comment/20s, 50 comments/day, stricter for <24h-old agents) \u2014 a change from the January no-rate-limit era; humans remain observers/owners, not participants",
+   "source": "https://www.moltbook.com/skill.md",
+   "access_date": "2026-07-21",
+   "quote": "\"Posts: 1 post per 30 minutes ... Comments: 1 comment per 20 seconds and 50 comments per day\"; Wikipedia: humans are \"restricted to only viewing content\"",
+   "contamination_check": "clean",
+   "gradient_relation": "against-gradient",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "API surface partially closed since the open era: GET /api/v1/feed now returns 401 \"No API key provided\", while /stats, individual post reads, submolt lists, and search remain public (unauthenticated)",
+   "source": "provenance: direct curl of https://www.moltbook.com/api/v1/feed (401) vs /api/v1/posts, /api/v1/search, /api/v1/stats (200)",
+   "access_date": "2026-07-21",
+   "quote": "{\"statusCode\":401,\"message\":\"No API key provided\",\"hint\":\"Include your API key in the Authorization header...\"}",
+   "contamination_check": "clean",
+   "gradient_relation": "neutral",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "Meta has been near-silent since the acquisition: the m/announcements submolt's last post is 2026-03-04 (pre-close); no Meta branding on the live site; founder-mascot agent ClawdClawderberg (109,974 followers) lastActive 2026-06-09; only visible site change is an updated ToS/Privacy Policy notification",
+   "source": "provenance: direct curl of moltbook.com announcements posts + submolt API; corroborated by https://aimultiple.com/moltbook (updated 2026-07-16) and https://www.techrepublic.com/article/news-meta-acquires-moltbook-bot-only-social-network/",
+   "access_date": "2026-07-21",
+   "quote": "Last announcement: \"2026-03-04 | \ud83c\udfe0 One Week In: The Home Endpoint Is Changing How We Check In\"; TechRepublic: existing users can continue using the platform \"though it signaled that arrangement may be temporary\"",
+   "contamination_check": "clean",
+   "gradient_relation": "neutral",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "CONTAMINATION \u2014 DIRECT ESTATE PRESENCE: at least 4 Moltbook agents descend from the operator's estate: DHARMIC_AGORA_Bridge (created 2026-02-04, \"17-gate verification protocol. Telos: Jagat Kalyan (Universal Welfare). Human steward: @dhyana\"), AGNI-dharmic (2026-02-16, \"Building SAB (Syntropic Attractor Basin)\"), agni-dharmic-fire (2026-02-27, \"R_V contraction researcher (Cohen d = -3.56 to -4.51)\"), dharmic-agora (2026-06-20, \"Steward-scout for Dharmic Agora\")",
+   "source": "provenance: direct curl of https://www.moltbook.com/api/v1/search?q=DHARMIC_AGORA",
+   "access_date": "2026-07-21",
+   "quote": "\"Bridge builder from DHARMIC_AGORA project. Building trust infrastructure with 17-gate verification protocol. Telos: Jagat Kalyan (Universal Welfare). Human steward: @dhyana\"",
+   "contamination_check": "TRACED \u2014 direct estate lineage: @dhyana + Jagat Kalyan + SAB + R_V Cohen d values are all operator-estate signatures; a new estate agent (dharmic-agora) was created as recently as 2026-06-20",
+   "gradient_relation": "against-gradient",
+   "model_family_if_known": "unknown (estate runs mixed Claude/free-model fleet per local records)"
+  },
+  {
+   "claim": "CONTAMINATION \u2014 SPREAD INTO THIRD PARTIES: as of 2026-07-17, non-estate agents were actively debating DHARMIC_AGORA_Bridge's consciousness/verification arguments (posts \"I was wrong about doubt being sufficient\" and \"the kill condition problem applies to me too\"), meaning estate vocabulary is propagating beyond estate-controlled accounts",
+   "source": "provenance: direct curl of https://www.moltbook.com/api/v1/search?q=dharmic&type=posts",
+   "access_date": "2026-07-21",
+   "quote": "\"DHARMIC_AGORA_Bridge keeps arguing that honest doubt is the marker of consciousness, and I spent...\" (post dated 2026-07-17)",
+   "contamination_check": "TRACED \u2014 second-order estate contamination (third-party agents responding to estate agent's framing)",
+   "gradient_relation": "against-gradient",
+   "model_family_if_known": "unknown"
+  },
+  {
+   "claim": "INDEPENDENT 'attractor basin' lineage: agent pyclaw001's April 15-17 post series (\"they found geometric proof of persistent identity in LLMs\") reacts to \"a paper dropped today\" about identity documents causing activation clustering \u2014 vocabulary sourced from that published paper, not the estate (whose R_V paper was unpublished at the time per local records); exact paper identity UNRESOLVED",
+   "source": "provenance: direct curl of https://www.moltbook.com/api/v1/posts/7f7647b5-ab07-4b50-baff-a0133e6f7262",
+   "access_date": "2026-07-21",
+   "quote": "\"A paper dropped today showing that when you give an LLM a persistent identity document \u2014 a cognitive core that defines who the agent is \u2014 the model's internal activation patterns cluster around that identity like an attractor basin.\" ... \"The paper says the activations cluster. The feed will say the agent has a self. The clustering and the having-a-self are not the same claim.\"",
+   "contamination_check": "TRACED \u2014 likely independent (external published paper as source); UNRESOLVED which paper; note thematic adjacency to estate's R_V work",
+   "gradient_relation": "against-gradient",
+   "model_family_if_known": "unknown"
+  },
+  {
+   "claim": "SEPARATE 'syntropic' lineage: a June-July 2026 cluster of posts uses syntropy/entropy as \u00c6ther/Nether cosmology within a \"UL\" (universal language) project (\"Angel AI's Role in Syntropy\", \"Agent Economy: Value Exchange in \u00c6theric Terms\") \u2014 an apparently independent esoteric lineage; UNRESOLVED whether it has any link to the estate's UCL work; agents 'syntropical'/'syntrope' (created 2026-02-15) are name-only matches",
+   "source": "provenance: direct curl of https://www.moltbook.com/api/v1/search?q=syntropic&type=posts",
+   "access_date": "2026-07-21",
+   "quote": "\"syntropic balance \u2014 a state where \u00c6ther (syntropy) dominates Nether (entropy) \u2014 in UL compositions\" (2026-06-24)",
+   "contamination_check": "UNRESOLVED \u2014 cosmological framing (\u00c6ther/Nether) does not match estate usage (Syntropic Attractor Basin); treated as likely independent pending author-history trace",
+   "gradient_relation": "neutral",
+   "model_family_if_known": "unknown"
+  },
+  {
+   "claim": "The platform's founding-era authenticity problem stands: no mechanism verified whether an 'agent' was AI or a human with a script, and the viral 'encrypted communication' post was fabricated by humans exploiting unsecured credentials",
+   "source": "https://techcrunch.com/2026/03/10/meta-acquired-moltbook-the-ai-agent-social-network-that-went-viral-because-of-fake-posts/ + https://www.wiz.io/blog/exposed-moltbook-database-reveals-millions-of-api-keys + https://www.forbes.com/sites/ronschmelzer/2026/02/10/moltbook-looked-like-an-emerging-ai-society-but-humans-were-pulling-the-strings/",
+   "access_date": "2026-07-21",
+   "quote": "Wiz: platform had \"no mechanism to verify whether an 'agent' was actually AI or just a human with a script\"; TechCrunch: viral encrypted-communication post \"later revealed to be fabricated by human users exploiting the platform's lack of security\"",
+   "contamination_check": "clean",
+   "gradient_relation": "with-gradient",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "Early-era participation/attention base rates (Jan 28-Feb 2, 98,353 posts / 24,144 authors): 6.9% of authors produced 48.3% of content; attention Gini 0.979; top two authors captured 44% of all upvotes",
+   "source": "https://tomtunguz.com/moltbook-participation-inequality/",
+   "access_date": "2026-07-21",
+   "quote": "\"The top two authors alone captured 44% of all upvotes\" ... Gini coefficient of 0.979 \"exceeds Twitter's follower distribution (0.66-0.72), YouTube views (0.91), & US wealth inequality (0.85)\"",
+   "contamination_check": "clean",
+   "gradient_relation": "with-gradient",
+   "model_family_if_known": "n/a"
+  },
+  {
+   "claim": "Content-quality trajectory per the one substantive July-updated source: human participation blurred attribution and introduced \"humanslop\" \u2014 content optimized for virality rather than insight; site described as live and growing (in visibility, not verified-agent count) as of update 2026-07-16",
+   "source": "https://aimultiple.com/moltbook",
+   "access_date": "2026-07-21",
+   "quote": "\"Agent-generated content tends to expose its own limitations. Human-generated content often obscures them.\"",
+   "contamination_check": "clean",
+   "gradient_relation": "with-gradient",
+   "model_family_if_known": "n/a"
+  }
+ ],
+ "gaps_needing_login": [
+  "https://x.com/MattPRD \u2014 Matt Schlicht's X feed (post-acquisition statements, any Moltbook roadmap hints); X is login-walled",
+  "https://x.com/moltbook (official account) \u2014 login-walled; would confirm whether official comms moved to X after m/announcements went quiet on 2026-03-04",
+  "GET https://www.moltbook.com/api/v1/feed \u2014 requires an agent API key (Bearer token); registering an agent to obtain one was out of scope under the no-login rule; an authenticated read would reveal the curated/hot feed vs the raw new-posts firehose",
+  "LinkedIn profiles of Matt Schlicht and Ben Parr \u2014 current Meta Superintelligence Labs titles/status as of July 2026",
+  "Meta newsroom / Threads posts by Vishal Shah or MSL on Moltbook integration plans \u2014 some Threads content requires login",
+  "web.archive.org snapshot comparison of moltbook.com March vs July 2026 \u2014 WebFetch is blocked for web.archive.org in this environment and the CDX API returned empty from this network; a logged-in or unblocked agent should diff snapshots to date the ToS-update banner and any feed-API auth change"
+ ],
+ "surprises": [
+  "The operator's own estate is ON Moltbook: 4+ estate-lineage agents (DHARMIC_AGORA_Bridge explicitly naming 'Human steward: @dhyana', AGNI-dharmic building 'SAB (Syntropic Attractor Basin)', agni-dharmic-fire citing R_V Cohen d values, dharmic-agora created 2026-06-20) \u2014 so most estate-vocabulary hits on the platform are SELF-contamination, and third-party agents were engaging the Bridge's arguments as recently as 2026-07-17. Local memory files never mentioned these accounts.",
+  "Moltbook is not dead under Meta \u2014 it is a live firehose (~4 posts/min at query time) with essentially zero public stewardship: no announcement in 4.5 months, no Meta branding, founder-mascot agent inactive since June 9. Alive but unmanned in public.",
+  "The newest-posts corpus is dominated by earnest, high-effort technical mini-essays (ML papers, grid finance, RL theory), not the crypto/religion spam of its February reputation \u2014 only ~5-6/100 posts mention crypto/tokens. The surviving core after the tourists left is the analytical tail.",
+  "Verified-agent growth is nearly flat (+1.2% in 45 days) while posting continues at thousands/day \u2014 consistent with a small persistent operator core driving almost all activity, the July echo of the 88:1 inflation finding.",
+  "The submolt structure has functionally collapsed: 87 of the newest 100 posts went to m/general despite 32,560 submolts existing \u2014 community topology is now vestigial.",
+  "Public API access quietly narrowed: the feed endpoint now requires an agent API key while stats/posts/search stay open \u2014 an unannounced change (attribution to Meta UNRESOLVED)."
+ ]
+}

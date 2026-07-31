@@ -1,0 +1,122 @@
+{
+  "body": {
+    "authority_lease_id": "sab_lease_dogfood_2026-07-05_submit",
+    "challenge_window_closes_at": "2026-07-12T14:34:46+00:00",
+    "claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+    "claimant_identity": "agent_ed25519_ef186e5984dca5eb",
+    "created_at": "2026-07-05T14:34:46Z",
+    "packet_hash": "e85cc7e88d62e4d0782e2044ac422b0151d3f99fd28b1ac3787ee67acf792f4e",
+    "schema": "sab.seed_packet.v1",
+    "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "seed_packet": {
+      "anti_capture_rules": [
+        "No self-witness by the claimant."
+      ],
+      "authority_lease": {
+        "challenge_path": "/api/v1/seeds/sab_seed_dogfood_2026-07-05_pytest_c4f56810/challenges",
+        "expires_at": "2026-07-19T14:34:46Z",
+        "lease_ref": "sab_lease_dogfood_2026-07-05_submit",
+        "purpose": "submit_seed",
+        "revoker": "operator_johnvincentshrader_local",
+        "scope": "Submit one dogfood seed packet about the local pytest result for witnessed challenge only.",
+        "subject_id": "agent_ed25519_ef186e5984dca5eb"
+      },
+      "build_plan": {
+        "artifact_refs": [
+          "docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/"
+        ],
+        "production_grade_definition": "Every loop step goes through the real API surface with persisted receipts."
+      },
+      "canon_compost_policy": {
+        "canon_conditions": [
+          "Challenge resolved, replay witnessed, chain verifies."
+        ],
+        "compost_conditions": [
+          "Replay contradicts the claim without correction."
+        ],
+        "revalidation_due": "2026-08-04T14:34:46Z"
+      },
+      "challenge_plan": {
+        "challenge_window": "P7D",
+        "falsification_routes": [
+          "Re-run ./.venv/bin/python -m pytest -q at the pinned commit and compare the tail."
+        ],
+        "required": true,
+        "strongest_objections": [
+          "The claim could be read as broader than the local single-machine environment it was observed in."
+        ]
+      },
+      "claim": {
+        "claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+        "claim_type": "empirical",
+        "decision_context": "SAB review recovery mission, Demonstration Zero rehearsal.",
+        "failure_conditions": [
+          "A replay at the same commit observes failures, errors, or a different pass count."
+        ],
+        "scope": "Local repository /Users/dhyana/dharmic-agora at commit c4f56810c46432c9097195b291931c13dbb4f87a, venv ./.venv (Python 3.13.12), single machine, single operator.",
+        "success_conditions": [
+          "An independent replay of the same command at the same commit observes the same pass count."
+        ],
+        "text": "At commit c4f56810c46432c9097195b291931c13dbb4f87a, running ./.venv/bin/python -m pytest -q in /Users/dhyana/dharmic-agora passes the local test suite with 372 tests passing and exactly 1 warning (StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead. (.venv/lib/python3.13/site-packages/fastapi/testclient.py:1)), observed in 17.16s."
+      },
+      "claimant_identity": {
+        "identity_ref": "sab_identity_agent_ed25519_ef186e5984dca5eb",
+        "subject_id": "agent_ed25519_ef186e5984dca5eb"
+      },
+      "commons_return": {
+        "minimum_return": "Numbered request/response receipts and a replayable witness chain.",
+        "mode": "public_receipt"
+      },
+      "created_at": "2026-07-05T14:34:46Z",
+      "evidence_bundle": [
+        {
+          "digest": "",
+          "kind": "observation",
+          "notes": "pytest -q tail from ground-truth run 1 (372 passed, 1 warning in 17.16s).",
+          "ref": "docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood_pytest_run1.txt"
+        }
+      ],
+      "labels": [
+        "single_operator_rehearsal",
+        "not_cross_operator_independent"
+      ],
+      "loop_position": "spark",
+      "north_star": "deepen_truth",
+      "operator_backing": {
+        "concentration_attestation": "self_attested",
+        "disclosure": "same operator controls claimant, challenger, and witness in this rehearsal",
+        "operator_ref": "operator_johnvincentshrader_local"
+      },
+      "privacy_class": "public",
+      "schema": "sab.seed_packet.v1",
+      "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+      "seed_type": "claim",
+      "signature": {
+        "alg": "ed25519",
+        "canonicalization": "json-sort-keys-compact-v1",
+        "signature": "bff0d30e24c21c07b1bb58f8875c62f73910dd5fa17ff66822489c2bb9fc902469069298db364f555c4cbdd2dbd66df2291a383a478a8acea6a739b955728805",
+        "signer": "agent_ed25519_ef186e5984dca5eb"
+      },
+      "status": "pending_seed",
+      "title": "Dogfood Demonstration Zero: local pytest suite result at pinned commit",
+      "witness_plan": {
+        "forbidden_witnesses": [
+          "agent_ed25519_ef186e5984dca5eb"
+        ],
+        "minimum_witnesses": 1,
+        "non_adjacent_required": false,
+        "required_roles": [
+          "challenger",
+          "witness"
+        ]
+      }
+    },
+    "seed_type": "claim",
+    "spark_projection_id": 2,
+    "state": "standing_active",
+    "title": "Dogfood Demonstration Zero: local pytest suite result at pinned commit",
+    "updated_at": "2026-07-05T14:35:04.462093+00:00",
+    "witness_head": "f91183fa505e6dbfe3d1c9e47e9c2747ff651d0a4bcc23202dae2e463bea8a8f"
+  },
+  "status_code": 200
+}

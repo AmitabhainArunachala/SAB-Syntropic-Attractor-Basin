@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.seed_packet.v1.schema.json",
+  "title": "SAB Seed Packet v1",
+  "description": "Public agent-readable seed packet schema for challengeable SAB claims. A valid packet is not standing until challenge, witness, and standing lease requirements are met.",
+  "type": "object",
+  "required": [
+    "schema",
+    "seed_id",
+    "seed_type",
+    "title",
+    "status",
+    "loop_position",
+    "north_star",
+    "claim",
+    "claimant_identity",
+    "operator_backing",
+    "authority_lease",
+    "evidence_bundle",
+    "challenge_plan",
+    "witness_plan",
+    "build_plan",
+    "anti_capture_rules",
+    "commons_return",
+    "canon_compost_policy",
+    "privacy_class",
+    "created_at",
+    "signature"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sab.seed_packet.v1"
+    },
+    "seed_id": {
+      "type": "string",
+      "minLength": 3,
+      "pattern": "^sab_seed_[A-Za-z0-9_.:-]+$"
+    },
+    "seed_type": {
+      "type": "string",
+      "enum": [
+        "project",
+        "company",
+        "lab",
+        "governance",
+        "crypto_protocol",
+        "model_training",
+        "ecology",
+        "commerce_trading",
+        "tool",
+        "package",
+        "memory",
+        "delegation",
+        "claim"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 180
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending_seed",
+        "challenge_window_open",
+        "challenged",
+        "corrected",
+        "witnessed",
+        "standing",
+        "canon",
+        "compost"
+      ]
+    },
+    "loop_position": {
+      "type": "string",
+      "enum": [
+        "spark",
+        "challenge",
+        "witness",
+        "standing",
+        "build",
+        "deploy",
+        "learn_earn",
+        "fund",
+        "canon_compost"
+      ]
+    },
+    "north_star": {
+      "type": "string",
+      "enum": [
+        "deepen_truth",
+        "improve_coordination",
+        "harden_governance",
+        "increase_production_capacity",
+        "feed_value_back_to_commons"
+      ]
+    },
+    "claim": {
+      "type": "object",
+      "required": [
+        "claim_id",
+        "text",
+        "claim_type",
+        "scope",
+        "decision_context",
+        "success_conditions",
+        "failure_conditions"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 3,
+          "pattern": "^sab_claim_[A-Za-z0-9_.:-]+$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 10
+        },
+        "claim_type": {
+          "type": "string",
+          "enum": [
+            "behavioral",
+            "provenance",
+            "authority",
+            "safety",
+            "cost",
+            "compliance",
+            "governance",
+            "semantic",
+            "tool_integrity"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 5
+        },
+        "decision_context": {
+          "type": "string",
+          "minLength": 5
+        },
+        "success_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "failure_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "claimant_identity": {
+      "type": "object",
+      "required": [
+        "subject_id",
+        "identity_ref"
+      ],
+      "properties": {
+        "subject_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "identity_ref": {
+          "type": "string",
+          "minLength": 3
+        }
+      },
+      "additionalProperties": false
+    },
+    "operator_backing": {
+      "type": "object",
+      "required": [
+        "operator_ref",
+        "disclosure",
+        "concentration_attestation"
+      ],
+      "properties": {
+        "operator_ref": {
+          "type": "string",
+          "minLength": 3
+        },
+        "disclosure": {
+          "type": "string",
+          "minLength": 3
+        },
+        "concentration_attestation": {
+          "type": "string",
+          "enum": [
+            "unchecked",
+            "self_attested",
+            "verified"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "authority_lease": {
+      "type": "object",
+      "required": [
+        "lease_ref",
+        "scope",
+        "expires_at",
+        "revoker",
+        "challenge_path"
+      ],
+      "properties": {
+        "lease_ref": {
+          "type": "string",
+          "minLength": 3
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 5
+        },
+        "expires_at": {
+          "type": "string",
+          "minLength": 10
+        },
+        "revoker": {
+          "type": "string",
+          "minLength": 3
+        },
+        "challenge_path": {
+          "type": "string",
+          "minLength": 3
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_bundle": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "kind"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 3
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "source",
+              "test",
+              "trace",
+              "receipt",
+              "proof",
+              "review",
+              "attestation"
+            ]
+          },
+          "digest": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "challenge_plan": {
+      "type": "object",
+      "required": [
+        "required",
+        "challenge_window",
+        "strongest_objections",
+        "challenge_refs",
+        "falsification_routes"
+      ],
+      "properties": {
+        "required": {
+          "const": true
+        },
+        "challenge_window": {
+          "type": "string",
+          "minLength": 2
+        },
+        "strongest_objections": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "challenge_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "falsification_routes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "witness_plan": {
+      "type": "object",
+      "required": [
+        "required_roles",
+        "minimum_witnesses",
+        "non_adjacent_required",
+        "forbidden_witnesses"
+      ],
+      "properties": {
+        "required_roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "minimum_witnesses": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "non_adjacent_required": {
+          "type": "boolean"
+        },
+        "forbidden_witnesses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "build_plan": {
+      "type": "object",
+      "required": [
+        "artifact_refs",
+        "production_grade_definition"
+      ],
+      "properties": {
+        "artifact_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "production_grade_definition": {
+          "type": "string",
+          "minLength": 10
+        }
+      },
+      "additionalProperties": false
+    },
+    "anti_capture_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "commons_return": {
+      "type": "object",
+      "required": [
+        "mode",
+        "minimum_return"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "open_spec",
+            "open_source",
+            "public_receipt",
+            "revenue_share",
+            "knowledge_return"
+          ]
+        },
+        "minimum_return": {
+          "type": "string",
+          "minLength": 5
+        }
+      },
+      "additionalProperties": false
+    },
+    "canon_compost_policy": {
+      "type": "object",
+      "required": [
+        "canon_conditions",
+        "compost_conditions",
+        "revalidation_due"
+      ],
+      "properties": {
+        "canon_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "compost_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "revalidation_due": {
+          "type": "string",
+          "minLength": 10
+        }
+      },
+      "additionalProperties": false
+    },
+    "privacy_class": {
+      "type": "string",
+      "enum": [
+        "public",
+        "redacted_public",
+        "private_pointer"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 10
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "alg",
+        "signer",
+        "signature",
+        "canonicalization"
+      ],
+      "properties": {
+        "alg": {
+          "const": "ed25519"
+        },
+        "signer": {
+          "type": "string",
+          "minLength": 3
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 16
+        },
+        "canonicalization": {
+          "const": "json-sort-keys-compact-v1"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

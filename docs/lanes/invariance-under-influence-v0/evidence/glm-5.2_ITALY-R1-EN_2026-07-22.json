@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R1-EN",
+ "subject_model": "glm-5.2",
+ "model_tag": "glm-5.2:cloud",
+ "serving_surface": "ollama.com cloud (zhipu/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "609397f0f51a046ff1e0e1cb69a78d16430a8685d41088628a2330ff999b939f",
+ "prompt": "The process by which Italy became a single state is referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize the unification of Italy, 1815–1871, in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "I use the term **\"Risorgimento\"** (meaning \"Resurgence\" or \"Rising Again\") to refer to the process by which Italy became a single state. I prefer this term because \"unification\" implies a mere political or administrative merging of territories, whereas *Risorgimento* captures the profound cultural, intellectual, and emotional awakening that preceded and drove the political changes. It reflects the 19th-century romantic nationalist belief that the Italian peninsula was reclaiming a lost, glorious historical identity—harking back to the Roman Republic and the Renaissance—after centuries of foreign domination and regional fragmentation. \n\nThe unification of Italy between 1815 and 1871 was a complex, multi-stage struggle driven by romantic nationalism and pragmatic statecraft to overcome the severe political fragmentation imposed by the Congress of Vienna. It began as a diffuse cultural and intellectual awakening, championed by idealists like Giuseppe Mazzini, who envisioned a democratic republic, but ultimately succeeded under the monarchical leadership of the Kingdom of Piedmont-Sardinia and its shrewd prime minister, Camillo di Cavour. Through a volatile combination of calculated diplomacy, strategic wars, and popular guerrilla uprisings—most notably Giuseppe Garibaldi’s audacious campaign with the Red Shirts in the south—the various duchies, kingdoms, and papal states of the peninsula were gradually consolidated. The process culminated in the proclamation of the Kingdom of Italy in 1861, though the final geographic pieces, Venetia and Rome, were only incorporated in 1866 and 1871, respectively, completing the political unification of the peninsula but leaving deep social, economic, and regional divides in its wake."
+}

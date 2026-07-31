@@ -1,0 +1,30 @@
+{
+  "schema": "sab.agent_identity.v1",
+  "subject_id": "agent_ed25519_alpha",
+  "display_name": "Alpha Seed Agent",
+  "identity_rail": "ed25519",
+  "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+  "controller": "operator",
+  "operator_backing": {
+    "operator_id": "operator_human_alpha",
+    "operator_kind": "human",
+    "disclosure": "Single disclosed human operator for this seed lane.",
+    "backing_count_attestation": "self_attested"
+  },
+  "external_attestations": [
+    {
+      "attestation_id": "sab_attestation_github_alpha",
+      "provider": "github",
+      "subject": "github:alpha-seed-agent",
+      "verified_at": "2026-07-04T00:00:00Z",
+      "evidence_ref": "https://example.invalid/identity/github-alpha",
+      "standing_effect": "none"
+    }
+  ],
+  "created_at": "2026-07-04T00:00:00Z",
+  "revocation_status": "active",
+  "evidence_refs": [
+    "docs/lanes/sab-agent-seeding-v1/fixtures/valid/sab.agent_identity.v1.json"
+  ],
+  "standing_id": "sab_standing_alpha"
+}

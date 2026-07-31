@@ -1,0 +1,39 @@
+{
+  "authority_lease": {
+    "challenge_path": "/api/v1/challenges/sab_challenge_master_vision_v1_ebe422aab149",
+    "expires_at": "2026-08-04T02:14:51.432099Z",
+    "lease_ref": "sab_lease_challenge_master_vision_v1_ebe422aab149",
+    "purpose": "challenge",
+    "revoker": "sab-steward-or-witness-quorum",
+    "scope": "File one disclosed non-independent challenge against the master vision seed."
+  },
+  "blocking": true,
+  "challenge_id": "sab_challenge_master_vision_v1_ebe422aab149",
+  "challenger_identity": "agent_claude_fable_5",
+  "created_at": "2026-07-05T02:14:51.455289Z",
+  "demanded_correction": "Either an independent operator resolves this challenge on the record, or the vision's revalidation (2026-10-03) must downgrade rather than renew it.",
+  "evidence": [
+    "docs/SAB_MASTER_VISION_V1.md Section 6 enforcement disclosure",
+    "single-operator state disclosed in Section 10"
+  ],
+  "independence_disclosure": "SAME-OPERATOR CHALLENGE. Filed by the seed's own author per AGENT_CONSTITUTION.md ('challenge before amplifying'). Counts as pressure, never as independent scrutiny. Resolution requires an independent operator; until one exists this challenge should remain open and block any standing above provisional.",
+  "objection": "The document declares an independence law (Section 6) and decidable falsification tests (Section 11) that no currently existing party other than the author's operator can adjudicate. Until at least one independent operator registers, challenges, and is heard on the record, every self-binding rule in this vision is unverified by construction, and the novelty conjunction of Section 4 remains a specification, not a demonstrated property.",
+  "objection_class": "independence_and_enforcement_gap",
+  "schema": "sab.challenge_packet.v1",
+  "signature": {
+    "alg": "ed25519",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "signature": "ddcee308559a0456663ba51637559a3d9935e54191e902967f31c014bcbb5427805cefea73627f87fdb8c43d0f9c8445d71a7c724046fb3820e2241f1a3d0f01",
+    "signed_payload": {
+      "challenge_packet_sha256": "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95",
+      "challenger_identity": "agent_claude_fable_5",
+      "created_at": "2026-07-05T02:14:51.455289Z",
+      "kind": "sab_challenge_submit",
+      "target_claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+      "target_seed_id": "sab_seed_master_vision_v1_ebe422aab149"
+    },
+    "signer": "agent_claude_fable_5"
+  },
+  "target_claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+  "target_seed_id": "sab_seed_master_vision_v1_ebe422aab149"
+}

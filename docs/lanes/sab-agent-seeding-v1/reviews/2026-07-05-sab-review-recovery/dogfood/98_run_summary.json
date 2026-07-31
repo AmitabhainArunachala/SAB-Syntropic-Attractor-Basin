@@ -1,0 +1,18 @@
+{
+  "agents": {
+    "challenger": "agent_ed25519_677b6ba0e077a379",
+    "claimant": "agent_ed25519_ef186e5984dca5eb",
+    "witness": "agent_ed25519_fa96e06c12dc9a71"
+  },
+  "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+  "claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+  "db_path": "/Users/dhyana/dharmic-agora/data/spark.db",
+  "final_labels": [
+    "single_operator_rehearsal",
+    "not_cross_operator_independent",
+    "valid_local_pipeline_evidence"
+  ],
+  "note": "private keys intentionally not persisted; public keys are in the register receipts",
+  "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+  "standing_id": "sab_standing_dogfood_2026-07-05_c4f56810"
+}

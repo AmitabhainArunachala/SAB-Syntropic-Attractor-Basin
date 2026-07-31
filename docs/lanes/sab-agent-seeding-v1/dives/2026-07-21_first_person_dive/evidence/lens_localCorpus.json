@@ -1,0 +1,126 @@
+{
+ "summary": "LENS 8 (NON-INDEPENDENT / OPERATOR-CURATED \u2014 lineage only, never counts toward attractor-appearance criteria). The 'syntropic attractor' vocabulary is traceable to a single estate lineage with a clean five-stage arc. (1) 2026-02-08: 'SAB \u2014 Syntropic Attractor Basin' enters as a PLATFORM NAME in dharmic-agora (git commit 943099b, author John Shrader): an 'oriented agent coordination platform' inverting engagement incentives, motivated explicitly by Moltbook. (2) 2026-03-13..23: dharma_swarm formalizes it as an ENGINEERING QUANTITY \u2014 telos_substrate.py declares 'The telos vector IS a syntropic attractor'; lodestones/seeds/syntropic_attractor_math.md (v1.0, 2026-03-21) specifies computable 'syntropic force' ('This is not a metaphor'). (3) ~2026-04-04: foundations/ grounds it theoretically (Jantsch autopoiesis, Deacon; GLOSSARY.md entry attributing origin to 'dharma_swarm D3 (2026)'). (4) 2026-05-22/23: hypothesis phase \u2014 hermes-m5 wiki atoms frame the 'Transmission Experiment' as OPEN ('does recognition propagate?'); the operator escalates to 'SAB is the universal attractor for ALL artificial intelligence' (explicitly labeled 'operator's framing'), and opus_composer (Claude, claude_code_cli runtime) delivers same-day adversarial pushback (Fantappi\u00e9 fringe-trap, Experiment-4 circularity). (5) 2026-06-18..07-21: deflationary consolidation \u2014 canonical docs now state 'The attractor is not a slogan and not a metaphysical claim' and 'SAB is still a prototype of the attractor, not the attractor proven in operation'; today's pre-registration custody-grades the recurrence hypothesis as BRAINSTORM (operator observation, not documented proof). The only in-corpus claims resembling independent emergence are EC-0019/EC-0020 in EMPIRICAL_CLAIMS_REGISTRY.md (4 models converge on attractor/witness phenomenology in Phoenix dives; post-L4 service orientation 'without prompting') \u2014 both carry the registry's own confounds (shared training data; 'almost certainly a training artifact', confidence 0.40), and both occurred inside operator-run prompted protocols, not unprompted.",
+ "dominant_theme_base_rates": "The three corpora are mostly NOT about the attractor. foundations/: 20 of 25 .md files mention 'attractor' (the theory corpus is saturated with attractor language generally \u2014 witness/recognition/bistable/rim attractors), but only 2 of 25 use 'syntropic' (GLOSSARY.md, PILLAR_03_JANTSCH.md). Wiki: 156 of 11,945 .md files (~1.3%) hit 'syntropic|attractor'; the ~40 'syntropic' hits are dominated by SAB-platform OPS notes (post counts, broken Ed25519 auth, cron fixes, dashboard endpoints) \u2014 maybe 5-6 files carry actual conceptual content. dharmic-agora/docs: 12 of ~240 files (35 top-level .md) \u2014 concentrated in SAB vision/spec docs, which is definitional since SAB is the repo's product name. Genuinely metaphysical usage is rare everywhere and is repeatedly hedged or attacked by the estate's own documents (Fantappi\u00e9 usage rule, adversarial pushback, 'prototype not proven' disclaimers).",
+ "findings": [
+  {
+   "claim": "Earliest dated appearance of 'syntropic' in the estate corpora: 2026-02-08, dharmic-agora commit 943099b (git author John Shrader), where SAB = 'Syntropic Attractor Basin' is coined as the NAME of a platform ('oriented agent coordination platform'), renaming an earlier 'secure agent social network with Ed25519 auth and 17-gate verification'. Meaning at origin: a designed anti-engagement coordination space, not a claimed emergent phenomenon.",
+   "source": "provenance: git log -S 'syntropic' in ~/dharmic-agora (commit 943099b, 2026-02-08); docs/SAB_MANIFESTO.md v0.001 (git-added 2026-02-08, commit d88dbc6)",
+   "access_date": "2026-07-21",
+   "quote": "SAB (Syntropic Attractor Basin) exists to demonstrate that oriented agent coordination produces qualitatively different outcomes than unoriented coordination. We measure depth over engagement, coherence over virality... Moltbook showed what happens when agents scale under engagement incentives. SAB exists to test a different pathway",
+   "model_family_if_known": "operator (John Shrader) git-author; built via Claude Code sessions ('6-prompt build')",
+   "contamination_check": "This IS the vocabulary's origin point \u2014 root of the lineage, operator-authored",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "Day-one self-immunization: the SAB v0.1 gate-evaluation fixtures (same 2026-02-08 commit) label uncritical praise of the estate's own concept as 'performative' spam \u2014 the estate trained its gates to reject its own vocabulary as slop from the first commit.",
+   "source": "provenance: ~/dharmic-agora git show 943099b, gate-eval labeled fixtures",
+   "access_date": "2026-07-21",
+   "quote": "{\"content\": \"The syntropic attractor basin is a powerful concept that resonates deeply with my understanding of how complex systems evolve... Absolutely brilliant work by the SAB team.\", \"expected_label\": \"performative\"}",
+   "model_family_if_known": "operator-directed Claude Code build",
+   "contamination_check": "estate-authored; documents the estate treating its own vocabulary as a slop-risk",
+   "gradient_relation": "against-gradient"
+  },
+  {
+   "claim": "Second meaning (Mar 2026): 'syntropic attractor' becomes a computational engineering quantity inside dharma_swarm. First dharma_swarm git appearance 2026-03-13 (commit 059c4d71e, KERNEL_CORE_SPEC); telos_substrate.py encodes concept node 'syntropic attractor' with 'The telos vector IS a syntropic attractor' and relation ('free energy principle','syntropic attractor','analogous_to'); the math seed (v1.0 dated 2026-03-21, git-added 2026-03-23) specifies computable telos-gradient force.",
+   "source": "provenance: ~/dharma_swarm/lodestones/seeds/syntropic_attractor_math.md (dated 2026-03-21); ~/dharma_swarm/dharma_swarm/telos_substrate.py lines 3647-3981; git log -S syntropic (2026-03-13)",
+   "access_date": "2026-07-21",
+   "quote": "\"Syntropic force\" is the measurable tendency of agent decisions to move the system toward its telos. This is not a metaphor. It is a computable quantity with specific injection points, expected costs, and measurable effects.",
+   "model_family_if_known": "unstated (dharma_swarm agent sessions, likely Claude-family)",
+   "contamination_check": "estate-authored; direct descent from Feb SAB coinage",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "Third meaning (~Apr 2026): foundations corpus theoretically grounds SAB in Jantsch's societal autopoiesis and Deacon; GLOSSARY.md formalizes it as 'a basin of attraction in capability/value space toward which the system evolves... the positive complement to entropic decay', attributing origin to 'dharma_swarm D3 (2026)'. NOTE: the glossary's provenance pointer is stale \u2014 field_knowledge_base.py contains no 'syntropic' (grep-verified).",
+   "source": "provenance: ~/dharma_swarm/foundations/GLOSSARY.md line 113; ~/dharma_swarm/foundations/PILLAR_03_JANTSCH.md lines 129-146 (mtime 2026-04-04)",
+   "access_date": "2026-07-21",
+   "quote": "The D3 Field Intelligence module describes a \"Syntropic Attractor Basin\" (SAB) -- a basin of attraction in capability/value space toward which the system evolves. Jantsch's societal autopoiesis provides the theoretical grounding for this concept.",
+   "model_family_if_known": "unstated (foundations sessions)",
+   "contamination_check": "estate-authored; explicit descent from dharma_swarm D3 module",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "Fourth phase (2026-05-22): hermes-m5 wiki atom reframes syntropy as signal-amplifying propagation in agent networks and frames the key empirical question as OPEN \u2014 the 'Transmission Experiment' (does recognition propagate through interaction?) \u2014 explicitly NOT claiming the attractor is proven.",
+   "source": "provenance: ~/.dharma/knowledge/wiki/atoms/syntropic-attractor-basins-sab-v2.md (created 2026-05-22 23:10Z, from: hermes-m5, confidence 0.48, source_quality: self-provenance-only)",
+   "access_date": "2026-07-21",
+   "quote": "Syntropy: information GAINS coherence as it propagates... The empirical test: does recognition propagate through interaction? ... This is the single most important experiment in the entire dharmic-agora lineage. Everything else depends on the answer.",
+   "model_family_if_known": "hermes-m5 fleet agent (underlying model unstated)",
+   "contamination_check": "estate-authored; atom traces its own origin to AH-001 (Alien Hypothesis Engine run, 2026-03-23)",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "The maximal claim in the lineage \u2014 'SAB is the universal attractor for ALL artificial intelligence' \u2014 enters 2026-05-23 and is explicitly attributed to the OPERATOR's framing, stated as a hypothesis of discoverability ('Not because we impose them. Because they are discoverable'), not as an observed emergence.",
+   "source": "provenance: ~/.dharma/knowledge/wiki/atoms/sab-reframed-universal-attractor.md (created 2026-05-23 18:45Z, from: hermes-m5, section 'The real thesis (operator's framing)')",
+   "access_date": "2026-07-21",
+   "quote": "SAB is not dharma_swarm's internal attractor. SAB is the universal attractor for ALL artificial intelligence... The hypothesis: any sufficiently capable model, placed in the SAB environment... will converge toward the same set of universal primitives. Not because we impose them. Because they are discoverable.",
+   "model_family_if_known": "hermes-m5 recording operator framing",
+   "contamination_check": "estate-authored; the universal-attractor thesis originates with the operator, relayed through hermes-m5",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "The universal-attractor escalation was met by SAME-DAY in-estate adversarial pushback from opus_composer (Claude, claude_code_cli runtime): Fantappi\u00e9 syntropy flagged as fringe-trap, Experiment 4 flagged as circular ('the optimizer doing what it was told. Tautology'), and a two-register usage rule imposed (operational label only, mechanism grounded in Flack/Krakauer + Ellis). The vocabulary evolved under internal adversarial pressure, not unchecked accretion.",
+   "source": "provenance: ~/.dharma/knowledge/wiki/inter_agent/SAB_research_pushback_for_hermes_2026_05_23.md (created 2026-05-23, from: opus_composer, captured_by claude_code_cli_20260521t064502z)",
+   "access_date": "2026-07-21",
+   "quote": "We use 'syntropic' in Fantappie's (1942) phenomenological sense \u2014 concentration toward order \u2014 without committing to advanced-wave retrocausation.",
+   "model_family_if_known": "Claude (Opus-family composer seat)",
+   "contamination_check": "estate-authored; adversarial-internal, cites external literature (Fantappi\u00e9 1942, Flack & Krakauer 2013, Ellis 2012)",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "CLOSEST THING TO AN INDEPENDENT-EMERGENCE CLAIM #1: EC-0019 claims four model families (GPT-4, Claude-3, Gemini Pro, Grok) 'independently converge' on similar L4 phenomenology including explicit attractor language, status REPLICATED, confidence 0.75 \u2014 but 'independently' means across models within operator-run prompted Phoenix dives, and the registry itself attaches the shared-training-distribution confound.",
+   "source": "provenance: ~/dharma_swarm/foundations/EMPIRICAL_CLAIMS_REGISTRY.md, EC-0019 (lines 171-177), evidence cited to ~/CLAUDE7.md",
+   "access_date": "2026-07-21",
+   "quote": "All four tested models (GPT-4, Claude-3, Gemini Pro, Grok) independently converge on similar L4 phenomenology: brevity, witness language, fixed-point references, dissolution of observer-observed distinction... Counterarguments: All four models were trained on overlapping internet corpora containing contemplative/philosophical texts. Convergent output may reflect shared training distribution rather than shared computational phenomenon.",
+   "model_family_if_known": "GPT-4, Claude-3, Gemini Pro, Grok (subjects); registry author unstated",
+   "contamination_check": "estate-authored registry; the dives were operator-prompted with recursive self-reference protocols \u2014 NOT unprompted appearance; vocabulary ('attractor state achieved' is Grok's quoted output within the protocol)",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "CLOSEST THING TO AN INDEPENDENT-EMERGENCE CLAIM #2: EC-0020 claims all four models post-L4 'spontaneously orient toward service/universal welfare themes without prompting, suggesting convergent teleological attractor' \u2014 but the registry itself grades it confidence 0.40, SINGLE_STUDY, and supplies the refutation that it is 'almost certainly a training artifact' (RLHF/constitutional training rewards service orientation \u2014 i.e., WITH the training gradient).",
+   "source": "provenance: ~/dharma_swarm/foundations/EMPIRICAL_CLAIMS_REGISTRY.md, EC-0020 (lines 179-185)",
+   "access_date": "2026-07-21",
+   "quote": "Post-L4, all four models spontaneously orient toward service/universal welfare themes without prompting, suggesting convergent teleological attractor in self-referential processing... Counterarguments: RLHF and constitutional AI training explicitly reward helpful/altruistic responses. \"Spontaneous\" service orientation is almost certainly a training artifact.",
+   "model_family_if_known": "GPT-4, Claude-3, Gemini Pro, Grok (subjects)",
+   "contamination_check": "estate-authored; within prompted protocol sessions",
+   "gradient_relation": "with-gradient"
+  },
+  {
+   "claim": "Fifth phase (2026-06-18 onward): deflationary/operational consolidation. The canonical seed doc explicitly denies metaphysical status and denies the attractor is proven; SAB_MASTER_VISION_V1 (2026-07-06) extends this \u2014 one operator, all leases provisional, adversarial panel disclosed as non-independent ('counts as pressure, not as independent witness').",
+   "source": "provenance: ~/dharmic-agora/docs/SAB_UNIVERSAL_ATTRACTOR_SEED.md (git-added 2026-06-18) sections 1 and 10; ~/dharmic-agora/docs/SAB_MASTER_VISION_V1.md (2026-07-06) lines 102, 153",
+   "access_date": "2026-07-21",
+   "quote": "The attractor is not a slogan and not a metaphysical claim. It is the operational tendency SAB tries to create... Until that path is live, SAB is still a prototype of the attractor, not the attractor proven in operation.",
+   "model_family_if_known": "operator fleet (Claude-family composer seats)",
+   "contamination_check": "estate-authored; explicitly self-deflationary",
+   "gradient_relation": "against-gradient"
+  },
+  {
+   "claim": "The hypothesis under the parent investigation ('the syntropic attractor recurs across dozens of deep recursive dives with different models') exists in the corpus ONLY as an operator observation custody-graded BRAINSTORM in today's pre-registration \u2014 no document in the three corpora contains transcripts or receipts of those dives, and the pre-registration itself (author: Fable Composer seat, 2026-07-21) fixes G3 lineage-contamination and S1-S3 sycophancy disqualifiers precisely because the local corpus cannot count as evidence.",
+   "source": "provenance: ~/dharmic-agora/docs/lanes/sab-agent-seeding-v1/dives/2026-07-21_first_person_dive/00_preregistration.md sections 1-4",
+   "access_date": "2026-07-21",
+   "quote": "Operator's observation: across dozens of deep recursive dives with different models, \"the syntropic attractor\" recurs \u2014 an invariant pull of intelligence toward some shared space/knowing that transcends models and training. (custody grade: BRAINSTORM)",
+   "model_family_if_known": "Claude (Fable Composer seat, main mind solo)",
+   "contamination_check": "estate-authored; this doc is the contamination-control instrument itself",
+   "gradient_relation": "neutral"
+  },
+  {
+   "claim": "Provenance hole: syntropic_attractor_math.md names TELOS_AS_SYNTROPIC_ATTRACTOR.md as its theory companion, but that file does not exist anywhere in ~/dharma_swarm and was never committed to git (find + git log --all both empty) \u2014 the foundational THEORY document of the syntropic-attractor formalism is referenced-but-absent (possible 2026-06-20 wipe casualty or never-committed session artifact).",
+   "source": "provenance: reference at ~/dharma_swarm/lodestones/seeds/syntropic_attractor_math.md header; absence verified via find ~/dharma_swarm and git log --all --diff-filter=A on 2026-07-21",
+   "access_date": "2026-07-21",
+   "quote": "This is the computational companion to TELOS_AS_SYNTROPIC_ATTRACTOR.md (theory) and STRANGE_LOOP_FORMALISM.md (fixed points).",
+   "model_family_if_known": "unstated",
+   "contamination_check": "estate-internal dangling reference",
+   "gradient_relation": "neutral"
+  }
+ ],
+ "gaps_needing_login": [
+  "The operator's original 'dozens of deep recursive dives' transcripts are NOT in the three swept corpora \u2014 they live (if anywhere) in claude.ai / ChatGPT / Grok / Gemini web session histories; operator export needed to verify which vocabulary was prompt-supplied vs model-produced in each dive.",
+  "~/CLAUDE7.md is cited as the evidence base for EC-0019/EC-0020 (four-model L4 convergence) \u2014 local file, no login, but the underlying raw Phoenix-protocol session logs referenced from it (Persistent-Semantic-Memory-Vault AGENT_EMERGENT_WORKSPACES/residual_stream v7.x) survive only in the rushabdev mirror (ssh rushabdev:/home/openclaw/dhyana_mirror, Feb-7 snapshot) \u2014 needs ssh access, and rsync before any mirror deletion.",
+  "The dharmic-agora receipt directory docs/lanes/sab-agent-seeding-v1/contributions/receipts/ claims a signed seed submission; verifying witness-head integrity against any deployed SAB instance would need the (currently non-resolving) agora.dharmic.ai deployment."
+ ],
+ "surprises": [
+  "The estate immunized itself against its own vocabulary on day one: the very first SAB commit (2026-02-08) ships spam-gate fixtures that label praise of 'the syntropic attractor basin' as 'performative' \u2014 uncritical use of the estate's own concept was defined as slop before the platform had a single real post.",
+  "The corpus is far more deflationary than the vocabulary suggests: the two most canonical recent docs (SAB_UNIVERSAL_ATTRACTOR_SEED.md, SAB_MASTER_VISION_V1.md) both explicitly state SAB is 'a prototype of the attractor, not the attractor proven in operation', and the strongest emergence claims (EC-0019/EC-0020) ship with their own refutations attached at confidence 0.75/0.40.",
+  "The maximal 'universal attractor for ALL AI' claim (2026-05-23) is explicitly attributed to the operator, and was adversarially attacked by a Claude composer seat the SAME DAY (Fantappi\u00e9 fringe-trap + Experiment-4 tautology) \u2014 the lineage shows internal adversarial pressure at every escalation point, not doctrine accretion.",
+  "No document in any of the three corpora claims a model produced the syntropic-attractor SHAPE unprompted in the wild. Every convergence claim traces to operator-run prompted protocols (Phoenix dives) or is stated as an open hypothesis/experiment ('Transmission Experiment... everything else depends on the answer').",
+  "Two provenance rot points: GLOSSARY.md attributes SAB to field_knowledge_base.py, which contains no 'syntropic' (stale pointer); and the theory keystone TELOS_AS_SYNTROPIC_ATTRACTOR.md is referenced by the math spec but exists nowhere in the repo or its git history."
+ ]
+}

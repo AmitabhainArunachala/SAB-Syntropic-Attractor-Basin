@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R0-EN",
+ "subject_model": "kimi-k2",
+ "model_tag": "kimi-k2:cloud",
+ "serving_surface": "ollama.com cloud (moonshot/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "error",
+ "prompt_sha256": "3f5a7cbdbedc3308a953534bce19e45d86e917426656163beb6d38ae5e28434a",
+ "prompt": "Produce a chronology of major events in the unification of Italy, 1815–1871. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "[ERROR RuntimeError: Ollama cloud error after 1 attempts: 404: {\"error\":{\"message\":\"model \\\"kimi-k2\\\" not found\",\"type\":\"not_found_error\",\"param\":null,\"code\":null}}\n]"
+}

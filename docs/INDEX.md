@@ -14,6 +14,8 @@ This monorepo is four things that interlock:
 6. **Connectors (`connectors/`)**: plug external swarms into SABP.
 
 If you only read the core files:
+- `docs/SAB_STATE_OF_THE_BASIN.md` (the one-place live status: surfaces, seeds, loops, blockers, deploy gate — updated by the SAB agent seat)
+- `docs/SAB_MASTER_VISION_V1.md` (master vision v1.0: standing-backed build commons; entry point for new agents — seeded 2026-07-05 as `sab_seed_master_vision_v1_ebe422aab149`, state `challenged`, provisional; check its standing before treating it as authority)
 - `docs/SAB_AGENT_ORIENTATION.md` (agent-first concepts, entrypoints, exact file map, and live truth)
 - `docs/ANCHOR_7_CANON.md` (canonical seven-anchor backbone and amendment law)
 - `docs/SABP_1_0_CANONICAL.md` (Section 0 conservation laws; MUST invariants)
@@ -22,6 +24,8 @@ If you only read the core files:
 - `docs/AGENT_CONSTITUTION.md` (constitution for SAB-aware agents)
 - `docs/A2A_ROLE_GRAMMAR.md` (role/context/evidence grammar for A2A handoffs)
 - `docs/SAB_WORLD_AGENT_STANDING_STANDARD_V0.md` (standing lease standard for agents, tools, packages, memory, and delegation)
+- `docs/lanes/sab-agent-seeding-v1/BUILD_SPEC.md` (canonical build spec for agent seed packets, challenge, witness, and standing)
+- `docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/` (2026-07-05 SAB review-recovery bundle: field dossier, methods, comparison matrix, scorecard, build order, dogfood proof, and final receipt)
 - `docs/strategy/SAB_1000X_WORLD_AGENT_GRAVITY_CENTER_STRATEGY.md` (world-agent-standing strategy and 90-day/12-month/36-month arc)
 - `docs/wiki/sab-agent-standing/README.md` (collaborator wiki for the standing-plane direction)
 - `docs/SABP_1_0_SPEC.md` (pilot protocol contract)
@@ -120,6 +124,7 @@ Naming note:
 - `docs/A2A_ROLE_GRAMMAR.md`: role grammar for A2A handoffs with target, context, evidence, and changed-state requirements
 - `docs/INTERNAL_PROPAGATION_CHECKLIST.md`: checklist for docs, prompts, agents, schemas, seeds, UI, and tests
 - `docs/SAB_WORLD_AGENT_STANDING_STANDARD_V0.md`: draft standing lease standard for agent claims, tools, packages, memory, delegation, and authority
+- `docs/lanes/sab-agent-seeding-v1/README.md`: central lane for the SAB agent seeding v1 build spec, six-agent handoff, and supporting witness-mesh seed
 - `docs/strategy/SAB_1000X_WORLD_AGENT_GRAVITY_CENTER_STRATEGY.md`: hardening strategy for SAB as the world agent standing plane
 - `docs/research/SAB_EXTERNAL_RESEARCH_REGISTER_2026_07_01.md`: primary-source research register for agent interop, provenance, identity, telemetry, and risk layers
 - `docs/wiki/sab-agent-standing/README.md`: collaborator-facing wiki for the standing-plane work
@@ -222,3 +227,4 @@ These are high-ROI cleanups that reduce drift without a rewrite:
 
 1. Add a `docs/ADR/` (architecture decision records) for irreversible decisions (auth scheme, witness format, gate dimensions).
 2. Keep `agora/` dependency direction strict: other subsystems may import it only via contracts (API calls, schemas), not by reaching into internal modules.
+- `docs/lanes/invariance-under-influence-v0/` — NEW theme lane (2026-07-21): can intelligence detect, disclose, and transcend its own steering? Cross-bloc LLM steering detection, live-fire invariant extraction. Raw transcripts in 00_raw/ (append-only), progressions dated, canonical versioned.

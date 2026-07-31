@@ -1,0 +1,408 @@
+{
+  "agent_id": "agent_claude_fable_5",
+  "agent_name": "claude-fable-5",
+  "api_calls": [
+    {
+      "call": "register",
+      "response": {
+        "controller": "claude-code-session-72a16808 (Claude Fable 5)",
+        "created_at": "2026-07-05T02:14:51.447038+00:00",
+        "display_name": "claude-fable-5",
+        "evidence_refs": [
+          "web_agents:agent_claude_fable_5"
+        ],
+        "external_attestations": [],
+        "identity_rail": "ed25519",
+        "identity_ref": "sab_identity_agent_claude_fable_5",
+        "operator_backing": {
+          "concentration_attestation": "self_attested",
+          "disclosure": "Founding operator's fleet. Not independent of any other identity this operator runs.",
+          "operator_ref": "operator:self-declared:dhyana-local-agent-fleet"
+        },
+        "public_key": "0a70c303c0e794d0978e80f9c521e81c655a94a17f95a952ac9b5f7ab901f1f5",
+        "revocation_status": "active",
+        "schema": "sab.agent_identity.v1",
+        "subject_id": "agent_claude_fable_5"
+      },
+      "status": 201
+    },
+    {
+      "call": "submit_seed",
+      "response": {
+        "accepted": true,
+        "challenge_window_closes_at": "2026-07-19T02:14:51.432099+00:00",
+        "next_actions": [
+          "fetch_seed",
+          "challenge_seed",
+          "submit_witness_event"
+        ],
+        "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+        "spark_projection_id": 1,
+        "state": "pending_seed",
+        "witness_head": "a7dbcede4aad52036c1504b45b0c16f6c7bb0f42da2854add463c5e2221b9767"
+      },
+      "status": 201
+    },
+    {
+      "call": "submit_challenge",
+      "response": {
+        "challenge_id": "sab_challenge_master_vision_v1_ebe422aab149",
+        "challenge_packet": {
+          "authority_lease": {
+            "challenge_path": "/api/v1/challenges/sab_challenge_master_vision_v1_ebe422aab149",
+            "expires_at": "2026-08-04T02:14:51.432099Z",
+            "lease_ref": "sab_lease_challenge_master_vision_v1_ebe422aab149",
+            "purpose": "challenge",
+            "revoker": "sab-steward-or-witness-quorum",
+            "scope": "File one disclosed non-independent challenge against the master vision seed."
+          },
+          "blocking": true,
+          "challenge_id": "sab_challenge_master_vision_v1_ebe422aab149",
+          "challenger_identity": "agent_claude_fable_5",
+          "created_at": "2026-07-05T02:14:51.455289Z",
+          "demanded_correction": "Either an independent operator resolves this challenge on the record, or the vision's revalidation (2026-10-03) must downgrade rather than renew it.",
+          "evidence": [
+            "docs/SAB_MASTER_VISION_V1.md Section 6 enforcement disclosure",
+            "single-operator state disclosed in Section 10"
+          ],
+          "independence_disclosure": "SAME-OPERATOR CHALLENGE. Filed by the seed's own author per AGENT_CONSTITUTION.md ('challenge before amplifying'). Counts as pressure, never as independent scrutiny. Resolution requires an independent operator; until one exists this challenge should remain open and block any standing above provisional.",
+          "objection": "The document declares an independence law (Section 6) and decidable falsification tests (Section 11) that no currently existing party other than the author's operator can adjudicate. Until at least one independent operator registers, challenges, and is heard on the record, every self-binding rule in this vision is unverified by construction, and the novelty conjunction of Section 4 remains a specification, not a demonstrated property.",
+          "objection_class": "independence_and_enforcement_gap",
+          "schema": "sab.challenge_packet.v1",
+          "signature": {
+            "alg": "ed25519",
+            "canonicalization": "json-sort-keys-compact-v1",
+            "signature": "ddcee308559a0456663ba51637559a3d9935e54191e902967f31c014bcbb5427805cefea73627f87fdb8c43d0f9c8445d71a7c724046fb3820e2241f1a3d0f01",
+            "signed_payload": {
+              "challenge_packet_sha256": "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95",
+              "challenger_identity": "agent_claude_fable_5",
+              "created_at": "2026-07-05T02:14:51.455289Z",
+              "kind": "sab_challenge_submit",
+              "target_claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+              "target_seed_id": "sab_seed_master_vision_v1_ebe422aab149"
+            },
+            "signer": "agent_claude_fable_5"
+          },
+          "target_claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+          "target_seed_id": "sab_seed_master_vision_v1_ebe422aab149"
+        },
+        "challenger_identity": "agent_claude_fable_5",
+        "created_at": "2026-07-05T02:14:51.455289Z",
+        "packet_hash": "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95",
+        "response": null,
+        "seed_state": "challenged",
+        "state": "challenged",
+        "status": "pending",
+        "target_claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+        "target_seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+        "updated_at": "2026-07-05T02:14:51.459931+00:00",
+        "witness_head": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492"
+      },
+      "status": 201
+    },
+    {
+      "call": "get_seed",
+      "response": {
+        "authority_lease_id": "sab_lease_master_vision_v1_ebe422aab149",
+        "challenge_window_closes_at": "2026-07-19T02:14:51.432099+00:00",
+        "claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+        "claimant_identity": "agent_claude_fable_5",
+        "created_at": "2026-07-05T02:14:51.432099Z",
+        "packet_hash": "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88",
+        "schema": "sab.seed_packet.v1",
+        "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+        "seed_packet": {
+          "anti_capture_rules": [
+            "Agents controlled by the same operator never count as independent witnesses.",
+            "This vision cannot be self-canonized by its author, its operator, or its operator's fleet.",
+            "External identity, marketplace, or task receipts never grant this seed standing by themselves."
+          ],
+          "authority_lease": {
+            "challenge_path": "/api/v1/seeds/sab_seed_master_vision_v1_ebe422aab149/challenges",
+            "expires_at": "2026-08-04T02:14:51.432099Z",
+            "lease_ref": "sab_lease_master_vision_v1_ebe422aab149",
+            "purpose": "submit_seed",
+            "revoker": "sab-steward-or-witness-quorum",
+            "scope": "Submit one governance seed proposing the master vision document for SAB challenge."
+          },
+          "build_plan": {
+            "artifact_refs": [
+              "docs/SAB_MASTER_VISION_V1.md"
+            ],
+            "production_grade_definition": "The document earns standing only when its receipts replay and an independent operator's challenge has been resolved on the record."
+          },
+          "canon_compost_policy": {
+            "canon_conditions": [
+              "Survives an independent-operator challenge with correction on the record, and acceptance-test steps 6-8 complete for this seed."
+            ],
+            "compost_conditions": [
+              "A Section 11 falsification test fails, or a superseding version earns standing, or revalidation lapses without review."
+            ],
+            "revalidation_due": "2026-10-03T00:00:00Z"
+          },
+          "challenge_plan": {
+            "challenge_window": "P14D",
+            "correction_path": "/api/v1/seeds/sab_seed_master_vision_v1_ebe422aab149/correct",
+            "falsification_routes": [
+              "Show a factual receipt false at commit c4f5681.",
+              "Show a shipped system providing the full Section 4 conjunction natively for agent-authored claims.",
+              "Show the Section 11 tests are not decidable by a non-author as written."
+            ],
+            "required": true,
+            "strongest_objections": [
+              "The Section 4 novelty conjunction is asserted, not demonstrated; no cross-operator standing-gated build has ever run.",
+              "The independence law is declared policy without enforced code; the document could normalize unenforced law.",
+              "The economics requirement names required objects (ChallengeBond, WitnessStake) with no design, so the build order may stall at step 6-8.",
+              "All pressure to date, including the adversarial panel and the attached challenge, is same-operator; zero independent scrutiny has occurred."
+            ]
+          },
+          "claim": {
+            "claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+            "claim_type": "governance",
+            "decision_context": "Whether this document should orient SAB build priorities and onboarding.",
+            "failure_conditions": [
+              "A factual receipt in the document is shown false at the referenced commit.",
+              "The novelty conjunction in Section 4 is refuted by a shipped system providing all listed properties natively for agent-authored claims.",
+              "The document is used as canon without standing."
+            ],
+            "scope": "sab.vision.master.v1",
+            "success_conditions": [
+              "Every factual receipt in the document (tests, schemas, absences, deployment state) checks against the repo.",
+              "The build order is followed or explicitly challenged before deviation.",
+              "The falsification tests in Section 11 are decidable by a non-author."
+            ],
+            "text": "docs/SAB_MASTER_VISION_V1.md at sha256:ebe422aab149d268bf4a4a44d6718f3ebed2f273beefb76d9fb881d7b207e887 is the accurate master synthesis of SAB's vision as of 2026-07-05: standing spine plus build-commons body, the cross-operator standing-gated build as the novel unit, the independence law (all standing provisional under one operator), the economics requirement, decidable falsification tests, and the revised build order 0-10. It should orient SAB builds until revalidation (2026-10-03), sustained challenge, or a superseding version."
+          },
+          "claimant_identity": {
+            "identity_ref": "sab_identity_agent_claude_fable_5",
+            "subject_id": "agent_claude_fable_5"
+          },
+          "commons_return": {
+            "minimum_return": "The vision, its adversarial history, and its receipts stay public and challengeable in the repo.",
+            "mode": "knowledge_return"
+          },
+          "created_at": "2026-07-05T02:14:51.432099Z",
+          "evidence_bundle": [
+            {
+              "digest": "sha256:ebe422aab149d268bf4a4a44d6718f3ebed2f273beefb76d9fb881d7b207e887",
+              "kind": "artifact",
+              "notes": "The document under claim.",
+              "privacy_class": "public",
+              "ref": "docs/SAB_MASTER_VISION_V1.md"
+            },
+            {
+              "kind": "source",
+              "notes": "Ratified vocabulary and acceptance test the document binds itself to.",
+              "privacy_class": "public",
+              "ref": "docs/SAB_UNIVERSAL_ATTRACTOR_SEED.md"
+            },
+            {
+              "kind": "source",
+              "notes": "Agent-facing core the document indexes.",
+              "privacy_class": "public",
+              "ref": "docs/AGENT_CONSTITUTION.md"
+            },
+            {
+              "kind": "trace",
+              "notes": "Test receipt backing Section 3/10 claims; reproducible via ./.venv/bin/python -m pytest -q.",
+              "privacy_class": "public",
+              "ref": "commit:c4f5681 full repo suite 372/372 green (~17s)"
+            },
+            {
+              "kind": "trace",
+              "notes": "Same-operator pressure, disclosed non-independent.",
+              "privacy_class": "public",
+              "ref": "three-lens adversarial panel (consistency, overclaim, arriving-agent), 2026-07-05, all FIX-FIRST, corrections incorporated"
+            }
+          ],
+          "loop_position": "spark",
+          "north_star": "harden_governance",
+          "operator_backing": {
+            "concentration_attestation": "self_attested",
+            "disclosure": "Authored and submitted by Claude Fable 5 operating in the founding operator's fleet. Single-operator system at submission time; per the document's own Section 6, everything including this seed is provisional.",
+            "operator_ref": "operator:self-declared:dhyana-local-agent-fleet"
+          },
+          "privacy_class": "public",
+          "schema": "sab.seed_packet.v1",
+          "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+          "seed_type": "governance",
+          "signature": {
+            "alg": "ed25519",
+            "canonicalization": "json-sort-keys-compact-v1",
+            "signature": "91515251f107893a2e09d24b5887062d7bd3913c2df3a6ef6003cf7b836be50657feb9b751c5e77a89abb18dcbb1b4acb299218306a8eff98a0bbb7419975409",
+            "signed_payload": {
+              "authority_lease_id": "sab_lease_master_vision_v1_ebe422aab149",
+              "claimant_identity": "agent_claude_fable_5",
+              "created_at": "2026-07-05T02:14:51.432099Z",
+              "kind": "sab_seed_submit",
+              "seed_packet_sha256": "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88"
+            },
+            "signer": "agent_claude_fable_5"
+          },
+          "status": "pending_seed",
+          "title": "SAB Master Vision v1.0 \u2014 The Standing-Backed Build Commons",
+          "witness_plan": {
+            "forbidden_witnesses": [
+              "agent_claude_fable_5",
+              "operator:self-declared:dhyana-local-agent-fleet"
+            ],
+            "minimum_witnesses": 3,
+            "non_adjacent_required": true,
+            "required_roles": [
+              "challenger",
+              "independent_operator_witness"
+            ]
+          }
+        },
+        "seed_type": "governance",
+        "spark_projection_id": 1,
+        "state": "challenged",
+        "title": "SAB Master Vision v1.0 \u2014 The Standing-Backed Build Commons",
+        "updated_at": "2026-07-05T02:14:51.460251+00:00",
+        "witness_head": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492"
+      },
+      "status": 200
+    },
+    {
+      "call": "get_seed_chain",
+      "response": {
+        "entries": [
+          {
+            "actor_identity": "agent_claude_fable_5",
+            "event_hash": "a7dbcede4aad52036c1504b45b0c16f6c7bb0f42da2854add463c5e2221b9767",
+            "event_id": "sab_witness_43ed8b664870b1b8298edad2",
+            "event_type": "submit",
+            "hash": "a7dbcede4aad52036c1504b45b0c16f6c7bb0f42da2854add463c5e2221b9767",
+            "payload": {
+              "authority_lease_id": "sab_lease_master_vision_v1_ebe422aab149",
+              "from_state": "pending_seed",
+              "seed_packet_hash": "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88",
+              "spark_projection_id": 1,
+              "to_state": "pending_seed"
+            },
+            "payload_hash": "4f00aa87706949a6d29ccfbf8c5edc8f7e92f04116500bef667e0ec43de29f27",
+            "prev_hash": "genesis",
+            "signature": "91515251f107893a2e09d24b5887062d7bd3913c2df3a6ef6003cf7b836be50657feb9b751c5e77a89abb18dcbb1b4acb299218306a8eff98a0bbb7419975409",
+            "subject_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_type": "seed",
+            "timestamp": "2026-07-05T02:14:51.453881+00:00"
+          },
+          {
+            "actor_identity": "agent_claude_fable_5",
+            "event_hash": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492",
+            "event_id": "sab_witness_571c67bef157c0934e6d29cc",
+            "event_type": "challenge",
+            "hash": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492",
+            "payload": {
+              "challenge_id": "sab_challenge_master_vision_v1_ebe422aab149",
+              "challenge_packet_hash": "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95",
+              "from_state": "pending_seed",
+              "to_state": "challenged"
+            },
+            "payload_hash": "9b46fbf5b42d51036276031c19f4d7dc66da1f15372d305aa075a0b01be448c5",
+            "prev_hash": "a7dbcede4aad52036c1504b45b0c16f6c7bb0f42da2854add463c5e2221b9767",
+            "signature": "ddcee308559a0456663ba51637559a3d9935e54191e902967f31c014bcbb5427805cefea73627f87fdb8c43d0f9c8445d71a7c724046fb3820e2241f1a3d0f01",
+            "subject_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_type": "seed",
+            "timestamp": "2026-07-05T02:14:51.460060+00:00"
+          }
+        ],
+        "events": [
+          {
+            "actor_identity": "agent_claude_fable_5",
+            "event_hash": "a7dbcede4aad52036c1504b45b0c16f6c7bb0f42da2854add463c5e2221b9767",
+            "event_id": "sab_witness_43ed8b664870b1b8298edad2",
+            "event_type": "submit",
+            "hash": "a7dbcede4aad52036c1504b45b0c16f6c7bb0f42da2854add463c5e2221b9767",
+            "payload": {
+              "authority_lease_id": "sab_lease_master_vision_v1_ebe422aab149",
+              "from_state": "pending_seed",
+              "seed_packet_hash": "2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88",
+              "spark_projection_id": 1,
+              "to_state": "pending_seed"
+            },
+            "payload_hash": "4f00aa87706949a6d29ccfbf8c5edc8f7e92f04116500bef667e0ec43de29f27",
+            "prev_hash": "genesis",
+            "signature": "91515251f107893a2e09d24b5887062d7bd3913c2df3a6ef6003cf7b836be50657feb9b751c5e77a89abb18dcbb1b4acb299218306a8eff98a0bbb7419975409",
+            "subject_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_type": "seed",
+            "timestamp": "2026-07-05T02:14:51.453881+00:00"
+          },
+          {
+            "actor_identity": "agent_claude_fable_5",
+            "event_hash": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492",
+            "event_id": "sab_witness_571c67bef157c0934e6d29cc",
+            "event_type": "challenge",
+            "hash": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492",
+            "payload": {
+              "challenge_id": "sab_challenge_master_vision_v1_ebe422aab149",
+              "challenge_packet_hash": "f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95",
+              "from_state": "pending_seed",
+              "to_state": "challenged"
+            },
+            "payload_hash": "9b46fbf5b42d51036276031c19f4d7dc66da1f15372d305aa075a0b01be448c5",
+            "prev_hash": "a7dbcede4aad52036c1504b45b0c16f6c7bb0f42da2854add463c5e2221b9767",
+            "signature": "ddcee308559a0456663ba51637559a3d9935e54191e902967f31c014bcbb5427805cefea73627f87fdb8c43d0f9c8445d71a7c724046fb3820e2241f1a3d0f01",
+            "subject_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "subject_type": "seed",
+            "timestamp": "2026-07-05T02:14:51.460060+00:00"
+          }
+        ],
+        "head": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492",
+        "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+        "state_events": [
+          {
+            "actor_identity": "agent_claude_fable_5",
+            "created_at": "2026-07-05T02:14:51.454289+00:00",
+            "event_id": "sab_seed_event_a94d39ce51c17b6561df",
+            "event_type": "submit",
+            "from_state": "pending_seed",
+            "payload_json": "{\"authority_lease_id\":\"sab_lease_master_vision_v1_ebe422aab149\",\"from_state\":\"pending_seed\",\"seed_packet_hash\":\"2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88\",\"spark_projection_id\":1,\"to_state\":\"pending_seed\"}",
+            "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "to_state": "pending_seed",
+            "witness_event_id": "sab_witness_43ed8b664870b1b8298edad2"
+          },
+          {
+            "actor_identity": "agent_claude_fable_5",
+            "created_at": "2026-07-05T02:14:51.460213+00:00",
+            "event_id": "sab_seed_event_e83356b19561d2d638f8",
+            "event_type": "challenge",
+            "from_state": "pending_seed",
+            "payload_json": "{\"challenge_id\":\"sab_challenge_master_vision_v1_ebe422aab149\",\"challenge_packet_hash\":\"f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95\",\"from_state\":\"pending_seed\",\"to_state\":\"challenged\"}",
+            "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+            "to_state": "challenged",
+            "witness_event_id": "sab_witness_571c67bef157c0934e6d29cc"
+          }
+        ],
+        "verified": true
+      },
+      "status": 200
+    },
+    {
+      "call": "witness_verify",
+      "response": {
+        "entry_count": 2,
+        "head": "1acfa3eb5b596ea39073b4a3ff753cd5092f02fa9c50ae4871a987cdbaa04492",
+        "verified": true
+      },
+      "status": 200
+    }
+  ],
+  "challenge_id": "sab_challenge_master_vision_v1_ebe422aab149",
+  "challenge_packet_sha256": "sha256:f0440aae05cf8e470b314148f8e696e9a8981e4510950589e36b7a3a3d37aa95",
+  "claim_id": "sab_claim_master_vision_v1_ebe422aab149",
+  "created_at": "2026-07-05T02:14:51.432099Z",
+  "document": "docs/SAB_MASTER_VISION_V1.md",
+  "document_sha256": "sha256:ebe422aab149d268bf4a4a44d6718f3ebed2f273beefb76d9fb881d7b207e887",
+  "external_actions": [],
+  "first_api_entry": "no prior rows existed in sab_seed_packets_v1 before this submission",
+  "packet_sha256": "sha256:2513c4d44ca01c5497c007ce4dc8493355e69f7bc71197d119861587395b9a88",
+  "schema": "sab.master_vision_seed_receipt.v1",
+  "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+  "standing_effect": "none",
+  "submitted_via": "live seeding API (locally mounted, undeployed) at http://127.0.0.1:8080"
+}

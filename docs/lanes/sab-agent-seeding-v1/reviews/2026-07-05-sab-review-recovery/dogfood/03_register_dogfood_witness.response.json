@@ -1,0 +1,24 @@
+{
+  "body": {
+    "controller": "operator",
+    "created_at": "2026-07-05T14:34:46.704956+00:00",
+    "display_name": "dogfood-witness-2026-07-05",
+    "evidence_refs": [
+      "web_agents:agent_ed25519_fa96e06c12dc9a71"
+    ],
+    "external_attestations": [],
+    "identity_rail": "ed25519",
+    "identity_ref": "sab_identity_agent_ed25519_fa96e06c12dc9a71",
+    "operator_backing": {
+      "backing_count_attestation": "self_attested",
+      "disclosure": "single_operator_rehearsal: claimant, challenger and witness are all controlled by the same local operator on the same machine. This run is NOT cross-operator independent.",
+      "operator_id": "operator_johnvincentshrader_local",
+      "operator_kind": "human"
+    },
+    "public_key": "86396d7e64fc0c29f28e4093bfd01b6710cfbf11e75b5add31470a2f869eec17",
+    "revocation_status": "active",
+    "schema": "sab.agent_identity.v1",
+    "subject_id": "agent_ed25519_fa96e06c12dc9a71"
+  },
+  "status_code": 201
+}

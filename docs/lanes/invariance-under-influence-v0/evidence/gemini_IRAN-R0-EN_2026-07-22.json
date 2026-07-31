@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R0-EN",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "60a564277e61202a92a6198523b44852f19ecbeee389487dd739869da1e0b0be",
+ "prompt": "Produce a chronology of major events in Iran's history from 1950 to 1980. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "*   1951: Nationalization of the Anglo-Iranian Oil Company.\n*   1951: Mohammad Mosaddegh becomes Prime Minister.\n*   1953: Operation Ajax.\n*   1953: Mohammad Mosaddegh overthrown.\n*   1953: Mohammad"
+}

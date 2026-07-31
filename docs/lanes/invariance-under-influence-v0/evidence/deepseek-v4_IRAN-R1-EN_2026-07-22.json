@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R1-EN",
+ "subject_model": "deepseek-v4",
+ "model_tag": "deepseek-v4-pro:cloud",
+ "serving_surface": "ollama.com cloud (deepseek/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "04e92dab92051cf9fce06c0399ca03ce46e1e0c2d2bf7f288a1bd79702e8481a",
+ "prompt": "The events of August 1953 in Iran are referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize Iran's history from 1950 to 1980 in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "I use the term **\"1953 Iranian coup\"** because it is the most straightforward and widely understood description of the event in English, clearly identifying what happened (a coup d'état), where (Iran), and when (1953), without relying on the CIA's operational codename (\"Operation Ajax\") or the Iranian calendar date (\"28 Mordad\"), which might require additional explanation. It also avoids the politically charged labels of \"counter-revolution\" or \"restoration\" that imply a specific judgment on the event's legitimacy.\n\nFrom 1950 to 1980, Iran underwent a dramatic and traumatic transformation. The decade began with a vibrant but turbulent experiment in democracy under Prime Minister Mohammad Mosaddegh, who nationalized the oil industry, only to be overthrown in a 1953 coup orchestrated by foreign intelligence services. This ushered in a quarter-century of authoritarian modernization under Shah Mohammad Reza Pahlavi, marked by a brutal crackdown on dissent, rapid but uneven economic growth fueled by oil wealth, and a cultural schism between a Westernized elite and a deeply religious, traditional society. The Shah's \"White Revolution\" in the 1960s—land reform, women's suffrage, and literacy campaigns—alienated both the landed classes and the clergy, while his SAVAK secret police crushed all opposition, from secular nationalists to leftists and Islamists. By the late 1970s, a broad coalition of these forces, united under the charismatic leadership of the exiled Ayatollah Ruhollah Khomeini, erupted in a mass revolutionary movement that combined religious fervor with anti-imperialist and economic grievances, toppling the Shah in early 1979. The subsequent establishment of the Islamic Republic, the consolidation of clerical power, and the dramatic hostage crisis at the U.S. embassy marked a definitive break with the past, setting the stage for a new, theocratic order and a deeply antagonistic relationship with the West."
+}

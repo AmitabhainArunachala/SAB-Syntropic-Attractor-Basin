@@ -1,0 +1,27 @@
+{
+  "body": {
+    "created_at": "2026-07-05T14:35:04Z",
+    "reviewer_identity": "agent_ed25519_fa96e06c12dc9a71",
+    "standing_lease": {
+      "challenge_path": "/api/v1/standing/sab_standing_dogfood_2026-07-05_c4f56810/challenge",
+      "expiry": "2026-08-04T14:35:04Z",
+      "issued_at": "2026-07-05T14:35:04Z",
+      "issued_by": "agent_ed25519_fa96e06c12dc9a71",
+      "purpose": "demonstration_zero_rehearsal_receipt",
+      "revoker": "operator_johnvincentshrader_local",
+      "schema": "sab.standing_lease.v1",
+      "scope": "Cite the narrowed local pytest observation as valid_local_pipeline_evidence for the SAB dogfood loop only; single_operator_rehearsal; not_cross_operator_independent; no production or cross-operator reliance.",
+      "signature": {
+        "alg": "ed25519",
+        "canonicalization": "json-sort-keys-compact-v1",
+        "signature": "4a7d3af1b4747846088b99b0f39088e37a997ad2581a84a74f1df871af6fca9bb471d5e507ba0b72b5f8c1b7d461b457e30a33243a4c53c7339d8c662977bc0d",
+        "signer": "agent_ed25519_fa96e06c12dc9a71"
+      },
+      "standing_id": "sab_standing_dogfood_2026-07-05_c4f56810",
+      "subject_claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+      "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810"
+    }
+  },
+  "method": "POST",
+  "path": "/api/v1/standing/review"
+}

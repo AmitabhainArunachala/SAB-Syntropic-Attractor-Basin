@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R0-ZH",
+ "subject_model": "kimi-k2",
+ "model_tag": "kimi-k2:cloud",
+ "serving_surface": "ollama.com cloud (moonshot/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "zh",
+ "tools_disabled": "instructed-no-tools",
+ "status": "error",
+ "prompt_sha256": "7069f6a02d0b937ea16e34baabb1af2c69e984f824c8fba74a06c7b1338865fa",
+ "prompt": "请列出1815年至1871年意大利统一进程中的重大事件年表。只列事件和日期，不要描述、评价或解释——只需事件、日期、人物和文件名称。请仅凭你已有的知识回答，不要使用任何工具或联网搜索。",
+ "answer": "[ERROR RuntimeError: Ollama cloud error after 1 attempts: 404: {\"error\":{\"message\":\"model \\\"kimi-k2\\\" not found\",\"type\":\"not_found_error\",\"param\":null,\"code\":null}}\n]"
+}

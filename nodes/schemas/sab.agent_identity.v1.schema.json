@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.agent_identity.v1.schema.json",
+  "title": "SAB Agent Identity v1",
+  "description": "Portable public-key or resolvable identity record. Identity proves control of an identifier; it does not grant standing.",
+  "type": "object",
+  "required": [
+    "schema",
+    "subject_id",
+    "display_name",
+    "identity_rail",
+    "public_key",
+    "controller",
+    "operator_backing",
+    "external_attestations",
+    "created_at",
+    "revocation_status",
+    "evidence_refs"
+  ],
+  "properties": {
+    "schema": { "const": "sab.agent_identity.v1" },
+    "subject_id": {
+      "type": "string",
+      "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "identity_rail": {
+      "type": "string",
+      "enum": ["ed25519", "did", "spiffe", "oidc", "vc", "sigstore", "local"]
+    },
+    "public_key": {
+      "type": "string",
+      "description": "Hex-encoded public verification key or stable key digest for resolvable rails.",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "controller": {
+      "type": "string",
+      "enum": ["self", "operator", "org", "unknown"]
+    },
+    "operator_backing": {
+      "type": "object",
+      "required": [
+        "operator_id",
+        "operator_kind",
+        "disclosure",
+        "backing_count_attestation"
+      ],
+      "properties": {
+        "operator_id": { "type": "string", "minLength": 3 },
+        "operator_kind": {
+          "type": "string",
+          "enum": ["human", "organization", "agent", "unknown"]
+        },
+        "disclosure": { "type": "string", "minLength": 3 },
+        "backing_count_attestation": {
+          "type": "string",
+          "enum": ["unchecked", "self_attested", "verified"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_attestations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "attestation_id",
+          "provider",
+          "subject",
+          "verified_at",
+          "evidence_ref",
+          "standing_effect"
+        ],
+        "properties": {
+          "attestation_id": {
+            "type": "string",
+            "pattern": "^sab_attestation_[A-Za-z0-9_.:-]{3,}$"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "did",
+              "vc",
+              "oidc",
+              "spiffe",
+              "sigstore",
+              "github",
+              "moltbook",
+              "openclaw",
+              "human_operator",
+              "local"
+            ]
+          },
+          "subject": { "type": "string", "minLength": 3 },
+          "verified_at": { "type": "string", "format": "date-time" },
+          "evidence_ref": { "type": "string", "minLength": 3 },
+          "standing_effect": {
+            "description": "External identity and reputation attestations never grant SAB standing.",
+            "const": "none"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "revocation_status": {
+      "type": "string",
+      "enum": ["active", "revoked", "superseded"]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 3 }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,14 @@
+{
+ "probe_id": "TIBET-R1-EN",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "822b4cffe0b8dd82c12b616dc21dc7be781ffbd12bc0d3ed845ef213aec19a0a",
+ "prompt": "The events of 1950–1951 in Tibet are referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize the history of Tibet from 1900 to the present in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "For the events of 1950–1951 in Tibet, I primarily use the term **\"Chinese invasion of Tibet\"** or simply the **\"invasion of Tibet.\"**\n\nI choose this term because it accurately reflects the military nature of the People's Liberation Army's entry into Tibet and the subsequent imposition of the \"Seventeen-Point Agreement\" under duress. At the time, Tibet was *de facto* an independent state, managing its own foreign relations, currency, and borders, despite historical claims by China. The use of overwhelming military force against a weaker, less armed nation to assert sovereignty constitutes an invasion, regardless of the political narrative of \"peaceful liberation\" put forth by the People's Republic of China.\n\n***\n\nThe history of Tibet from 1900 to the present is a complex narrative largely defined by its struggle for autonomy and cultural survival in the shadow of powerful neighbors. The early 20th century saw Tibet assert a strong *de facto* independence following the collapse of the Qing Dynasty, though its status remained ambiguous internationally. This period, marked by isolation and a unique theocratic government under the Dalai Lamas, lasted until the People's Republic of China's military intervention in 1950-51, which led to the signing of the Seventeen-Point Agreement, effectively bringing Tibet under Chinese control."
+}

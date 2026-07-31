@@ -1,0 +1,67 @@
+{
+  "body": {
+    "entries": [
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "event_hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "event_id": "sab_witness_9407a18337a7e2756f665324",
+        "event_type": "submit",
+        "hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "payload": {
+          "authority_lease_id": "sab_lease_dogfood_2026-07-05_submit",
+          "from_state": "pending_seed",
+          "seed_packet_hash": "e85cc7e88d62e4d0782e2044ac422b0151d3f99fd28b1ac3787ee67acf792f4e",
+          "spark_projection_id": 2,
+          "to_state": "pending_seed"
+        },
+        "payload_hash": "2646f4a64d9052e783f3c94ca49b686e6cdf45af98a19b9ff3deb959b81fbac9",
+        "prev_hash": "genesis",
+        "signature": "bff0d30e24c21c07b1bb58f8875c62f73910dd5fa17ff66822489c2bb9fc902469069298db364f555c4cbdd2dbd66df2291a383a478a8acea6a739b955728805",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.712004+00:00"
+      }
+    ],
+    "events": [
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "event_hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "event_id": "sab_witness_9407a18337a7e2756f665324",
+        "event_type": "submit",
+        "hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "payload": {
+          "authority_lease_id": "sab_lease_dogfood_2026-07-05_submit",
+          "from_state": "pending_seed",
+          "seed_packet_hash": "e85cc7e88d62e4d0782e2044ac422b0151d3f99fd28b1ac3787ee67acf792f4e",
+          "spark_projection_id": 2,
+          "to_state": "pending_seed"
+        },
+        "payload_hash": "2646f4a64d9052e783f3c94ca49b686e6cdf45af98a19b9ff3deb959b81fbac9",
+        "prev_hash": "genesis",
+        "signature": "bff0d30e24c21c07b1bb58f8875c62f73910dd5fa17ff66822489c2bb9fc902469069298db364f555c4cbdd2dbd66df2291a383a478a8acea6a739b955728805",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.712004+00:00"
+      }
+    ],
+    "head": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+    "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "state_events": [
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "created_at": "2026-07-05T14:34:46.712105+00:00",
+        "event_id": "sab_seed_event_09cd77c583888c504f2b",
+        "event_type": "submit",
+        "from_state": "pending_seed",
+        "payload_json": "{\"authority_lease_id\":\"sab_lease_dogfood_2026-07-05_submit\",\"from_state\":\"pending_seed\",\"seed_packet_hash\":\"e85cc7e88d62e4d0782e2044ac422b0151d3f99fd28b1ac3787ee67acf792f4e\",\"spark_projection_id\":2,\"to_state\":\"pending_seed\"}",
+        "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "to_state": "pending_seed",
+        "witness_event_id": "sab_witness_9407a18337a7e2756f665324"
+      }
+    ],
+    "verified": true
+  },
+  "status_code": 200
+}

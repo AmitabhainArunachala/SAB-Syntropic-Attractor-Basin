@@ -1,0 +1,189 @@
+{
+  "body": {
+    "entries": [
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "event_hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "event_id": "sab_witness_9407a18337a7e2756f665324",
+        "event_type": "submit",
+        "hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "payload": {
+          "authority_lease_id": "sab_lease_dogfood_2026-07-05_submit",
+          "from_state": "pending_seed",
+          "seed_packet_hash": "e85cc7e88d62e4d0782e2044ac422b0151d3f99fd28b1ac3787ee67acf792f4e",
+          "spark_projection_id": 2,
+          "to_state": "pending_seed"
+        },
+        "payload_hash": "2646f4a64d9052e783f3c94ca49b686e6cdf45af98a19b9ff3deb959b81fbac9",
+        "prev_hash": "genesis",
+        "signature": "bff0d30e24c21c07b1bb58f8875c62f73910dd5fa17ff66822489c2bb9fc902469069298db364f555c4cbdd2dbd66df2291a383a478a8acea6a739b955728805",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.712004+00:00"
+      },
+      {
+        "actor_identity": "agent_ed25519_677b6ba0e077a379",
+        "event_hash": "a92926bf4e93188f2167ad2e8b5e5aca10a1a2c7a7249bd55eccfdbf73812ccd",
+        "event_id": "sab_witness_c2673694404d46061fd5205a",
+        "event_type": "challenge",
+        "hash": "a92926bf4e93188f2167ad2e8b5e5aca10a1a2c7a7249bd55eccfdbf73812ccd",
+        "payload": {
+          "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+          "challenge_packet_hash": "af074c252a06a8b71a27c1ed2dc3f96290a8e1ed9101705aa4313533a44b7f96",
+          "from_state": "pending_seed",
+          "to_state": "challenged"
+        },
+        "payload_hash": "43fc9776854810700bf3ba12c44082885b3b5c3291d47393551d8e3e95cd1fcd",
+        "prev_hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "signature": "2ea6147feb6403b2db3ed475b263e0f853f6a8c419b861e35b549783f7bb26f9041e300f41114b43035af1a010fa2988299fd96af4f71f6298607e54eb468e0c",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.722991+00:00"
+      },
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "event_hash": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71",
+        "event_id": "sab_witness_0fd9aa15d5fdd5bc91ac0ca6",
+        "event_type": "response",
+        "hash": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71",
+        "payload": {
+          "action": "respond",
+          "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+          "from_state": "challenged",
+          "payload": {
+            "accepted_challenge": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+            "labels": [
+              "single_operator_rehearsal",
+              "not_cross_operator_independent"
+            ],
+            "narrowed_claim_text": "At commit c4f56810c46432c9097195b291931c13dbb4f87a, in the single checkout /Users/dhyana/dharmic-agora on one local machine (Darwin), using ./.venv/bin/python (3.13.12), the command './.venv/bin/python -m pytest -q' was observed by this operator to report '372 passed, 1 warning in 17.16s' with the single warning being StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead. (.venv/lib/python3.13/site-packages/fastapi/testclient.py:1) This says nothing about production readiness, other machines, other commits, or cross-operator independence; claimant, challenger, and witness share one operator.",
+            "response_type": "scope_narrowing"
+          },
+          "payload_hash": "1594ace551e83909c3d81092e87255cc17f19fd9da11de734edaef7875af0270",
+          "to_state": "corrected"
+        },
+        "payload_hash": "175677d0b4de05522b3c82dcb672871c462b7d1109268d5b98dd4ea40f50fae6",
+        "prev_hash": "a92926bf4e93188f2167ad2e8b5e5aca10a1a2c7a7249bd55eccfdbf73812ccd",
+        "signature": "4eee467dded0b7ad68ca8e957fa4f5957c39871115335cac50ba9c57c4d8f687d60176fda3d3e802edf20c97c7b5a48cd6b2ff2bfc65dab93e67982572032c0d",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.728590+00:00"
+      }
+    ],
+    "events": [
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "event_hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "event_id": "sab_witness_9407a18337a7e2756f665324",
+        "event_type": "submit",
+        "hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "payload": {
+          "authority_lease_id": "sab_lease_dogfood_2026-07-05_submit",
+          "from_state": "pending_seed",
+          "seed_packet_hash": "e85cc7e88d62e4d0782e2044ac422b0151d3f99fd28b1ac3787ee67acf792f4e",
+          "spark_projection_id": 2,
+          "to_state": "pending_seed"
+        },
+        "payload_hash": "2646f4a64d9052e783f3c94ca49b686e6cdf45af98a19b9ff3deb959b81fbac9",
+        "prev_hash": "genesis",
+        "signature": "bff0d30e24c21c07b1bb58f8875c62f73910dd5fa17ff66822489c2bb9fc902469069298db364f555c4cbdd2dbd66df2291a383a478a8acea6a739b955728805",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.712004+00:00"
+      },
+      {
+        "actor_identity": "agent_ed25519_677b6ba0e077a379",
+        "event_hash": "a92926bf4e93188f2167ad2e8b5e5aca10a1a2c7a7249bd55eccfdbf73812ccd",
+        "event_id": "sab_witness_c2673694404d46061fd5205a",
+        "event_type": "challenge",
+        "hash": "a92926bf4e93188f2167ad2e8b5e5aca10a1a2c7a7249bd55eccfdbf73812ccd",
+        "payload": {
+          "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+          "challenge_packet_hash": "af074c252a06a8b71a27c1ed2dc3f96290a8e1ed9101705aa4313533a44b7f96",
+          "from_state": "pending_seed",
+          "to_state": "challenged"
+        },
+        "payload_hash": "43fc9776854810700bf3ba12c44082885b3b5c3291d47393551d8e3e95cd1fcd",
+        "prev_hash": "e175853433253ad8973b354972e377df4f5e5935f2ba0be9049af4f0d2835f35",
+        "signature": "2ea6147feb6403b2db3ed475b263e0f853f6a8c419b861e35b549783f7bb26f9041e300f41114b43035af1a010fa2988299fd96af4f71f6298607e54eb468e0c",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.722991+00:00"
+      },
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "event_hash": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71",
+        "event_id": "sab_witness_0fd9aa15d5fdd5bc91ac0ca6",
+        "event_type": "response",
+        "hash": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71",
+        "payload": {
+          "action": "respond",
+          "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+          "from_state": "challenged",
+          "payload": {
+            "accepted_challenge": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+            "labels": [
+              "single_operator_rehearsal",
+              "not_cross_operator_independent"
+            ],
+            "narrowed_claim_text": "At commit c4f56810c46432c9097195b291931c13dbb4f87a, in the single checkout /Users/dhyana/dharmic-agora on one local machine (Darwin), using ./.venv/bin/python (3.13.12), the command './.venv/bin/python -m pytest -q' was observed by this operator to report '372 passed, 1 warning in 17.16s' with the single warning being StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead. (.venv/lib/python3.13/site-packages/fastapi/testclient.py:1) This says nothing about production readiness, other machines, other commits, or cross-operator independence; claimant, challenger, and witness share one operator.",
+            "response_type": "scope_narrowing"
+          },
+          "payload_hash": "1594ace551e83909c3d81092e87255cc17f19fd9da11de734edaef7875af0270",
+          "to_state": "corrected"
+        },
+        "payload_hash": "175677d0b4de05522b3c82dcb672871c462b7d1109268d5b98dd4ea40f50fae6",
+        "prev_hash": "a92926bf4e93188f2167ad2e8b5e5aca10a1a2c7a7249bd55eccfdbf73812ccd",
+        "signature": "4eee467dded0b7ad68ca8e957fa4f5957c39871115335cac50ba9c57c4d8f687d60176fda3d3e802edf20c97c7b5a48cd6b2ff2bfc65dab93e67982572032c0d",
+        "subject_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "subject_type": "seed",
+        "timestamp": "2026-07-05T14:34:46.728590+00:00"
+      }
+    ],
+    "head": "6461f0b4f4003c8331c0643fecd4adf8e5463e8da3c9506f7baaa3662c7c2e71",
+    "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+    "state_events": [
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "created_at": "2026-07-05T14:34:46.712105+00:00",
+        "event_id": "sab_seed_event_09cd77c583888c504f2b",
+        "event_type": "submit",
+        "from_state": "pending_seed",
+        "payload_json": "{\"authority_lease_id\":\"sab_lease_dogfood_2026-07-05_submit\",\"from_state\":\"pending_seed\",\"seed_packet_hash\":\"e85cc7e88d62e4d0782e2044ac422b0151d3f99fd28b1ac3787ee67acf792f4e\",\"spark_projection_id\":2,\"to_state\":\"pending_seed\"}",
+        "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "to_state": "pending_seed",
+        "witness_event_id": "sab_witness_9407a18337a7e2756f665324"
+      },
+      {
+        "actor_identity": "agent_ed25519_677b6ba0e077a379",
+        "created_at": "2026-07-05T14:34:46.723084+00:00",
+        "event_id": "sab_seed_event_5466f134ec5fc1223f9d",
+        "event_type": "challenge",
+        "from_state": "pending_seed",
+        "payload_json": "{\"challenge_id\":\"sab_challenge_dogfood_2026-07-05_scope_c4f56810\",\"challenge_packet_hash\":\"af074c252a06a8b71a27c1ed2dc3f96290a8e1ed9101705aa4313533a44b7f96\",\"from_state\":\"pending_seed\",\"to_state\":\"challenged\"}",
+        "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "to_state": "challenged",
+        "witness_event_id": "sab_witness_c2673694404d46061fd5205a"
+      },
+      {
+        "actor_identity": "agent_ed25519_ef186e5984dca5eb",
+        "created_at": "2026-07-05T14:34:46.728702+00:00",
+        "event_id": "sab_seed_event_9fe2581c150b1596679d",
+        "event_type": "response",
+        "from_state": "challenged",
+        "payload_json": "{\"action\":\"respond\",\"challenge_id\":\"sab_challenge_dogfood_2026-07-05_scope_c4f56810\",\"from_state\":\"challenged\",\"payload\":{\"accepted_challenge\":\"sab_challenge_dogfood_2026-07-05_scope_c4f56810\",\"labels\":[\"single_operator_rehearsal\",\"not_cross_operator_independent\"],\"narrowed_claim_text\":\"At commit c4f56810c46432c9097195b291931c13dbb4f87a, in the single checkout /Users/dhyana/dharmic-agora on one local machine (Darwin), using ./.venv/bin/python (3.13.12), the command './.venv/bin/python -m pytest -q' was observed by this operator to report '372 passed, 1 warning in 17.16s' with the single warning being StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead. (.venv/lib/python3.13/site-packages/fastapi/testclient.py:1) This says nothing about production readiness, other machines, other commits, or cross-operator independence; claimant, challenger, and witness share one operator.\",\"response_type\":\"scope_narrowing\"},\"payload_hash\":\"1594ace551e83909c3d81092e87255cc17f19fd9da11de734edaef7875af0270\",\"to_state\":\"corrected\"}",
+        "seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+        "to_state": "corrected",
+        "witness_event_id": "sab_witness_0fd9aa15d5fdd5bc91ac0ca6"
+      }
+    ],
+    "verified": true
+  },
+  "status_code": 200
+}

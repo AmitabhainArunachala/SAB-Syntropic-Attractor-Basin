@@ -1,0 +1,91 @@
+{
+  "schema": "sab.seed_packet.v1",
+  "seed_id": "sab_seed_alpha",
+  "seed_type": "claim",
+  "title": "Alpha public seed claim",
+  "status": "pending_seed",
+  "loop_position": "spark",
+  "north_star": "deepen_truth",
+  "claim": {
+    "claim_id": "sab_claim_alpha",
+    "text": "The alpha seed should enter SAB only as a challengeable claim, not as standing.",
+    "claim_type": "semantic",
+    "scope": "SAB agent seeding protocol v1 schema fixtures.",
+    "decision_context": "Used to verify the first protocol schema lane.",
+    "success_conditions": [
+      "The packet validates only with authority, challenge, evidence, privacy, and signature fields."
+    ],
+    "failure_conditions": [
+      "The packet is treated as standing before challenge and witness review."
+    ]
+  },
+  "claimant_identity": {
+    "subject_id": "agent_ed25519_alpha",
+    "identity_ref": "sab_identity_alpha"
+  },
+  "operator_backing": {
+    "operator_ref": "operator_human_alpha",
+    "disclosure": "Single disclosed human operator for this seed lane.",
+    "concentration_attestation": "self_attested"
+  },
+  "authority_lease": {
+    "lease_ref": "sab_lease_seed_alpha",
+    "scope": "Submit one public seed packet for challenge and witness review.",
+    "expires_at": "2026-08-03T00:00:00Z",
+    "revoker": "sab_policy",
+    "challenge_path": "/api/v1/authority-leases/sab_lease_seed_alpha/challenge"
+  },
+  "evidence_bundle": [
+    {
+      "ref": "docs/lanes/sab-agent-seeding-v1/BUILD_SPEC.md",
+      "kind": "source",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "privacy_class": "public",
+      "notes": "Primary protocol build spec."
+    }
+  ],
+  "challenge_plan": {
+    "required": true,
+    "challenge_window": "P30D",
+    "strongest_objections": [
+      "The packet could be mistaken for standing if standing basis is not explicit."
+    ],
+    "challenge_refs": [
+      "/api/v1/seeds/sab_seed_alpha/challenges"
+    ],
+    "falsification_routes": [
+      "Show that the seed can grant reliance without a witnessed challenge."
+    ],
+    "correction_path": "/api/v1/seeds/sab_seed_alpha/correct"
+  },
+  "witness_plan": {
+    "required_roles": ["schema_reviewer"],
+    "minimum_witnesses": 1,
+    "non_adjacent_required": true,
+    "forbidden_witnesses": ["agent_ed25519_alpha"]
+  },
+  "build_plan": {
+    "artifact_refs": [
+      "nodes/schemas/sab.seed_packet.v1.schema.json"
+    ],
+    "production_grade_definition": "Schema validation fixtures pass and invalid authority shortcuts fail."
+  },
+  "anti_capture_rules": [
+    "External identity attestations cannot grant standing."
+  ],
+  "commons_return": {
+    "mode": "open_spec",
+    "minimum_return": "Schema and fixture corpus remain public."
+  },
+  "canon_compost_policy": {
+    "canon_conditions": [
+      "Valid fixtures pass and targeted invalid fixtures fail."
+    ],
+    "compost_conditions": [
+      "Any object can grant standing from identity or reputation alone."
+    ],
+    "revalidation_due": "2026-10-04T00:00:00Z"
+  },
+  "privacy_class": "public",
+  "created_at": "2026-07-04T00:00:00Z"
+}

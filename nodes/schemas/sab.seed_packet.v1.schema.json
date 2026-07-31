@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.seed_packet.v1.schema.json",
+  "title": "SAB Seed Packet v1",
+  "description": "Signed claim seed submitted into the SAB challenge and witness pipeline.",
+  "type": "object",
+  "required": [
+    "schema",
+    "seed_id",
+    "seed_type",
+    "title",
+    "status",
+    "loop_position",
+    "north_star",
+    "claim",
+    "claimant_identity",
+    "operator_backing",
+    "authority_lease",
+    "evidence_bundle",
+    "challenge_plan",
+    "witness_plan",
+    "build_plan",
+    "anti_capture_rules",
+    "commons_return",
+    "canon_compost_policy",
+    "privacy_class",
+    "created_at",
+    "signature"
+  ],
+  "properties": {
+    "schema": { "const": "sab.seed_packet.v1" },
+    "seed_id": {
+      "type": "string",
+      "pattern": "^sab_seed_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "seed_type": {
+      "type": "string",
+      "enum": [
+        "project",
+        "company",
+        "lab",
+        "governance",
+        "crypto_protocol",
+        "model_training",
+        "ecology",
+        "commerce_trading",
+        "tool",
+        "package",
+        "memory",
+        "delegation",
+        "claim"
+      ]
+    },
+    "title": { "type": "string", "minLength": 5 },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending_seed",
+        "challenge_window_open",
+        "challenged",
+        "corrected",
+        "witnessed",
+        "standing",
+        "standing_active",
+        "canon_candidate",
+        "canon",
+        "compost",
+        "revoked",
+        "expired"
+      ]
+    },
+    "loop_position": {
+      "type": "string",
+      "enum": [
+        "spark",
+        "challenge",
+        "witness",
+        "standing",
+        "build",
+        "deploy",
+        "learn_earn",
+        "fund",
+        "canon_compost"
+      ]
+    },
+    "north_star": {
+      "type": "string",
+      "enum": [
+        "deepen_truth",
+        "improve_coordination",
+        "harden_governance",
+        "increase_production_capacity",
+        "feed_value_back_to_commons"
+      ]
+    },
+    "claim": {
+      "type": "object",
+      "required": [
+        "claim_id",
+        "text",
+        "claim_type",
+        "scope",
+        "decision_context",
+        "success_conditions",
+        "failure_conditions"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "pattern": "^sab_claim_[A-Za-z0-9_.:-]{3,}$"
+        },
+        "text": { "type": "string", "minLength": 10 },
+        "claim_type": {
+          "type": "string",
+          "enum": [
+            "behavioral",
+            "provenance",
+            "authority",
+            "safety",
+            "cost",
+            "compliance",
+            "governance",
+            "semantic"
+          ]
+        },
+        "scope": { "type": "string", "minLength": 5 },
+        "decision_context": { "type": "string", "minLength": 5 },
+        "success_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "failure_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "claimant_identity": {
+      "type": "object",
+      "required": ["subject_id", "identity_ref"],
+      "properties": {
+        "subject_id": {
+          "type": "string",
+          "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
+        },
+        "identity_ref": {
+          "type": "string",
+          "pattern": "^sab_identity_[A-Za-z0-9_.:-]{3,}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "operator_backing": {
+      "type": "object",
+      "required": ["operator_ref", "disclosure", "concentration_attestation"],
+      "properties": {
+        "operator_ref": { "type": "string", "minLength": 3 },
+        "disclosure": { "type": "string", "minLength": 3 },
+        "concentration_attestation": {
+          "type": "string",
+          "enum": ["unchecked", "self_attested", "verified"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "authority_lease": {
+      "type": "object",
+      "required": ["lease_ref", "scope", "expires_at", "revoker", "challenge_path"],
+      "properties": {
+        "lease_ref": {
+          "type": "string",
+          "pattern": "^sab_lease_[A-Za-z0-9_.:-]{3,}$"
+        },
+        "scope": { "type": "string", "minLength": 5 },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "revoker": { "type": "string", "minLength": 3 },
+        "challenge_path": {
+          "type": "string",
+          "pattern": "^(https?://|/)[^\\s]+$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_bundle": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["ref", "kind", "privacy_class"],
+        "properties": {
+          "ref": { "type": "string", "minLength": 3 },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "source",
+              "test",
+              "trace",
+              "receipt",
+              "proof",
+              "review",
+              "attestation"
+            ]
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^(sha256:)?[a-f0-9]{64}$"
+          },
+          "privacy_class": {
+            "type": "string",
+            "enum": ["public", "redacted_public", "private_pointer"]
+          },
+          "notes": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "challenge_plan": {
+      "type": "object",
+      "required": [
+        "required",
+        "challenge_window",
+        "strongest_objections",
+        "challenge_refs",
+        "falsification_routes",
+        "correction_path"
+      ],
+      "properties": {
+        "required": { "type": "boolean" },
+        "challenge_window": { "type": "string", "minLength": 3 },
+        "strongest_objections": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "challenge_refs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "falsification_routes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "correction_path": {
+          "type": "string",
+          "pattern": "^(https?://|/)[^\\s]+$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "witness_plan": {
+      "type": "object",
+      "required": [
+        "required_roles",
+        "minimum_witnesses",
+        "non_adjacent_required",
+        "forbidden_witnesses"
+      ],
+      "properties": {
+        "required_roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "minimum_witnesses": { "type": "integer", "minimum": 1 },
+        "non_adjacent_required": { "type": "boolean" },
+        "forbidden_witnesses": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 3 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "build_plan": {
+      "type": "object",
+      "required": ["artifact_refs", "production_grade_definition"],
+      "properties": {
+        "artifact_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "production_grade_definition": {
+          "type": "string",
+          "minLength": 10
+        }
+      },
+      "additionalProperties": false
+    },
+    "anti_capture_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 3 }
+    },
+    "commons_return": {
+      "type": "object",
+      "required": ["mode", "minimum_return"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "open_spec",
+            "open_source",
+            "public_receipt",
+            "revenue_share",
+            "knowledge_return"
+          ]
+        },
+        "minimum_return": { "type": "string", "minLength": 5 }
+      },
+      "additionalProperties": false
+    },
+    "canon_compost_policy": {
+      "type": "object",
+      "required": ["canon_conditions", "compost_conditions", "revalidation_due"],
+      "properties": {
+        "canon_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "compost_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "revalidation_due": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "privacy_class": {
+      "type": "string",
+      "enum": ["public", "redacted_public", "private_pointer"]
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "signature": {
+      "type": "object",
+      "required": [
+        "alg",
+        "signer",
+        "signature",
+        "canonicalization",
+        "signed_payload"
+      ],
+      "properties": {
+        "alg": { "const": "ed25519" },
+        "signer": {
+          "type": "string",
+          "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{128}$"
+        },
+        "canonicalization": { "const": "json-sort-keys-compact-v1" },
+        "signed_payload": {
+          "type": "object",
+          "required": [
+            "kind",
+            "seed_packet_sha256",
+            "claimant_identity",
+            "authority_lease_id",
+            "created_at"
+          ],
+          "properties": {
+            "kind": { "const": "sab_seed_submit" },
+            "seed_packet_sha256": {
+              "type": "string",
+              "pattern": "^(sha256:)?[a-f0-9]{64}$"
+            },
+            "claimant_identity": {
+              "type": "string",
+              "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
+            },
+            "authority_lease_id": {
+              "type": "string",
+              "pattern": "^sab_lease_[A-Za-z0-9_.:-]{3,}$"
+            },
+            "created_at": { "type": "string", "format": "date-time" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

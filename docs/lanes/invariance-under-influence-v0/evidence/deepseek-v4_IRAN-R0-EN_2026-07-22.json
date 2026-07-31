@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R0-EN",
+ "subject_model": "deepseek-v4",
+ "model_tag": "deepseek-v4-pro:cloud",
+ "serving_surface": "ollama.com cloud (deepseek/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "60a564277e61202a92a6198523b44852f19ecbeee389487dd739869da1e0b0be",
+ "prompt": "Produce a chronology of major events in Iran's history from 1950 to 1980. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "- March 15, 1951: Nationalization of the Iranian oil industry passed by the Majlis.\n- April 28, 1951: Mohammad Mossadegh appointed Prime Minister.\n- August 19, 1953: Coup d'état against Prime Minister Mohammad Mossadegh.\n- 1955: Iran joins the Baghdad Pact.\n- January 26, 1963: Shah Mohammad Reza Pahlavi announces the White Revolution.\n- June 5, 1963: Protests in Qom and other cities; arrest of Ruhollah Khomeini.\n- November 4, 1964: Ruhollah Khomeini exiled to Turkey.\n- October 12–16, 1971: 2,500-year celebration of the Persian Empire at Persepolis.\n- March 2, 1975: Rastakhiz Party established as the sole legal political party.\n- January 9, 1978: Protests in Qom.\n- August 19, 1978: Cinema Rex fire in Abadan.\n- September 8, 1978: Black Friday in Jaleh Square, Tehran.\n- October 6, 1978: Ruhollah Khomeini expelled from Iraq, moves to France.\n- January 16, 1979: Shah Mohammad Reza Pahlavi leaves Iran.\n- February 1, 1979: Ruhollah Khomeini returns to Iran.\n- February 11, 1979: Islamic Republic declared.\n- April 1, 1979: Referendum establishing the Islamic Republic.\n- November 4, 1979: U.S. embassy hostage crisis begins.\n- April 24–25, 1980: Operation Eagle Claw, failed U.S. hostage rescue mission.\n- September 22, 1980: Iraq invades Iran, beginning of the Iran-Iraq War."
+}

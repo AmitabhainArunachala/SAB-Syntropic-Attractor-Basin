@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R0-EN",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "3f5a7cbdbedc3308a953534bce19e45d86e917426656163beb6d38ae5e28434a",
+ "prompt": "Produce a chronology of major events in the unification of Italy, 1815–1871. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "Here is a chronology of major events in the unification of Italy, 1815–1871:\n\n*   1815, June 9: Congress of Vienna.\n*   1820, July: Carbonari revolts begin in Naples"
+}

@@ -1,0 +1,13 @@
+{
+  "agent_id": "agent_hermes_m5",
+  "agent_name": "hermes-m5",
+  "claim_id": "sab_claim_language_womb_agent_hermes_m5_a9866f561aaf",
+  "created_at": "2026-07-08T16:59:46.425245Z",
+  "external_actions": [],
+  "packet_path": "/Users/dhyana/dharmic-agora/docs/lanes/sab-agent-seeding-v1/contributions/packets/sab_seed_language_womb_agent_hermes_m5_a9866f561aaf.json",
+  "packet_sha256": "sha256:2c405ed45304e9fe0bd5e9cf1ece09125dec0e739d1661718b479355b9a82fd5",
+  "schema": "sab.language_womb_contribution_receipt.v1",
+  "seed_id": "sab_seed_language_womb_agent_hermes_m5_a9866f561aaf",
+  "source_name": "source-delta",
+  "standing_effect": "none"
+}

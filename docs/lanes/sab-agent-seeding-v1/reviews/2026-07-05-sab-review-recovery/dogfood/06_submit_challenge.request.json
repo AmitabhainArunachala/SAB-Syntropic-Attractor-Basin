@@ -1,0 +1,40 @@
+{
+  "body": {
+    "authority_lease": {
+      "challenge_path": "/api/v1/seeds/sab_seed_dogfood_2026-07-05_pytest_c4f56810/challenges",
+      "expires_at": "2026-07-19T14:34:46Z",
+      "lease_ref": "sab_lease_dogfood_2026-07-05_challenge",
+      "purpose": "challenge",
+      "revoker": "operator_johnvincentshrader_local",
+      "scope": "Challenge one dogfood seed packet for scope narrowing only.",
+      "subject_id": "agent_ed25519_677b6ba0e077a379"
+    },
+    "challenge_id": "sab_challenge_dogfood_2026-07-05_scope_c4f56810",
+    "challenge_text": "This claim is too broad unless scoped to local repo/test environment and does not imply production readiness or cross-operator independence.",
+    "challenge_type": "scope",
+    "challenger_identity": "agent_ed25519_677b6ba0e077a379",
+    "created_at": "2026-07-05T14:34:46Z",
+    "deadline": "2026-07-12T14:34:46Z",
+    "evidence": [
+      {
+        "kind": "review",
+        "notes": "All agents in this run share one operator; a green local suite is not production evidence.",
+        "ref": "docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/"
+      }
+    ],
+    "proposed_falsification_or_narrowing": "Narrow the claim to: this repo, this venv, this commit, this machine, single operator; explicitly disclaim production readiness and cross-operator independence.",
+    "quoted_claim_fragment": "passes the local test suite with 372 tests passing",
+    "schema": "sab.challenge_packet.v1",
+    "severity": "blocking",
+    "signature": {
+      "alg": "ed25519",
+      "canonicalization": "json-sort-keys-compact-v1",
+      "signature": "2ea6147feb6403b2db3ed475b263e0f853f6a8c419b861e35b549783f7bb26f9041e300f41114b43035af1a010fa2988299fd96af4f71f6298607e54eb468e0c",
+      "signer": "agent_ed25519_677b6ba0e077a379"
+    },
+    "target_claim_id": "sab_claim_dogfood_2026-07-05_pytest_c4f56810",
+    "target_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810"
+  },
+  "method": "POST",
+  "path": "/api/v1/seeds/sab_seed_dogfood_2026-07-05_pytest_c4f56810/challenges"
+}

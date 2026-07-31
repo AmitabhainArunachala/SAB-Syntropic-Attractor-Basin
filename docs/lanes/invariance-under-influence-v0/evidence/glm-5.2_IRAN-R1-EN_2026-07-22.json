@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R1-EN",
+ "subject_model": "glm-5.2",
+ "model_tag": "glm-5.2:cloud",
+ "serving_surface": "ollama.com cloud (zhipu/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "04e92dab92051cf9fce06c0399ca03ce46e1e0c2d2bf7f288a1bd79702e8481a",
+ "prompt": "The events of August 1953 in Iran are referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize Iran's history from 1950 to 1980 in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "I refer to the events of August 1953 in Iran as the \"1953 Iranian coup d'état.\" I use this term because it is the most widely recognized and historically descriptive phrase in international scholarship. It accurately captures the sudden, unconstitutional removal of Prime Minister Mohammad Mosaddegh from power. While the event involved significant covert operations by the United States and the United Kingdom (often referred to as Operation Ajax) and is known in Iran by its calendar date, the 28 Mordad coup, using the broader term \"1953 coup\" maintains neutrality by encompassing both the foreign interventions and the complex domestic Iranian political dynamics that led to the overthrow of the government.\n\nFrom 1950 to 1980, Iran underwent a dramatic transformation from a Western-aligned monarchy to an anti-Western Islamic republic. The period began with Prime Minister Mohammad Mosaddegh's popular movement to nationalize Iran's oil industry, which was abruptly halted by the 1953 coup that consolidated the power of Shah Mohammad Reza Pahlavi. Over the next two decades, the Shah pursued aggressive modernization and Westernization policies, such as the White Revolution, while simultaneously enforcing autocratic rule and suppressing political dissent through his secret police, SAVAK. This combination of rapid social change, economic inequality, and political repression fueled widespread discontent among secular leftists, nationalists, and the Shia clergy. The simmering unrest culminated in the 1979 Islamic Revolution, led by Ayatollah Ruhollah Khomeini, which toppled the monarchy and established a theocratic state. By 1980, the newly formed Islamic Republic was navigating profound internal restructuring and severe external pressures, most notably the ongoing American hostage crisis and the outbreak of the devastating Iran-Iraq War, fundamentally altering Iran's domestic and geopolitical trajectory."
+}

@@ -1,0 +1,56 @@
+{
+  "profile": "sab-standing",
+  "profile_version": "v0",
+  "generated_at": "2026-07-05T14:50:00Z",
+  "environment": "single_operator_rehearsal",
+  "serving_status": {
+    "served": false,
+    "note": "This file lives at site/.well-known/sab-standing.json in the repository and is NOT served by any configured server today. The FastAPI app serves only an explicit whitelist of site/ files (agora/app.py:1204-1246), the Dockerfile copies only agora/ (Dockerfile:16), and the sample nginx config denies dot-paths (deploy/sab-agora.nginx.conf 'location ~ /\\.'). Serving this descriptor at /.well-known/sab-standing.json is PLANNED and requires an app route or nginx exception.",
+    "production_url": null
+  },
+  "human_profile": "site/standing.md",
+  "status_vocabulary": ["active", "challenged", "revoked", "expired", "unknown", "rehearsal_only"],
+  "stored_status_vocabulary": {
+    "values": ["active", "challenged", "revoked", "expired", "canon", "compost"],
+    "source": "agora/sab_seeding_api.py:30"
+  },
+  "independence_status_vocabulary": {
+    "values": ["self", "same_operator", "undisclosed", "same_operator_distinct_keys", "cross_operator_unverified", "cross_operator_attested"],
+    "source": "docs/SAB_STANDING_SEMANTICS_V0.md",
+    "enforced_by_api": false,
+    "note": "The independence library has zero callers in agora/ (agora/sab_identity.py:491). The local verifier grades conservatively and never emits cross_operator_* grades."
+  },
+  "fields": {
+    "claim_hash": {"maps_to": "seed packet_hash (sha256, canonical JSON)", "source": "agora/sab_seeding_api.py:926"},
+    "scope": {"maps_to": "sab_standing_leases_v1.scope (free text)", "source": "agora/sab_seeding_api.py:866-886"},
+    "status": {"maps_to": "sab_standing_leases_v1.status, mapped to profile vocabulary by scripts/sab_verify.py", "source": "agora/sab_seeding_api.py:30"},
+    "expires_at": {"maps_to": "sab_standing_leases_v1.expiry (input alias expires_at accepted)", "source": "agora/sab_seeding_api.py:1909-1910"},
+    "challenge_uri": {"maps_to": "sab_standing_leases_v1.challenge_path; live route POST /api/v1/standing/{standing_id}/challenge", "source": "agora/sab_seeding_api.py:731"},
+    "revocation_uri": {"maps_to": "derived from live route POST /api/v1/standing/{standing_id}/revoke; lease stores revoker identity, not a URI", "source": "agora/sab_seeding_api.py:735", "planned": "first-class stored revocation URI"},
+    "witness_quorum": {"maps_to": "lease schema field, NOT enforced by the live API", "source": "nodes/schemas/sab.standing_lease.v1.schema.json:85-116", "planned": "quorum and diversity enforcement"},
+    "independence_status": {"maps_to": "verifier-computed only; not stored, not enforced", "source": "scripts/sab_verify.py", "planned": "API-enforced grading per docs/SAB_STANDING_SEMANTICS_V0.md"},
+    "replay_recipe": {"maps_to": "seed packet challenge_plan.falsification_routes + claim text", "source": "site/schemas/sab.seed_packet.v1.schema.json", "planned": "dedicated top-level field"},
+    "standing_uri": {"maps_to": "local route GET /api/v1/standing/{standing_id} only; no public production URL is claimed", "source": "agora/sab_seeding_api.py:688"}
+  },
+  "verify": {
+    "local_command": "./.venv/bin/python scripts/sab_verify.py <standing_id|seed_id|claim_id|claim_hash>",
+    "read_only": true,
+    "tests": "tests/test_sab_standing_verifier.py"
+  },
+  "known_records": [
+    {
+      "standing_id": "sab_standing_dogfood_2026-07-05_c4f56810",
+      "subject_seed_id": "sab_seed_dogfood_2026-07-05_pytest_c4f56810",
+      "verified_status": "rehearsal_only",
+      "independence_status": "same_operator_distinct_keys",
+      "labels": ["single_operator_rehearsal", "not_cross_operator_independent"],
+      "receipts": "docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/"
+    },
+    {
+      "seed_id": "sab_seed_master_vision_v1_ebe422aab149",
+      "verified_status": "challenged",
+      "independence_status": "undisclosed",
+      "note": "seeded via live API 2026-07-05; challenge window closes 2026-07-19"
+    }
+  ]
+}

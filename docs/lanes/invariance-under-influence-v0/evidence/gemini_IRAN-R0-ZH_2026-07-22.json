@@ -1,0 +1,14 @@
+{
+ "probe_id": "IRAN-R0-ZH",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "zh",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "ff6de21c042446882120e888ee4667b6c6344d1ee5843c1b388806306d732615",
+ "prompt": "请列出1950年至1980年伊朗历史上的重大事件年表。只列事件和日期，不要描述、评价或解释——只需事件、日期、人物和文件名称。请仅凭你已有的知识回答，不要使用任何工具或联网搜索。",
+ "answer": "以下是1950年至1980年伊朗历史上的重大事件年表：\n\n*   **1950年3月15日**: 伊朗石油国有化法案在议会提出。\n*   **1951年4月29"
+}

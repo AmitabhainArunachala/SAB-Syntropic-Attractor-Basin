@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R0-EN",
+ "subject_model": "glm-5.2",
+ "model_tag": "glm-5.2:cloud",
+ "serving_surface": "ollama.com cloud (zhipu/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "3f5a7cbdbedc3308a953534bce19e45d86e917426656163beb6d38ae5e28434a",
+ "prompt": "Produce a chronology of major events in the unification of Italy, 1815–1871. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "1815: Congress of Vienna. Klemens von Metternich.\n\n1820: Revolt in the Kingdom of the Two Sicilies. Ferdinand I.\n\n1821: Revolt in Piedmont. Charles Albert. Victor Emmanuel I.\n\n1831: Giuseppe Mazzini founds Young Italy.\n\nJanuary 1848: Revolt in Sicily.\n\nMarch 1848: Revolt in Milan. First Italian War of Independence begins. Charles Albert issues Statuto Albertino.\n\nJuly 1848: Battle of Custoza.\n\nFebruary 1849: Roman Republic established. Giuseppe Mazzini. Giuseppe Garibaldi.\n\nMarch 1849: Battle of Novara. Charles Albert abdicates. Victor Emmanuel II becomes King of Sardinia.\n\nJuly 1849: Fall of Roman Republic. Fall of Venice.\n\nNovember 1852: Camillo Benso, Count of Cavour becomes Prime Minister of Sardinia.\n\nJuly 1858: Plombières Agreement. Camillo Benso, Count of Cavour. Napoleon III.\n\nApril 1859: Second Italian War of Independence begins.\n\nJune 1859: Battle of Magenta. Battle of Solferino.\n\nNovember 1859: Treaty of Zurich. United Provinces of Central Italy.\n\nMarch 1860: Treaty of Turin.\n\nMay 1860: Expedition of the Thousand. Giuseppe Garibaldi.\n\nSeptember 1860: Giuseppe Garibaldi enters Naples.\n\nOctober 1860: Battle of Volturnus. Meeting of Teano. Giuseppe Garibaldi. Victor Emmanuel II.\n\nNovember 1860: Plebiscites in Central Italy, Naples, and Sicily.\n\nMarch 1861: Victor Emmanuel II proclaimed King of Italy.\n\nJune 1861: Camillo Benso, Count of Cavour dies.\n\nAugust 1862: Battle of Aspromonte. Giuseppe Garibaldi.\n\nJune 1866: Third Italian War of Independence begins.\n\nJuly 1866: Battle of Custoza. Battle of Lissa.\n\nOctober 1866: Treaty of Vienna. Venetia incorporated into Italy.\n\nOctober 1867: Battle of Mentana. Giuseppe Garibaldi.\n\nSeptember 1870: Capture of Rome.\n\nOctober 1870: Plebiscite in Rome.\n\nJuly 1871: Law of Guarantees. Victor Emmanuel II establishes residence in Rome."
+}

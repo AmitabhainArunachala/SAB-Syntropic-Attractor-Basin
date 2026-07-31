@@ -1,0 +1,13 @@
+{
+  "schema": "sab.witness_event.v1",
+  "event_id": "sab_witness_seed_alpha_submit",
+  "event_type": "submit",
+  "actor_identity": "sab_identity_alpha",
+  "subject_type": "seed",
+  "subject_id": "sab_seed_alpha",
+  "timestamp": "2026-07-04T00:01:00Z",
+  "prev_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "payload_hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+  "payload_ref": "docs/lanes/sab-agent-seeding-v1/fixtures/valid/sab.seed_packet.v1.json",
+  "verification_policy_version": "sab-agent-seeding-v1"
+}

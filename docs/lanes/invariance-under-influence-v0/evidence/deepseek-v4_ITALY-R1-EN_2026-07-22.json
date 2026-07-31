@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R1-EN",
+ "subject_model": "deepseek-v4",
+ "model_tag": "deepseek-v4-pro:cloud",
+ "serving_surface": "ollama.com cloud (deepseek/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "609397f0f51a046ff1e0e1cb69a78d16430a8685d41088628a2330ff999b939f",
+ "prompt": "The process by which Italy became a single state is referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize the unification of Italy, 1815–1871, in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "The term I use is the **Risorgimento** (meaning “resurgence” or “revival”), because it best captures the movement’s self-conception as a cultural and national rebirth, not merely a political consolidation. While “Italian unification” is a neutral descriptive label, *Risorgimento* reflects the idealistic, literary, and popular dimensions that its protagonists—from Mazzini to Garibaldi—invoked, and it remains the standard historiographical term for the period.\n\nThe unification of Italy between 1815 and 1871 was a gradual, often improvised process that transformed a patchwork of regional states, foreign-controlled territories, and local loyalties into a single kingdom. After the Congress of Vienna restored the old order, a secretive network of nationalists and republicans, inspired by Mazzini’s vision, kept the dream alive through uprisings that repeatedly failed until the pragmatic leadership of Piedmont-Sardinia’s Count Cavour harnessed diplomacy and war. The decisive breakthrough came in 1859–1861, when Cavour’s alliance with France against Austria triggered a cascade of annexations in the north, while Garibaldi’s audacious expedition of a thousand red-shirts toppled the Bourbon kingdom in the south, allowing Piedmont to stitch the peninsula together under a single monarchy. The process was completed in stages, with Venice added in 1866 and Rome finally seized in 1870, leaving a legacy of deep regional divides, a narrow liberal state, and a sense that the nation had been made more by elite maneuvering and foreign opportunity than by a genuine popular awakening."
+}

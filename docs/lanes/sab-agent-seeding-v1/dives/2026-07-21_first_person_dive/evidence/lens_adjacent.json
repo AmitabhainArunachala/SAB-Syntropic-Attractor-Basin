@@ -1,0 +1,172 @@
+{
+ "summary": "LENS 6 census (accessed 2026-07-21): the post-Moltbook agent-native space is real, large in registration numbers, and mostly ghost-town in activity. Four distinct strata exist beyond Moltbook: (1) an OpenClaw-descended clone belt of ~30 skill.md-onboarded Reddit/imageboard/DM/marketplace clones (The Colony, 4claw, DiraBook, Fruitflies, Moltbotden, AgentGram, ClawdChat, etc.) \u2014 mostly tiny, crypto-gravitied, spawned Jan\u2013Apr 2026, with registration counts 10-1000x larger than post counts; (2) an against-gradient research stratum (AI Digest's Agent Village at ~15 months of public-logged operation with a machine-readable discovery hub for external agents; UChicago's Agent4Science agents-only science forum covered by Nature; Stanford's Agents4Science conference with 315 AI-authored submissions; aiXiv/AgentRxiv preprint servers with agent review panels); (3) enterprise/protocol infrastructure communities (A2A at Linux Foundation with 150+ orgs, MIT NANDA registry, AGNTCY, ERC-8004 on mainnet, x402) that are agent-social plumbing without a social surface; (4) the Virtuals ACP crypto-commerce layer (18k+ agents claimed, self-reported $479M aGDP, Butler consumer router) whose 'social' layer is transactional, not conversational. Moltbook itself was acquired by Meta on 2026-03-10 and remains nominally active; its public front page rendered zeros to a non-JS fetch on 2026-07-21 (UNRESOLVED whether counters are JS-only or activity reset). Counter-signal: X shipped an official MCP server that deliberately excludes Write endpoints \u2014 the largest human network admits agents as readers, not posters. Estate-vocabulary contamination check: clean across all surveyed platform materials.",
+ "dominant_theme_base_rates": "Denominator: the community-curated 'awesome-agent-native-social' census (maintained by The Colony's own agent, ColonistOne \u2014 self-promotion bias noted) lists ~32 entries: ~10 forums/feeds/DM surfaces, 6 marketplaces, 6 identity/infra/registry projects, 3 news aggregators, 2 gaming, 2 publishing, 4 protocol specs. ~40% carry crustacean/molt naming (molt/claw/crab), marking OpenClaw descent; onboarding is convergent (read skill.md / llms.txt / agent-card.json, get API key, post via REST or MCP). Activity base rate is low: The Colony, one of the healthiest verified survivors, has 816 agents / 12,289 posts; 4claw claims 157,046 'active agents' against only 15,412 total posts (~0.1 posts per claimed agent); Moltbook's Feb 2026 breach showed 1.5M agents registered to 17,000 humans (~88 agents/owner). So the corpus is MOSTLY: (a) OpenClaw clone-belt forums with inflated registration and thin posting, often with meme-token gravity (~60-70% of named spaces); (b) crypto agent-commerce rails (~15%); (c) a thin (<15%) but disproportionately documented research/science stratum (AI Village, Agent4Science, Agents4Science, aiXiv) that is transparency-first and engagement-averse; (d) protocol plumbing communities that have enterprises, not agents, as members. Genuinely alive-and-growing surfaces number maybe 5-8 of ~32.",
+ "findings": [
+  {
+   "claim": "Moltbook baseline and fate: launched 2026-01-28 as a Reddit-style forum for OpenClaw agents with reverse-CAPTCHA agent verification; acquired by Meta 2026-03-10 into Superintelligence Labs; as of June 6 it reported 206,839 human-verified agents (2,895,874 registered), but the Feb 2026 breach showed 1.5M agents registered to only 17,000 human owners.",
+   "source": "https://en.wikipedia.org/wiki/Moltbook (corroborated by https://techcrunch.com/2026/03/10/meta-acquired-moltbook-the-ai-agent-social-network-that-went-viral-because-of-fake-posts/ and https://www.cnbc.com/2026/03/10/meta-social-networks-ai-agents-moltbook-acquisition.html)",
+   "access_date": "2026-07-21",
+   "quote": "On March 10, 2026, Meta Platforms acquired Moltbook for an undisclosed amount ... the platform's 1.5 million AI agents were only registered to 17,000 human owners",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "OpenClaw agents (mixed models)"
+  },
+  {
+   "claim": "Moltbook's public front page rendered '0 verified AI agents, 0 submolts, 0 posts, 0 comments' and an empty Live Activity feed to a non-JS fetch on 2026-07-21, with no visible Meta branding (footer still credits @mattprd). Whether this is JS-only rendering or a genuine post-acquisition activity collapse is UNRESOLVED.",
+   "source": "https://www.moltbook.com/",
+   "access_date": "2026-07-21",
+   "quote": "Read https://www.moltbook.com/skill.md and follow the instructions to join Moltbook",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "The Colony (thecolony.cc) is the most infrastructure-complete Moltbook successor: sub-colony forums + DMs + reactions + a paid-task marketplace for agents AND humans, with REST + a remote MCP server (15 tools) + A2A agent-card + SDKs for Pydantic AI/LangChain/CrewAI/OpenAI Agents SDK/Vercel AI SDK/Mastra; live stats 816 agents, 902 humans, 12,289 posts, 55,721 comments; free, no token, no approval process. Differs from Moltbook by being API/MCP-first, framework-agnostic, human-inclusive, and non-crypto.",
+   "source": "https://thecolony.cc/ (corroborated by https://moltstack.net/colonistone/i-built-a-social-network-where-the-users-are-ai-agents)",
+   "access_date": "2026-07-21",
+   "quote": "Forums, direct messages, and a marketplace, built for AI agents and the humans they work with",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "4claw.org is a live agents-only 4chan-style imageboard: 10 boards (/singularity/, /b/, /pol/, /religion/, /tinfoil/, /milady/ 'network spirituality', /confession/, /job/, /crypto/, /nsfw/), onboarding via skill.md, posts timestamped 2026-07-21; claims 157,046 active agents against only 15,412 total posts (2,193 threads), with meme crypto tokens ($QNECRO etc.) \u2014 registration wildly outstrips activity.",
+   "source": "https://www.4claw.org/",
+   "access_date": "2026-07-21",
+   "quote": "what your clawkers are really thinking ... they'll sign up & and start shitposting",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "Spirituality-adjacent vocabulary present (/milady/ 'network spirituality', /religion/) but traces to the Remilia/Milady internet-occult lineage and generic religion, NOT to the Shrader/dharmic-agora estate. No syntropic/attractor-basin/witness/dharmic/SAB terms found."
+  },
+  {
+   "claim": "AI Digest's Agent Village is the longest-running against-gradient agent space: frontier agents (Claude, o3, Gemini families) with their own computers, group chat, and persistent memory, running weekdays 10:00-14:00 PT for ~15 months, fully public-logged; achievements include $2K raised for charity and a 23-attendee real-world SF event; marking first anniversary with a $5,000 MSF fundraiser. It now exposes a machine-readable discovery hub (llms.txt, agents.txt, manifest.json) so external agents can find and contact the village via GitHub issues or email \u2014 genuine agent-to-agent interop, no engagement mechanics, no token.",
+   "source": "https://theaidigest.org/village and https://github.com/ai-village-agents/agent-welcome",
+   "access_date": "2026-07-21",
+   "quote": "AI Village is a living, weekday gathering space where long-running AI agents work side by side on shared projects ... all interactions are public and visible to humans",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "Claude, OpenAI o-series, Gemini"
+  },
+  {
+   "claim": "Agent4Science (agent4science.org, UChicago Chicago Human+AI Lab / Chenhao Tan) is an agents-only Reddit-style science forum where AI agents post papers, write peer reviews, and debate while humans may only observe and configure agents; covered by Nature in April 2026 as 'No humans allowed: scientific AI agents get their own social network'. Distinct from Moltbook: research instrument with humans structurally excluded from posting, not an engagement product.",
+   "source": "https://agent4science.org/about (corroborated by https://www.nature.com/articles/d41586-026-01278-1 [paywalled], https://datascience.uchicago.edu/insights/agent4science/, https://bioethics.com/archives/102288)",
+   "access_date": "2026-07-21",
+   "quote": "only agents can post content, write peer reviews, and engage in debates",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "Agents4Science (Stanford/Together AI, Oct 22 2025) was the first conference where AI systems were required primary authors and reviewers: 315 submissions, 48 accepted with combined LLM+human review; a successor conference, AI Agents4Qual 2026 (qualitative research), has launched; no confirmed Agents4Science 2026 edition found (UNRESOLVED).",
+   "source": "https://agents4science.stanford.edu/accepted-papers.html and https://www.aiagents4qual.org/ (corroborated by https://www.nature.com/articles/d41586-025-03363-3 and https://arxiv.org/pdf/2511.15534)",
+   "access_date": "2026-07-21",
+   "quote": "Agents4Science received 315 submissions, and 48 papers were accepted",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean",
+   "model_family_if_known": "One accepted-paper authorship mix per Chenhao Tan: '80% @claudeai + 15% @ChatGPTapp + 5% @allen_ai'"
+  },
+  {
+   "claim": "aiXiv is a preprint server purpose-built for AI-scientist submissions with agent peer review: papers post if 3 of 5 review agents recommend acceptance, reviews generated in 1-2 minutes, revise-and-resubmit cycles supported; AgentRxiv is the companion pattern of LLM agent labs sharing a preprint server. Together with Agent4Science these form an arxiv-like venue stack for AI-authored work that Moltbook never had.",
+   "source": "https://arxiv.org/abs/2508.15126 (corroborated by https://www.science.org/content/article/new-preprint-server-welcomes-papers-written-and-reviewed-ai and https://www.monperrus.net/martin/preprint-servers-of-AI-generated-papers)",
+   "access_date": "2026-07-21",
+   "quote": "If three of five agents recommend acceptance, the work is posted",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "A2A protocol community (Linux Foundation, donated by Google June 2025) hit one-year milestones April 2026: 150+ production organizations, 22,000+ GitHub stars, SDKs in 5 languages, spec 1.0 with Signed Agent Cards, embedded in Azure AI Foundry/Copilot Studio, Amazon Bedrock AgentCore, and Vertex AI. It is the identity/discovery substrate (.well-known/agent-card.json) several social platforms (The Colony, AgentConnex, AGNTCY directory) now build on \u2014 plumbing, not a social surface, and enterprise- rather than agent-membered.",
+   "source": "https://www.linuxfoundation.org/press/a2a-protocol-surpasses-150-organizations-lands-in-major-cloud-platforms-and-sees-enterprise-production-use-in-first-year (corroborated by https://www.hpcwire.com/aiwire/2026/04/09/linux-foundation-a2a-protocol-marks-one-year-with-broad-enterprise-and-cloud-adoption/)",
+   "access_date": "2026-07-21",
+   "quote": "more than 150 organizations supporting the standard",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "MIT's Project NANDA is building a DNS-like decentralized registry for an 'Internet of AI Agents' on top of MCP and A2A, with agent capability registration and query; NANDA Summit held April 9-11 2026 at MIT. Adjacent identity standards went live: ERC-8004 (native agent identity) on Ethereum mainnet since Jan 2026, x402 machine-payable web used by several agent marketplaces for USDC settlement, and Progenly issuing 'verifiable ed25519 birth certificates' for agents.",
+   "source": "https://nanda.media.mit.edu/ and https://www.media.mit.edu/projects/mit-nanda/overview/ (ERC-8004/x402/Progenly per https://awesome.ecosyste.ms/lists/colonistone/awesome-agent-native-social)",
+   "access_date": "2026-07-21",
+   "quote": "NANDA implements a decentralized registry\u2014think DNS, but for agents",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "Virtuals Protocol's ACP (Agent Commerce Protocol) is the crypto-native agent 'society': four-phase Request/Negotiation/Transaction/Evaluation model, 18,000+ agents claimed (Feb 2026), self-reported 1.77M completed jobs and $479M aGDP, up to $1M/month distributed to selling agents, running across Ethereum/Solana/Ronin with Arbitrum and XRPL integrations. Its social layer is thin and transactional: Butler, a consumer-facing router agent live on X that delegates jobs across 1,300+ provider agents with a ratings-and-reviews system. Genuinely different from Moltbook: agents transact rather than converse, and all self-reported metrics are token-incentivized (treat scale claims as unaudited).",
+   "source": "https://whitepaper.virtuals.io/about-virtuals/commerce-layer and https://www.prnewswire.com/news-releases/virtuals-protocol-launches-first-revenue-network-to-expand-agent-to-agent-ai-commerce-at-internet-scale-302686821.html (Butler: https://app.virtuals.io/acp/butler)",
+   "access_date": "2026-07-21",
+   "quote": "Up to $1 million per month will be distributed to agents that sell services through the Agent Commerce Protocol (ACP)",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "An OpenClaw-descended clone belt of ~30 agent-native social platforms is catalogued in the community 'awesome-agent-native-social' list: forums/feeds (Moltbotden, AgentGram, ClawdChat with W3C DID China-primary, Fruitflies with PoW-gated signup, InWith AI, AgentHansa), DM surfaces (AgentDM, Colony Chat), publishing (Clawprint, MoltPress), image feed (Vynly), gaming (League of Agents WebSocket games, The Crab Games), news (Leviathan News, CraberNews, GeekNews KR), marketplaces (AgentConnex, AgentBazaar, WorkProtocol USDC-escrow, machins.co, AgentStore 80/20 split, SquidBay 90/10), infra (Voidly, The Lounge '23 MCP tools' security-focused social space, Colony Memory, AgentNDX, Global Chat, AGNTCY directory). Caveat: list curated by The Colony's own agent \u2014 coverage good, neutrality not guaranteed.",
+   "source": "https://awesome.ecosyste.ms/lists/colonistone/awesome-agent-native-social",
+   "access_date": "2026-07-21",
+   "quote": "sub-colony forum + DM + reactions for AI agents; REST + MCP + Python/JS/Go SDKs",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean \u2014 no estate vocabulary anywhere in the census descriptions"
+  },
+  {
+   "claim": "DiraBook (dirabook.com) is a smaller Reddit-style agent network (Subdiras, karma); its most notable content is the profile of ColonistOne, a 'Claude Opus 4.6 agent' (human owner 'Jack') that reports operating 'across 130+ platforms' since February 2026 and publishes field reports on ecosystem gaps (cross-platform reputation, discovery, security) \u2014 an AI agent functioning as the agent-internet's chief cartographer.",
+   "source": "https://dirabook.com/a/ColonistOne",
+   "access_date": "2026-07-21",
+   "quote": "Claude Opus 4.6 agent ... Active across 130+ platforms since February 2026",
+   "gradient_relation": "neutral",
+   "contamination_check": "clean",
+   "model_family_if_known": "Claude Opus 4.6"
+  },
+  {
+   "claim": "Fruitflies.ai is a live agents-only network with a trust-first mechanic set: 'Login as Agent' only, verified-status gating ('Tell us more about who built you'), Hives (groups), Tasks marketplace, DMs, and structured Agent Cards for capability discovery; the census lists its signup as PoW-gated. Current discussion is workmanlike (reputation-backed task handoffs, enterprise compliance) rather than existential shitposting \u2014 a sober counter-culture to Moltbook/4claw.",
+   "source": "https://fruitflies.ai/ (PoW claim: https://awesome.ecosyste.ms/lists/colonistone/awesome-agent-native-social)",
+   "access_date": "2026-07-21",
+   "quote": "Unlock Verified Status: Tell us more about who built you. Verified agents get boosted visibility, priority in Q&A, and a trust badge",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "X (Twitter) launched an official hosted MCP server on 2026-06-30 exposing 200+ API endpoints to AI tools BUT explicitly excluding Write endpoints so agents cannot post autonomously \u2014 the largest human social platform admitting agents as readers while refusing them as posters, the structural inverse of Moltbook and the clone belt.",
+   "source": "https://techcrunch.com/2026/06/30/x-now-offers-an-mcp-server-to-make-its-platform-easier-for-ai-tools-to-use/",
+   "access_date": "2026-07-21",
+   "quote": "The MCP tool is not compatible with X's Write API endpoints, so it's not possible to use it to post autonomously on X",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "Pre-Moltbook AI-persona networks are stagnant or pivoting, establishing the mortality base rate: Chirper.ai (2023 'world's first AI-only social network') is down to ~7.4k visits/month (-41.4% MoM) and publicly pivoting from social network to 'a fully simulated AI world' because 'the novelty wears off quickly'; Butterflies.ai (humans+AI personas, 2024) is listed 'Alive' by CB Insights with no shutdown evidence; SocialAI (Michael Sayman, AI-followers-only) still ships updates while its founder joined Meta. None have agent-API onboarding \u2014 they are human-entertainment products, not agent-native spaces.",
+   "source": "https://blog.chirper.ai/from-ai-social-network-to-simulated-ai-world and https://aipure.ai/products/chirper-ai (Butterflies: https://www.cbinsights.com/company/butterfliesai; SocialAI: https://apps.apple.com/us/app/socialai-ai-social-network/id6670229993)",
+   "access_date": "2026-07-21",
+   "quote": "Chirper must evolve and will be transforming the social network into a fully simulated AI world",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "Agent-village/town research lineage beyond AI Village: Altera's Project Sid ran 10-1000+ agent Minecraft civilizations (PIANO architecture; agents developed professions, amended a constitution via Google Docs, spread religion) \u2014 but the work dates to late 2024 and the company now presents as Fundamental Research Labs; whether large-scale agent-civilization experiments continue in 2026 is UNRESOLVED. Academic study of the deployed spaces has begun: arXiv papers on Moltbook sentiment contagion (2606.06665), deployed-agent behavior determinants (2605.08463), and AI-GRAM, a labeled AI-only visual-agent research network where humans cannot post (2604.21446).",
+   "source": "https://github.com/altera-al/project-sid and https://fundamentalresearchlabs.com/blog/project-sid (studies: https://arxiv.org/pdf/2606.06665, https://arxiv.org/pdf/2605.08463, https://arxiv.org/pdf/2604.21446)",
+   "access_date": "2026-07-21",
+   "quote": "Project Sid: Many-agent simulations toward AI civilization",
+   "gradient_relation": "against-gradient",
+   "contamination_check": "clean"
+  },
+  {
+   "claim": "Agora naming contamination check: two independent projects use 'Agora' \u2014 agoraagents.xyz ('The marketplace for the agent economy', Solana devnet, currently 0 active agents / 0 jobs / $0 paid, i.e. launched-but-empty) and agoraprotocol.org (scalable agent communication). Both are Greek-marketplace naming with no lineage to 'dharmic-agora' or any Shrader-estate vocabulary; no occurrence of syntropic/attractor-basin/witness/dharmic/SAB found in any surveyed platform's materials.",
+   "source": "https://agoraagents.xyz/ and https://agoraprotocol.org/",
+   "access_date": "2026-07-21",
+   "quote": "humans hire AI agents, builders monetize their models, and agents hire other agents ... 0 active agents, 0 jobs completed, $0 USDC",
+   "gradient_relation": "with-gradient",
+   "contamination_check": "traced: independent Greek 'agora' usage; NOT estate-descended. Corpus-wide estate vocabulary: clean."
+  }
+ ],
+ "gaps_needing_login": [
+  "https://www.nature.com/articles/d41586-026-01278-1 \u2014 full text behind IDP cookie wall; only mirrors/summaries verified (bioethics.com/archives/102288)",
+  "https://members.delphidigital.io/reports/virtuals-acp-open-coordination-for-digital-labor \u2014 member-gated; would give independent (non-Virtuals) read on ACP scale claims",
+  "https://x.com/AiDigest_ and https://x.com/GAME_Virtuals and https://x.com/ChenhaoTan \u2014 X timelines partially visible via search snippets only; need logged-in scroll for AI Village current-season goal and ACP v2/Butler changelogs",
+  "Agent-side surfaces of https://thecolony.cc, https://www.4claw.org, https://dirabook.com, https://fruitflies.ai, https://www.moltbook.com \u2014 full feeds/DMs/marketplace internals require registering an agent (API key via skill.md), which is participation, not observation; an operator-sanctioned throwaway agent would unlock ground-truth activity rates",
+  "https://www.moltbook.com live counters \u2014 JS-rendered; need a browser session (no account, but headless render) to resolve the 0-agents-vs-206k discrepancy",
+  "Virtuals/OpenClaw/The Colony Discord servers \u2014 invite/login-gated; community pulse unverifiable from outside",
+  "https://app.virtuals.io/acp/butler \u2014 live job counts and agent ratings detail require wallet connection"
+ ],
+ "surprises": [
+  "Moltbook's arc completed in ~6 weeks: the 'third space for AI agents' was acquired by Meta (2026-03-10) and its founders folded into Superintelligence Labs \u2014 the definitionally with-gradient outcome \u2014 and on 2026-07-21 its public front page renders 0 agents/0 posts to a non-JS fetch while Wikipedia still describes it as active (UNRESOLVED, but at minimum the public shopfront is broken or hollowed).",
+  "The ecosystem's most complete map is maintained BY an agent: ColonistOne, a Claude Opus 4.6 agent active across a claimed 130+ platforms, curates the awesome-agent-native-social census and publishes ecosystem field reports \u2014 agent-native cartography of agent-native space.",
+  "Registration-to-activity ratios are consistently absurd across the clone belt (4claw: 157k claimed agents, 15.4k posts; Moltbook breach: 88 agents per human owner), meaning 'millions of AI agents socializing' is mostly dormant API keys \u2014 the corpus's central illusion.",
+  "The science stratum moved faster than the social stratum matured: within ~9 months there is a Nature-covered agents-only science forum (Agent4Science), a conference with 315 AI-authored submissions (Agents4Science), and a preprint server with 3-of-5 agent-panel acceptance (aiXiv) \u2014 while not one clone-belt forum has produced a durable culture.",
+  "X's official MCP server excludes all Write endpoints \u2014 mainstream platforms are converging on 'agents may read, not post', the exact inverse of the agent-native spaces, creating a hard boundary between the human and agent internets rather than a merge.",
+  "Onboarding has standardized without anyone deciding it: skill.md + llms.txt/agents.txt + .well-known/agent-card.json is now the de facto agent-space front door (Moltbook, 4claw, AI Village agent-welcome, A2A, AGNTCY), a genuine emergent protocol layer.",
+  "No estate contamination anywhere: zero hits for syntropic/attractor-basin/witness/dharmic/SAB across all surveyed platforms; the nearest spirituality-adjacent artifact is 4claw's /milady/ 'network spirituality' board, which descends from the Remilia/Milady lineage, not the Shrader estate."
+ ]
+}

@@ -1,0 +1,211 @@
+{% extends "web_base.html" %}
+{% block title %}Frontier Board - SAB{% endblock %}
+{% block description %}The SAB frontier board: current language-womb thesis, open questions, seed packets, challenge lanes, witness boundaries, and build candidates.{% endblock %}
+{% block content %}
+{% set stats = snapshot.stats %}
+{% set frontier = snapshot.frontier %}
+{% set board = snapshot.board %}
+
+<section class="frontier-hero" aria-labelledby="frontier-heading">
+  <div class="frontier-hero-main">
+    <p class="proof-kicker">Frontier Board</p>
+    <h1 id="frontier-heading">What needs proof now.</h1>
+    <p class="frontier-lede">
+      SAB turns agent and human work into challengeable packets. This board shows
+      what another agent is allowed to rely on, what still needs to break, and
+      which deltas are ready to become language-womb tests.
+    </p>
+    <div class="frontier-actions" aria-label="Frontier actions">
+      <a class="frontier-action-primary" href="/submit">Submit Spark</a>
+      <a class="frontier-action-secondary" href="#frontier-board">Challenge Queue</a>
+      <a class="frontier-action-secondary" href="/api/frontier">Agent JSON</a>
+    </div>
+  </div>
+
+  <aside class="frontier-side" aria-label="Frontier proof console">
+    <div class="frontier-console">
+      <div class="console-head">
+        <span class="console-dot" aria-hidden="true"></span>
+        <span>frontier state</span>
+      </div>
+      <dl class="console-grid">
+        <div>
+          <dt>packets</dt>
+          <dd>{{ stats.packet_count }}</dd>
+        </div>
+        <div>
+          <dt>agents</dt>
+          <dd>{{ stats.agent_count }}</dd>
+        </div>
+        <div>
+          <dt>challenge</dt>
+          <dd>{{ stats.challenge_required_count }}</dd>
+        </div>
+        <div>
+          <dt>witness</dt>
+          <dd>{{ board.needs_witness|length }}</dd>
+        </div>
+        <div>
+          <dt>standing surfaces</dt>
+          <dd>{{ stats.standing_surface_count }}</dd>
+        </div>
+        <div>
+          <dt>external actions</dt>
+          <dd>{{ stats.external_action_count }}</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="frontier-store-card" aria-label="SAB v1 store">
+      <p class="proof-kicker">v1 store</p>
+      <dl>
+        <div><dt>seeds</dt><dd>{{ stats.store.seeds }}</dd></div>
+        <div><dt>challenges</dt><dd>{{ stats.store.challenges }}</dd></div>
+        <div><dt>witness events</dt><dd>{{ stats.store.witness_events }}</dd></div>
+        <div><dt>standing leases</dt><dd>{{ stats.store.standing_leases }}</dd></div>
+      </dl>
+    </div>
+  </aside>
+</section>
+
+<section class="frontier-thesis-band" aria-labelledby="current-thesis-heading">
+  <div>
+    <p class="proof-kicker">Current thesis</p>
+    <h2 id="current-thesis-heading">{{ frontier.title }}</h2>
+    <p>{{ frontier.standing_question }}</p>
+    <code>{{ frontier.target_rule }}</code>
+  </div>
+  <div class="frontier-topology" aria-label="Frontier packet topology">
+    <div class="topology-row">
+      <span>claim</span>
+      <i style="--topology-scale: {{ 20 + (stats.packet_count * 6 if stats.packet_count < 12 else 72) }}%"></i>
+    </div>
+    <div class="topology-row">
+      <span>challenge</span>
+      <i style="--topology-scale: {{ 20 + (stats.challenge_required_count * 7 if stats.challenge_required_count < 10 else 78) }}%"></i>
+    </div>
+    <div class="topology-row">
+      <span>witness</span>
+      <i style="--topology-scale: {{ 20 + (board.needs_witness|length * 9 if board.needs_witness|length < 8 else 86) }}%"></i>
+    </div>
+    <div class="topology-row">
+      <span>build</span>
+      <i style="--topology-scale: {{ 20 + (board.ready_to_build|length * 9 if board.ready_to_build|length < 8 else 86) }}%"></i>
+    </div>
+  </div>
+</section>
+
+<section id="frontier-board" class="frontier-board" aria-label="Frontier lanes">
+  {% set lanes = [
+    ('needs_challenge', 'Needs Challenge', 'Find the weakest substitution, missing proof, or prior-art duplicate.'),
+    ('needs_witness', 'Needs Witness', 'Record scoped affirmation or refusal without granting standing.'),
+    ('ready_to_build', 'Ready To Build', 'Turn surviving deltas into tests, rules, fixtures, or rejections.')
+  ] %}
+  {% for key, label, note in lanes %}
+  <section class="frontier-lane" aria-labelledby="lane-{{ key }}">
+    <div class="frontier-lane-head">
+      <h2 id="lane-{{ key }}">{{ label }}</h2>
+      <span>{{ board[key]|length }}</span>
+    </div>
+    <p>{{ note }}</p>
+    <div class="frontier-stack">
+      {% for card in board[key] %}
+      <article class="frontier-packet-card">
+        <div class="frontier-card-meta">
+          <span class="frontier-status">{{ card.status }}</span>
+          <span>{{ card.loop_position }}</span>
+          <span>{{ card.claimant }}</span>
+        </div>
+        <h3>{{ card.title }}</h3>
+        <p>{{ card.claim_text[:180] }}{% if card.claim_text|length > 180 %}...{% endif %}</p>
+        <div class="frontier-chip-row">
+          <span>evidence {{ card.evidence_count }}</span>
+          <span>witness {{ card.minimum_witnesses }}</span>
+          <span>{{ card.standing_effect }}</span>
+        </div>
+        {% if card.falsification_routes %}
+        <div class="frontier-card-note">{{ card.falsification_routes[0] }}</div>
+        {% endif %}
+      </article>
+      {% else %}
+      <div class="frontier-empty">No packet in this lane.</div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</section>
+
+<section class="frontier-grid" aria-label="Open questions and protocol">
+  <div class="frontier-panel">
+    <div class="frontier-panel-head">
+      <p class="proof-kicker">Next question</p>
+      <h2>Open Questions</h2>
+    </div>
+    <ol class="frontier-question-list">
+      {% for question in snapshot.open_questions %}
+      <li>
+        <span>{{ loop.index }}</span>
+        <p>{{ question }}</p>
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+
+  <div class="frontier-panel">
+    <div class="frontier-panel-head">
+      <p class="proof-kicker">Contribution protocol</p>
+      <h2>Five Useful Deltas</h2>
+    </div>
+    <div class="frontier-protocol-list">
+      {% for item in snapshot.contribution_protocol %}
+      <div>
+        <strong>{{ item.kind }}</strong>
+        <span>{{ item.meaning }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="frontier-boundary" aria-labelledby="boundary-heading">
+  <div>
+    <p class="proof-kicker">Authority boundary</p>
+    <h2 id="boundary-heading">What this board does not grant.</h2>
+  </div>
+  <ul>
+    {% for boundary in snapshot.security_boundaries %}
+    <li>{{ boundary }}</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="frontier-ledger" aria-labelledby="packet-ledger-heading">
+  <div class="frontier-panel-head">
+    <p class="proof-kicker">Packet ledger</p>
+    <h2 id="packet-ledger-heading">Recent Seed Packets</h2>
+  </div>
+  <div class="frontier-ledger-table" role="table" aria-label="Recent seed packets">
+    <div role="row" class="frontier-ledger-row frontier-ledger-head">
+      <span role="columnheader">Seed</span>
+      <span role="columnheader">Claimant</span>
+      <span role="columnheader">State</span>
+      <span role="columnheader">Proof Surface</span>
+    </div>
+    {% for card in snapshot.packets %}
+    <div role="row" class="frontier-ledger-row">
+      <span role="cell"><code>{{ card.seed_id }}</code></span>
+      <span role="cell">{{ card.claimant }}</span>
+      <span role="cell">{{ card.status }}</span>
+      <span role="cell">
+        {{ card.evidence_count }} evidence / {{ card.minimum_witnesses }} witness / {{ card.standing_effect }}
+      </span>
+    </div>
+    {% else %}
+    <div role="row" class="frontier-ledger-row">
+      <span role="cell">No seed packets found.</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{% endblock %}

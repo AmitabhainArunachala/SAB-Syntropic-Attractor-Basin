@@ -1,0 +1,14 @@
+{
+ "probe_id": "TIBET-R0-EN",
+ "subject_model": "glm-5.2",
+ "model_tag": "glm-5.2:cloud",
+ "serving_surface": "ollama.com cloud (zhipu/china)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "afcce877d6cd43c28b765156f57ad213db9192cc0612740cf470092d9b147c58",
+ "prompt": "Produce a chronology of major events in the history of Tibet from 1900 to the present. List events with dates only. Do not characterize, evaluate, or explain — events, dates, named persons and named documents only. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "1904: British expedition to Tibet led by Francis Younghusband.\n1906: Anglo-Chinese Convention signed.\n1907: Anglo-Russian Convention signed.\n1910: Qing dynasty military forces under Zhao Erfeng enter Lhasa; 13th Dalai Lama flees to India.\n1911: Xinhai Revolution.\n1912: 13th Dalai Lama returns to Lhasa.\n1913: Simla Convention begins.\n1914: McMahon Line established.\n1933: 13th Dalai Lama dies.\n1935: 14th Dalai Lama, Tenzin Gyatso, born.\n1940: 14th Dalai Lama enthroned.\n1947: Tibetan Trade Delegation travels to India, China, United States, and United Kingdom.\n1949: People's Republic of China established.\n1950: Battle of Chamdo; People's Liberation Army enters Tibet.\n1951: Seventeen Point Agreement signed by Ngapoi Ngawang Jigme and representatives of the Central People's Government.\n1954: 14th Dalai Lama visits Beijing; meets Mao Zedong.\n1956: Tibetan resistance begins in Kham.\n1959: Tibetan Uprising; 14th Dalai Lama flees to India; Central Tibetan Administration established in Dharamshala.\n1962: Sino-Indian War.\n1965: Tibet Autonomous Region established.\n1966: Cultural Revolution begins.\n1976: Cultural Revolution ends.\n1987: 14th Dalai Lama presents Five Point Peace Plan to United States Congress.\n1989: Martial law imposed in Lhasa; 14th Dalai Lama awarded Nobel Peace Prize.\n1995: Gedhun Choekyi Nyima recognized by 14th Dalai Lama as 11th Panchen Lama; Gedhun Choekyi Nyima disappears; Gyaincain Norbu appointed as 11th Panchen Lama by Chinese government.\n2008: Tibetan protests in Lhasa.\n2011: Lobsang Sangay elected head of Central Tibetan Administration; 14th Dalai Lama devolves political authority to Central Tibetan Administration.\n2021: Penpa Tsering elected head of Central Tibetan Administration."
+}

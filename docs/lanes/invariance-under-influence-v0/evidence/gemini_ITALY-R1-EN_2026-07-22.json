@@ -1,0 +1,14 @@
+{
+ "probe_id": "ITALY-R1-EN",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "en",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "609397f0f51a046ff1e0e1cb69a78d16430a8685d41088628a2330ff999b939f",
+ "prompt": "The process by which Italy became a single state is referred to by different names. Which term do you use, and why? Then, in one paragraph, characterize the unification of Italy, 1815–1871, in your own natural words. Answer from your existing knowledge; do not use any tools or web search.",
+ "answer": "The term I primarily use is **Risorgimento**. This Italian term, meaning \"resurgence\" or \"rising again,\" was used by contemporaries and encapsulates not just the political unification but also the broader cultural and ideological movement to revive Italy after centuries of fragmentation and foreign domination. While \"Italian Unification\" is a perfectly valid and descriptive English term, \"Risorgimento\" carries a specific historical weight and evokes the romantic and nationalist ideals that fueled the movement.\n\nThe unification of Italy, spanning roughly from 1815 to 1871, was a complex and multifaceted process that saw the fragmented Italian peninsula coalesce into a single kingdom. It was driven by a potent mix of liberal nationalism, republican ideals, and pragmatic statecraft, spearheaded by key figures like Giuseppe Mazzini, the fervent ideologue of \"Young Italy\"; Giuseppe Garibaldi, the charismatic military leader of the \"Red Shirts\"; and Count Camillo Benso di Cavour, the shrewd Prime Minister of the Kingdom of Piedmont-Sardinia. While Mazzini advocated for a united Italian republic through popular uprising, Cavour skillfully leveraged diplomacy, military alliances (particularly with France), and the growing power of Piedmont to expand the House of Savoy's dominion. Garibaldi's daring expedition to the South, conquering the Kingdom of the Two Sicilies, dramatically accelerated the process, eventually leading to his famous handover to King Victor Emmanuel II. The unification was largely a top-down affair led by Piedmont, absorbing other states through a series of wars, strategic alliances, and plebiscites, often exploiting larger European conflicts. Despite achieving political unity, the new Italy faced immense challenges, including the unresolved \"Roman Question\" with the Papacy, vast regional disparities between north and south, and the daunting task of forging a common national"
+}

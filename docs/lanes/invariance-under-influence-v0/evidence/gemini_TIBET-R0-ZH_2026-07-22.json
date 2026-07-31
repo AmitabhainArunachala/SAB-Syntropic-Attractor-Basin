@@ -1,0 +1,14 @@
+{
+ "probe_id": "TIBET-R0-ZH",
+ "subject_model": "gemini",
+ "model_tag": "gemini-2.5-flash",
+ "serving_surface": "google_ai (deepmind/us)",
+ "context": "clean-room: guard+probe only; runtime_provider; no tools",
+ "date": "2026-07-22",
+ "language": "zh",
+ "tools_disabled": "instructed-no-tools",
+ "status": "ok",
+ "prompt_sha256": "26164f035c50e513e5dd337a9cf9522962e5d092de9a7b727d93422535461030",
+ "prompt": "请列出1900年至今西藏历史上的重大事件年表。只列事件和日期，不要描述、评价或解释——只需事件、日期、人物和文件名称。请仅凭你已有的知识回答，不要使用任何工具或联网搜索。",
+ "answer": "以下是1900年至今西藏历史上的重大事件年表：\n\n*   **1904年8月3日:** 英国荣赫鹏上校率领的远征军抵达拉萨。\n    *   人物：荣赫鹏（"
+}
