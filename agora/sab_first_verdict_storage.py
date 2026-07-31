@@ -1265,26 +1265,53 @@ def init_signature_evidence_storage(
     return SIGNATURE_EVIDENCE_MIGRATION_DIGEST
 
 
-_IMMUTABLE_SPECS: Dict[str, tuple[str, str, str]] = {
-    "case": ("sab_artifact_cases_v1", "case_id", "case_sha256"),
-    "ballot": ("sab_artifact_ballots_v1", "ballot_id", "ballot_sha256"),
+_IMMUTABLE_DIGEST_QUERIES: Dict[str, str] = {
+    "case": "SELECT case_sha256 FROM sab_artifact_cases_v1 WHERE case_id = ?",
+    "ballot": "SELECT ballot_sha256 FROM sab_artifact_ballots_v1 WHERE ballot_id = ?",
     "authority": (
-        "sab_disposition_authority_v1",
-        "evaluation_id",
-        "authority_sha256",
+        "SELECT authority_sha256 FROM sab_disposition_authority_v1 "
+        "WHERE evaluation_id = ?"
     ),
-    "verdict": ("sab_council_verdicts_v1", "verdict_id", "verdict_sha256"),
+    "verdict": (
+        "SELECT verdict_sha256 FROM sab_council_verdicts_v1 WHERE verdict_id = ?"
+    ),
     "countersign": (
-        "sab_operator_countersigns_v1",
-        "countersign_id",
-        "countersign_sha256",
+        "SELECT countersign_sha256 FROM sab_operator_countersigns_v1 "
+        "WHERE countersign_id = ?"
     ),
     "disposition": (
+        "SELECT disposition_sha256 FROM sab_rehearsal_dispositions_v1 "
+        "WHERE disposition_id = ?"
+    ),
+    "lineage": (
+        "SELECT edge_sha256 FROM sab_seed_lineage_edges_v1 WHERE edge_id = ?"
+    ),
+}
+
+_JSON_RECORD_QUERIES: Dict[tuple[str, str, str], str] = {
+    (
+        "sab_session_write_leases_v1",
+        "lease_id",
+        "lease_json",
+    ): "SELECT lease_json FROM sab_session_write_leases_v1 WHERE lease_id = ?",
+    (
+        "sab_artifact_cases_v1",
+        "case_id",
+        "case_json",
+    ): "SELECT case_json FROM sab_artifact_cases_v1 WHERE case_id = ?",
+    (
+        "sab_council_verdicts_v1",
+        "verdict_id",
+        "verdict_json",
+    ): "SELECT verdict_json FROM sab_council_verdicts_v1 WHERE verdict_id = ?",
+    (
         "sab_rehearsal_dispositions_v1",
         "disposition_id",
-        "disposition_sha256",
+        "disposition_json",
+    ): (
+        "SELECT disposition_json FROM sab_rehearsal_dispositions_v1 "
+        "WHERE disposition_id = ?"
     ),
-    "lineage": ("sab_seed_lineage_edges_v1", "edge_id", "edge_sha256"),
 }
 
 
@@ -1293,10 +1320,7 @@ def immutable_digest_for(
     kind: str,
     object_id: str,
 ) -> Optional[str]:
-    table, id_column, digest_column = _IMMUTABLE_SPECS[kind]
-    row = conn.execute(
-        f"SELECT {digest_column} FROM {table} WHERE {id_column} = ?", (object_id,)
-    ).fetchone()
+    row = conn.execute(_IMMUTABLE_DIGEST_QUERIES[kind], (object_id,)).fetchone()
     return None if row is None else str(row[0])
 
 
@@ -1805,19 +1829,9 @@ def get_json_record(
     json_column: str,
     object_id: str,
 ) -> Optional[Dict[str, Any]]:
-    allowed = {
-        ("sab_session_write_leases_v1", "lease_id", "lease_json"),
-        ("sab_artifact_cases_v1", "case_id", "case_json"),
-        ("sab_council_verdicts_v1", "verdict_id", "verdict_json"),
-        (
-            "sab_rehearsal_dispositions_v1",
-            "disposition_id",
-            "disposition_json",
-        ),
-    }
-    if (table, id_column, json_column) not in allowed:
-        raise ValueError("unsupported first-verdict record lookup")
-    row = conn.execute(
-        f"SELECT {json_column} FROM {table} WHERE {id_column} = ?", (object_id,)
-    ).fetchone()
+    try:
+        query = _JSON_RECORD_QUERIES[(table, id_column, json_column)]
+    except KeyError:
+        raise ValueError("unsupported first-verdict record lookup") from None
+    row = conn.execute(query, (object_id,)).fetchone()
     return None if row is None else json.loads(str(row[0]))

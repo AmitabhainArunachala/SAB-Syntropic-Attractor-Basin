@@ -31,6 +31,7 @@ from agora.sab_first_verdict_storage import (
     activate_session_lease,
     ballot_set_sha256_for_case,
     canonical_json_text,
+    get_json_record,
     idempotency_lookup,
     immutable_digest_for,
     init_first_verdict_storage,
@@ -1634,6 +1635,29 @@ def test_immutable_identity_exact_replay_and_conflict(
     with pytest.raises(ImmutableConflict, match="different content"):
         require_immutable_identity(conn, kind, object_id, _digest(f"changed-{kind}"))
     assert immutable_digest_for(conn, kind, object_id) == digest
+
+
+def test_json_record_lookup_uses_only_frozen_identifier_combinations(
+    conn: sqlite3.Connection,
+) -> None:
+    records = _insert_graph(conn)
+    case_id, _ = records["case"]
+    assert get_json_record(
+        conn,
+        table="sab_artifact_cases_v1",
+        id_column="case_id",
+        json_column="case_json",
+        object_id=case_id,
+    ) is not None
+
+    with pytest.raises(ValueError, match="unsupported first-verdict record lookup"):
+        get_json_record(
+            conn,
+            table="sab_artifact_cases_v1 WHERE 1 = 1 --",
+            id_column="case_id",
+            json_column="case_json",
+            object_id=case_id,
+        )
 
 
 def test_idempotency_lookup_replays_exact_response_and_rejects_conflict(
