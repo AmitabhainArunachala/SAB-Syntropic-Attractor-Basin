@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sab.local/schemas/sab.agent_identity.v1.schema.json",
   "title": "SAB Agent Identity v1",
-  "description": "Portable public-key or resolvable identity record. Identity proves control of an identifier; it does not grant standing.",
+  "description": "Portable identity binding record. Registration associates a subject with a public verification key but does not prove private-key possession; possession requires verification of a signature over a specific payload. Identity does not grant standing.",
   "type": "object",
   "required": [
     "schema",
@@ -22,6 +22,13 @@
     "subject_id": {
       "type": "string",
       "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
+    },
+    "identity_ref": {
+      "description": "Optional stable reference to this identity record; it carries no authority or standing.",
+      "type": ["string", "null"],
+      "minLength": 16,
+      "maxLength": 200,
+      "pattern": "^sab_identity_[A-Za-z0-9_.:-]{3,}$"
     },
     "display_name": {
       "type": "string",

@@ -6,10 +6,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_DIR = REPO_ROOT / "nodes" / "schemas"
 FIXTURE_DIR = REPO_ROOT / "docs" / "lanes" / "sab-agent-seeding-v1" / "fixtures"
+IDENTITY_FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "sab_agent_identity"
 
 VALID_FIXTURE_NAMES = [
     "sab.agent_identity.v1.json",
@@ -97,6 +101,16 @@ def _validate(schema: dict[str, Any], value: Any, path: str = "$") -> list[str]:
         errors.append(f"{path}: expected one of {schema['enum']!r}")
 
     schema_type = schema.get("type")
+    if isinstance(schema_type, list):
+        if value is None and "null" in schema_type:
+            return errors
+        concrete_types = [item for item in schema_type if item != "null"]
+        if len(concrete_types) == 1:
+            concrete_schema = dict(schema)
+            concrete_schema["type"] = concrete_types[0]
+            return errors + _validate(concrete_schema, value, path)
+        return errors + [f"{path}: unsupported type union {schema_type!r}"]
+
     if schema_type == "object":
         if not isinstance(value, dict):
             return [f"{path}: expected object"]
@@ -205,3 +219,42 @@ def test_schema_terms_keep_identity_reputation_and_standing_separate() -> None:
     assert basis["properties"]["basis_type"]["const"] == "witnessed_challenge"
     assert basis["properties"]["external_attestation_effect"]["const"] == "none"
     assert {"challenge_event_refs", "witness_event_refs", "evidence_refs"} <= set(basis["required"])
+
+
+def test_identity_ref_schema_and_runtime_round_trip_fixtures() -> None:
+    from agora.sab_identity import AgentIdentityV1
+
+    schema = _load_json(SCHEMA_DIR / "sab.agent_identity.v1.schema.json")
+    assert "identity_ref" in schema["properties"]
+    assert "identity_ref" not in schema["required"]
+    assert "does not prove private-key possession" in schema["description"]
+
+    for name in ("canonical_with_identity_ref.json", "legacy_without_identity_ref.json"):
+        fixture = _load_json(IDENTITY_FIXTURE_DIR / "valid" / name)
+        assert _validate(schema, fixture) == []
+        identity = AgentIdentityV1.model_validate(fixture)
+        serialized = identity.model_dump(mode="json", by_alias=True, exclude_none=True)
+        assert serialized == fixture
+
+
+def test_identity_ref_malformed_fixture_is_rejected_by_schema_and_runtime() -> None:
+    from agora.sab_identity import AgentIdentityV1
+
+    schema = _load_json(SCHEMA_DIR / "sab.agent_identity.v1.schema.json")
+    fixture = _load_json(IDENTITY_FIXTURE_DIR / "invalid" / "identity_ref_wrong_prefix.json")
+    errors = _validate(schema, fixture)
+    assert "$.identity_ref: does not match pattern" in errors
+    with pytest.raises(ValidationError, match="identity_ref"):
+        AgentIdentityV1.model_validate(fixture)
+
+
+def test_canonical_subject_mismatch_fixture_is_rejected_by_runtime() -> None:
+    from agora.sab_identity import AgentIdentityV1
+
+    schema = _load_json(SCHEMA_DIR / "sab.agent_identity.v1.schema.json")
+    fixture = _load_json(IDENTITY_FIXTURE_DIR / "invalid" / "canonical_subject_mismatch.json")
+    # The public-key digest relationship is a semantic invariant enforced by
+    # the runtime model; the portable schema can only validate field shapes.
+    assert _validate(schema, fixture) == []
+    with pytest.raises(ValidationError, match="subject_id does not match Ed25519 public key"):
+        AgentIdentityV1.model_validate(fixture)

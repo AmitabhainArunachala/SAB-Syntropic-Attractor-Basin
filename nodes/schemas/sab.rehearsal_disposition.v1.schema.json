@@ -1,0 +1,251 @@
+{
+  "$defs": {
+    "AuthorizedDispositionAuthorityV1": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Effects",
+          "type": "array"
+        },
+        "artifact_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "authority_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Authority Refs",
+          "type": "array"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "evaluated_state_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evaluated State Hash",
+          "type": "string"
+        },
+        "evaluation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evaluation Id",
+          "type": "string"
+        },
+        "forbidden_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Effects",
+          "type": "array"
+        },
+        "live_eligible": {
+          "const": false,
+          "default": false,
+          "title": "Live Eligible",
+          "type": "boolean"
+        },
+        "policy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Sha256",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "result": {
+          "const": "Authorized",
+          "default": "Authorized",
+          "title": "Result",
+          "type": "string"
+        },
+        "schema": {
+          "const": "sab.disposition_authority.v1",
+          "default": "sab.disposition_authority.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "scope": {
+          "const": "Copy",
+          "default": "Copy",
+          "title": "Scope",
+          "type": "string"
+        },
+        "standing_effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Standing Effect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evaluation_id",
+        "artifact_id",
+        "authority_refs",
+        "policy_sha256",
+        "content_sha256",
+        "evaluated_state_hash",
+        "reason_codes"
+      ],
+      "title": "AuthorizedDispositionAuthorityV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.rehearsal_disposition.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Immutable Copy disposition receipt; it is not an effect capability.\n\nThe lifecycle can persist this receipt only after independently obtaining\nan evaluator-sealed authority and checking the receipt against that exact\nvalue.  Deserialization deliberately recreates data, never authority.",
+  "properties": {
+    "after_state_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "After State Hash",
+      "type": "string"
+    },
+    "applied_at": {
+      "format": "date-time",
+      "title": "Applied At",
+      "type": "string"
+    },
+    "authority": {
+      "$ref": "#/$defs/AuthorizedDispositionAuthorityV1"
+    },
+    "ballot_source": {
+      "const": "fixture_model",
+      "default": "fixture_model",
+      "title": "Ballot Source",
+      "type": "string"
+    },
+    "before_state_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Before State Hash",
+      "type": "string"
+    },
+    "case_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Case Sha256",
+      "type": "string"
+    },
+    "copied_database_id": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Copied Database Id",
+      "type": "string"
+    },
+    "countersign_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Countersign Id",
+      "type": "string"
+    },
+    "countersign_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Countersign Sha256",
+      "type": "string"
+    },
+    "disposition_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Disposition Id",
+      "type": "string"
+    },
+    "effects": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Effects",
+      "type": "array"
+    },
+    "evidence_provenance": {
+      "const": "fixture_models",
+      "default": "fixture_models",
+      "title": "Evidence Provenance",
+      "type": "string"
+    },
+    "live_eligible": {
+      "const": false,
+      "default": false,
+      "title": "Live Eligible",
+      "type": "boolean"
+    },
+    "proof_class": {
+      "const": "copied_live_db_rehearsal",
+      "default": "copied_live_db_rehearsal",
+      "title": "Proof Class",
+      "type": "string"
+    },
+    "schema": {
+      "const": "sab.rehearsal_disposition.v1",
+      "default": "sab.rehearsal_disposition.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "scope": {
+      "const": "Copy",
+      "default": "Copy",
+      "title": "Scope",
+      "type": "string"
+    },
+    "source_fixture_id": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Source Fixture Id",
+      "type": "string"
+    },
+    "standing_effect": {
+      "const": "none",
+      "default": "none",
+      "title": "Standing Effect",
+      "type": "string"
+    },
+    "verdict_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Verdict Id",
+      "type": "string"
+    },
+    "verdict_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Verdict Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "disposition_id",
+    "verdict_id",
+    "verdict_sha256",
+    "case_id",
+    "case_sha256",
+    "authority",
+    "countersign_id",
+    "countersign_sha256",
+    "effects",
+    "source_fixture_id",
+    "copied_database_id",
+    "before_state_hash",
+    "after_state_hash",
+    "applied_at"
+  ],
+  "title": "RehearsalDispositionV1",
+  "type": "object"
+}

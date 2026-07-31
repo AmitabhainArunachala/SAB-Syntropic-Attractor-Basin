@@ -31,6 +31,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from agora.sab_identity import subject_id_from_public_key  # noqa: E402
+
 
 @dataclass(frozen=True)
 class AgentFixture:
@@ -132,7 +134,7 @@ def _agent(label: str) -> AgentFixture:
     else:
         signing_key = secrets.token_bytes(32)
         public_key = hashlib.sha256(signing_key).hexdigest()
-    subject_id = f"agent_ed25519_{hashlib.sha256(public_key.encode()).hexdigest()[:16]}"
+    subject_id = subject_id_from_public_key(public_key)
     return AgentFixture(
         label=label,
         signing_key=signing_key,

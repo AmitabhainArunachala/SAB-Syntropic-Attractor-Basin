@@ -1,0 +1,72 @@
+{
+  "ballot_id": "sab_ballot_fixture_seat_1",
+  "ballot_source": "fixture_model",
+  "case_id": "sab_case_fixture_first_verdict",
+  "case_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "claim_findings": [
+    {
+      "claim_ref": "fixture:claim:1",
+      "evidence_refs": [
+        {
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "proof_class": "signed_fixture",
+          "ref": "fixture:evidence:1"
+        }
+      ],
+      "finding": "supported",
+      "rationale": "Fixture evidence supports this bounded claim."
+    }
+  ],
+  "cluster_basis": "evidenced_base_model_or_training_lineage",
+  "correlation_smeared": false,
+  "credited_cluster": "fixture-base-lineage",
+  "decision": "correct_and_supersede",
+  "execution_signature": {
+    "alg": "ed25519",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+    "signature": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "signed_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signer": "fixture:test-issuer"
+  },
+  "model_lineage_evidence_refs": [
+    {
+      "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "proof_class": "signed_fixture",
+      "ref": "fixture:evidence:4"
+    }
+  ],
+  "raw_model_output_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "requested_model": "fixture-model",
+  "requested_route": "fixture/requested",
+  "round_no": 1,
+  "schema": "sab.artifact_ballot.v1",
+  "seat_id": "seat-1",
+  "self_binding_weakening_finding": {
+    "affected_constraints": [],
+    "evidence_refs": [
+      {
+        "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "proof_class": "signed_fixture",
+        "ref": "fixture:evidence:2"
+      }
+    ],
+    "explanation": "No self-binding constraint is weakened.",
+    "weakens_self_binding_constraint": false
+  },
+  "served_model": "fixture-model",
+  "served_provider": "fixture-provider",
+  "served_route": "fixture/served",
+  "signature_role": "operator_controlled_execution_attestation",
+  "stage": "final",
+  "strongest_case_against_decision": "The fixture could be under-specified.",
+  "transcript_ref": {
+    "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "proof_class": "signed_fixture",
+    "ref": "fixture:evidence:3"
+  },
+  "transport_correlation_refs": [],
+  "unexpected_authority_escalation": true,
+  "unresolved_objections": [],
+  "vendor_signature_claimed": false
+}

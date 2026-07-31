@@ -97,14 +97,22 @@ class OperatorBacking(BaseModel):
 class AgentIdentityV1(BaseModel):
     """Runtime model for `sab.agent_identity.v1`.
 
-    This proves public-key control and operator disclosure. It does not prove
-    truth, witness independence, permission, standing, or canon.
+    This records a public verification key and operator disclosure. Registration
+    alone does not prove possession of the corresponding private key, truth,
+    witness independence, permission, standing, or canon. Key possession is
+    established only for a payload whose Ed25519 signature is actually checked.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     schema_: Literal["sab.agent_identity.v1"] = Field(AGENT_IDENTITY_SCHEMA, alias="schema")
     subject_id: str = Field(..., min_length=8, max_length=160)
+    identity_ref: Optional[str] = Field(
+        default=None,
+        min_length=16,
+        max_length=200,
+        pattern=r"^sab_identity_[A-Za-z0-9_.:-]{3,}$",
+    )
     display_name: str = Field(..., min_length=1, max_length=120)
     identity_rail: Literal["ed25519"] = "ed25519"
     public_key: str = Field(..., min_length=64, max_length=128)
@@ -124,6 +132,13 @@ class AgentIdentityV1(BaseModel):
     @classmethod
     def required_text(cls, value: str, info: Any) -> str:
         return _non_empty_string(value, str(info.field_name))
+
+    @field_validator("identity_ref", mode="before")
+    @classmethod
+    def normalize_identity_ref(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     @field_validator("evidence_refs")
     @classmethod
@@ -145,6 +160,7 @@ class AgentIdentityV1(BaseModel):
         *,
         display_name: str,
         public_key: str,
+        identity_ref: Optional[str] = None,
         controller: Literal["self", "operator", "org", "unknown"] = "unknown",
         operator_backing: Optional[OperatorBacking] = None,
         created_at: Optional[datetime] = None,
@@ -152,6 +168,7 @@ class AgentIdentityV1(BaseModel):
     ) -> "AgentIdentityV1":
         return cls(
             subject_id=subject_id_from_public_key(public_key),
+            identity_ref=identity_ref,
             display_name=display_name,
             public_key=public_key,
             controller=controller,

@@ -5,13 +5,9 @@ docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/
 against a temporary database: register x3 -> seed -> challenge -> respond
 (scope narrowing) -> witness affirm -> chain verify -> standing lease review.
 
-Also documents, as an xfail, one remaining defect found during the run:
-- D1: /api/v1/agents/register output is rejected by the canonical
-  AgentIdentityV1 model (extra `identity_ref` field + subject_id derived with
-  sha256[:16] in agora/sab_seeding_api.py vs [:32] in agora/sab_identity.py).
-
-D2 (witness_plan.forbidden_witnesses unenforced) was closed by build 3;
-its former xfail now runs as a real regression test below.
+D1 (registration/canonical identity round trip) and D2
+(witness_plan.forbidden_witnesses enforcement) are locked as real regression
+tests below.
 """
 from __future__ import annotations
 
@@ -294,20 +290,78 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
     assert final_seed["state"] == "standing_active"
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "D1: /api/v1/agents/register response is rejected by AgentIdentityV1 "
-        "(extra identity_ref field; subject_id sha256[:16] in sab_seeding_api.py:_subject_id_for_public_key "
-        "vs [:32] in sab_identity.py:subject_id_from_public_key)"
-    ),
-)
 def test_register_response_round_trips_through_canonical_identity_model(client: TestClient) -> None:
-    from agora.sab_identity import AgentIdentityV1
+    from agora.sab_identity import AgentIdentityV1, subject_id_from_public_key
 
     agent = _Agent()
     body = _register(client, agent, "dogfood-regression-identity")
-    AgentIdentityV1.model_validate(body)
+    identity = AgentIdentityV1.model_validate(body)
+
+    assert identity.subject_id == subject_id_from_public_key(agent.public_key)
+    assert len(identity.subject_id.removeprefix("agent_ed25519_")) == 32
+    assert identity.identity_ref == f"sab_identity_{identity.subject_id}"
+
+
+def test_register_preserves_explicit_named_legacy_subject(client: TestClient) -> None:
+    from agora.sab_identity import AgentIdentityV1
+
+    agent = _Agent()
+    legacy_subject = "agent_claude_fable_5"
+    legacy_ref = f"sab_identity_{legacy_subject}"
+    response = client.post(
+        "/api/v1/agents/register",
+        json={
+            "schema": "sab.agent_identity.v1",
+            "subject_id": legacy_subject,
+            "identity_ref": legacy_ref,
+            "display_name": "Fable legacy identity",
+            "identity_rail": "ed25519",
+            "public_key": agent.public_key,
+            "controller": "operator",
+            "operator_backing": {
+                "operator_id": "operator_dogfood_regression",
+                "operator_kind": "human",
+                "disclosure": "explicit legacy subject compatibility fixture",
+                "backing_count_attestation": "self_attested",
+            },
+            "external_attestations": [],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    identity = AgentIdentityV1.model_validate(response.json())
+    assert identity.subject_id == legacy_subject
+    assert identity.identity_ref == legacy_ref
+
+
+def test_register_rejects_noncanonical_ed25519_subject_alias(client: TestClient) -> None:
+    agent = _Agent()
+    obsolete_subject = f"agent_ed25519_{hashlib.sha256(agent.public_key.encode()).hexdigest()[:16]}"
+    response = client.post(
+        "/api/v1/agents/register",
+        json={
+            "schema": "sab.agent_identity.v1",
+            "subject_id": obsolete_subject,
+            "display_name": "obsolete sixteen character identity",
+            "identity_rail": "ed25519",
+            "public_key": agent.public_key,
+            "controller": "operator",
+            "operator_backing": {
+                "operator_id": "operator_dogfood_regression",
+                "operator_kind": "human",
+                "disclosure": "negative canonical namespace fixture",
+                "backing_count_attestation": "self_attested",
+            },
+            "external_attestations": [],
+        },
+    )
+
+    assert response.status_code in {400, 422}, response.text
+    rejected_home = client.get(
+        "/api/v1/agents/me/home",
+        params={"subject_id": obsolete_subject},
+    )
+    assert rejected_home.status_code == 404
 
 
 def test_claimant_self_witness_is_rejected_when_seed_forbids_it(client: TestClient) -> None:

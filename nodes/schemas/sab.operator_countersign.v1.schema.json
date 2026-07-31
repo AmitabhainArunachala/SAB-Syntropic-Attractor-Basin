@@ -1,0 +1,262 @@
+{
+  "$defs": {
+    "AllowedOperationV1": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 240,
+          "minLength": 1,
+          "pattern": "^/[^\\s]*$",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "path"
+      ],
+      "title": "AllowedOperationV1",
+      "type": "object"
+    },
+    "ContractSignatureV1": {
+      "additionalProperties": false,
+      "properties": {
+        "alg": {
+          "const": "ed25519",
+          "default": "ed25519",
+          "title": "Alg",
+          "type": "string"
+        },
+        "canonicalization": {
+          "const": "json-sort-keys-compact-v1",
+          "default": "json-sort-keys-compact-v1",
+          "title": "Canonicalization",
+          "type": "string"
+        },
+        "public_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Public Key",
+          "type": "string"
+        },
+        "signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Signature",
+          "type": "string"
+        },
+        "signed_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Signed Payload Sha256",
+          "type": "string"
+        },
+        "signer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Signer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "signer",
+        "public_key",
+        "signature",
+        "signed_payload_sha256"
+      ],
+      "title": "ContractSignatureV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.operator_countersign.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowed_operations": {
+      "items": {
+        "$ref": "#/$defs/AllowedOperationV1"
+      },
+      "minItems": 1,
+      "title": "Allowed Operations",
+      "type": "array"
+    },
+    "allowed_operations_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Allowed Operations Sha256",
+      "type": "string"
+    },
+    "authority_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authority Digest",
+      "type": "string"
+    },
+    "case_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Case Sha256",
+      "type": "string"
+    },
+    "code_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Code Sha",
+      "type": "string"
+    },
+    "countersign_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Countersign Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "decision": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Decision",
+      "type": "string"
+    },
+    "effect_payload": {
+      "additionalProperties": true,
+      "title": "Effect Payload",
+      "type": "object"
+    },
+    "effect_payload_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Effect Payload Sha256",
+      "type": "string"
+    },
+    "expected_case_head": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Expected Case Head",
+      "type": "string"
+    },
+    "expected_lifecycle_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Expected Lifecycle Fingerprint",
+      "type": "string"
+    },
+    "expected_seed_state": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Expected Seed State",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "lease_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Lease Sha256",
+      "type": "string"
+    },
+    "live_eligible": {
+      "const": false,
+      "default": false,
+      "title": "Live Eligible",
+      "type": "boolean"
+    },
+    "schema": {
+      "const": "sab.operator_countersign.v1",
+      "default": "sab.operator_countersign.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "scope": {
+      "const": "Copy",
+      "default": "Copy",
+      "title": "Scope",
+      "type": "string"
+    },
+    "signature": {
+      "$ref": "#/$defs/ContractSignatureV1"
+    },
+    "signer_kind": {
+      "const": "fixture_ephemeral",
+      "default": "fixture_ephemeral",
+      "title": "Signer Kind",
+      "type": "string"
+    },
+    "standing_effect": {
+      "const": "none",
+      "default": "none",
+      "title": "Standing Effect",
+      "type": "string"
+    },
+    "successor_envelope_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Successor Envelope Sha256"
+    },
+    "target_seed_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Target Seed Id",
+      "type": "string"
+    },
+    "verdict_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Verdict Id",
+      "type": "string"
+    },
+    "verdict_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Verdict Sha256",
+      "type": "string"
+    },
+    "write_lease_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Write Lease Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "countersign_id",
+    "verdict_id",
+    "verdict_sha256",
+    "case_id",
+    "case_sha256",
+    "target_seed_id",
+    "decision",
+    "expected_seed_state",
+    "expected_case_head",
+    "expected_lifecycle_fingerprint",
+    "effect_payload",
+    "effect_payload_sha256",
+    "write_lease_id",
+    "lease_sha256",
+    "authority_digest",
+    "allowed_operations",
+    "allowed_operations_sha256",
+    "code_sha",
+    "created_at",
+    "expires_at",
+    "signature"
+  ],
+  "title": "OperatorCountersignV1",
+  "type": "object"
+}

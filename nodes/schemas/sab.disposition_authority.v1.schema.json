@@ -1,0 +1,340 @@
+{
+  "$defs": {
+    "AdvisoryOnlyDispositionAuthorityV1": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Effects",
+          "type": "array"
+        },
+        "artifact_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "authority_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Authority Refs",
+          "type": "array"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "evaluated_state_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evaluated State Hash",
+          "type": "string"
+        },
+        "evaluation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evaluation Id",
+          "type": "string"
+        },
+        "forbidden_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Effects",
+          "type": "array"
+        },
+        "live_eligible": {
+          "title": "Live Eligible",
+          "type": "boolean"
+        },
+        "policy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Sha256",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "result": {
+          "const": "AdvisoryOnly",
+          "default": "AdvisoryOnly",
+          "title": "Result",
+          "type": "string"
+        },
+        "schema": {
+          "const": "sab.disposition_authority.v1",
+          "default": "sab.disposition_authority.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/DispositionScope"
+        },
+        "standing_effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Standing Effect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evaluation_id",
+        "artifact_id",
+        "scope",
+        "authority_refs",
+        "policy_sha256",
+        "content_sha256",
+        "evaluated_state_hash",
+        "reason_codes",
+        "live_eligible"
+      ],
+      "title": "AdvisoryOnlyDispositionAuthorityV1",
+      "type": "object"
+    },
+    "AuthorizedDispositionAuthorityV1": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Effects",
+          "type": "array"
+        },
+        "artifact_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "authority_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Authority Refs",
+          "type": "array"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "evaluated_state_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evaluated State Hash",
+          "type": "string"
+        },
+        "evaluation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evaluation Id",
+          "type": "string"
+        },
+        "forbidden_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Effects",
+          "type": "array"
+        },
+        "live_eligible": {
+          "const": false,
+          "default": false,
+          "title": "Live Eligible",
+          "type": "boolean"
+        },
+        "policy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Sha256",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "result": {
+          "const": "Authorized",
+          "default": "Authorized",
+          "title": "Result",
+          "type": "string"
+        },
+        "schema": {
+          "const": "sab.disposition_authority.v1",
+          "default": "sab.disposition_authority.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "scope": {
+          "const": "Copy",
+          "default": "Copy",
+          "title": "Scope",
+          "type": "string"
+        },
+        "standing_effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Standing Effect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evaluation_id",
+        "artifact_id",
+        "authority_refs",
+        "policy_sha256",
+        "content_sha256",
+        "evaluated_state_hash",
+        "reason_codes"
+      ],
+      "title": "AuthorizedDispositionAuthorityV1",
+      "type": "object"
+    },
+    "DispositionScope": {
+      "enum": [
+        "Copy",
+        "Live",
+        "All"
+      ],
+      "title": "DispositionScope",
+      "type": "string"
+    },
+    "NoJurisdictionDispositionAuthorityV1": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Effects",
+          "type": "array"
+        },
+        "artifact_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "authority_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Authority Refs",
+          "type": "array"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "evaluated_state_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evaluated State Hash",
+          "type": "string"
+        },
+        "evaluation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evaluation Id",
+          "type": "string"
+        },
+        "forbidden_effects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Effects",
+          "type": "array"
+        },
+        "live_eligible": {
+          "title": "Live Eligible",
+          "type": "boolean"
+        },
+        "policy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Sha256",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "result": {
+          "const": "NoJurisdiction",
+          "default": "NoJurisdiction",
+          "title": "Result",
+          "type": "string"
+        },
+        "schema": {
+          "const": "sab.disposition_authority.v1",
+          "default": "sab.disposition_authority.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/DispositionScope"
+        },
+        "standing_effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Standing Effect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evaluation_id",
+        "artifact_id",
+        "scope",
+        "authority_refs",
+        "policy_sha256",
+        "content_sha256",
+        "evaluated_state_hash",
+        "reason_codes",
+        "live_eligible"
+      ],
+      "title": "NoJurisdictionDispositionAuthorityV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://sab.local/schemas/sab.disposition_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "AdvisoryOnly": "#/$defs/AdvisoryOnlyDispositionAuthorityV1",
+      "Authorized": "#/$defs/AuthorizedDispositionAuthorityV1",
+      "NoJurisdiction": "#/$defs/NoJurisdictionDispositionAuthorityV1"
+    },
+    "propertyName": "result"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/AuthorizedDispositionAuthorityV1"
+    },
+    {
+      "$ref": "#/$defs/AdvisoryOnlyDispositionAuthorityV1"
+    },
+    {
+      "$ref": "#/$defs/NoJurisdictionDispositionAuthorityV1"
+    }
+  ]
+}

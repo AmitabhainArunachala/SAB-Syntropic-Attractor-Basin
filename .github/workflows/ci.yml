@@ -15,6 +15,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        # First-verdict tests verify signed source bytes at a pinned ancestor.
+        fetch-depth: 0
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5

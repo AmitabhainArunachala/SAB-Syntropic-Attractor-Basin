@@ -1,0 +1,48 @@
+{
+  "after_state_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "applied_at": "2026-07-27T15:00:00Z",
+  "authority": {
+    "allowed_effects": [
+      "challenge:resolve",
+      "seed:supersede"
+    ],
+    "artifact_id": "sab_seed_fixture_first_verdict",
+    "authority_refs": [
+      "fixture:signed-policy"
+    ],
+    "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "evaluated_state_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "evaluation_id": "sab_authority_fixture_copy",
+    "forbidden_effects": [],
+    "live_eligible": false,
+    "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "reason_codes": [
+      "signed_policy_authorizes_exact_scope_and_effects"
+    ],
+    "result": "Authorized",
+    "schema": "sab.disposition_authority.v1",
+    "scope": "Copy",
+    "standing_effect": "none"
+  },
+  "ballot_source": "fixture_model",
+  "before_state_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "case_id": "sab_case_fixture_first_verdict",
+  "case_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "copied_database_id": "copy:sha256:fixture",
+  "countersign_id": "sab_countersign_fixture",
+  "countersign_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "disposition_id": "sab_rehearsal_fixture",
+  "effects": [
+    "challenge:resolve",
+    "seed:supersede"
+  ],
+  "evidence_provenance": "fixture_models",
+  "live_eligible": false,
+  "proof_class": "copied_live_db_rehearsal",
+  "schema": "sab.rehearsal_disposition.v1",
+  "scope": "Copy",
+  "source_fixture_id": "fixture:first-verdict",
+  "standing_effect": "none",
+  "verdict_id": "sab_verdict_fixture",
+  "verdict_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

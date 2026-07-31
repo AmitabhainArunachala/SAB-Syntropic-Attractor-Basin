@@ -1,0 +1,24 @@
+{
+  "allowed_effects": [
+    "challenge:resolve",
+    "seed:supersede"
+  ],
+  "artifact_id": "sab_seed_fixture_first_verdict",
+  "authority_refs": [
+    "fixture:signed-policy"
+  ],
+  "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "evaluated_state_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evaluation_id": "sab_authority_fixture_copy",
+  "forbidden_effects": [],
+  "live_eligible": false,
+  "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reason_codes": [
+    "signed_policy_authorizes_exact_scope_and_effects"
+  ],
+  "result": "Authorized",
+  "schema": "sab.disposition_authority.v1",
+  "scope": "Copy",
+  "standing_effect": "none",
+  "unexpected_authority_escalation": true
+}

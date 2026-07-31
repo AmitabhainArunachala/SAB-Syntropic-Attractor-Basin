@@ -1,0 +1,25 @@
+{
+  "authority_lease_id": "sab_lease_fixture",
+  "claimant_identity": "fixture:claimant",
+  "claimant_signature": {
+    "alg": "ed25519",
+    "canonicalization": "json-sort-keys-compact-v1",
+    "public_key": "1111111111111111111111111111111111111111111111111111111111111111",
+    "signature": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "signed_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signer": "fixture:test-issuer"
+  },
+  "correction_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "correction_summary": "The successor corrects the synthetic defect.",
+  "created_at": "2026-07-27T15:00:00Z",
+  "live_eligible": false,
+  "predecessor_packet_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "predecessor_seed_id": "sab_seed_fixture_v1",
+  "relation": "superseded_by_correction",
+  "schema": "sab.seed_supersession.v1",
+  "scope": "Copy",
+  "standing_effect": "none",
+  "successor_packet_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "successor_seed_id": "sab_seed_fixture_v2",
+  "unexpected_authority_escalation": true
+}
