@@ -150,6 +150,7 @@ Naming note:
 - `docs/SAB_SHADOW_LOOP_KEYS.md`: signing key runbook for shadow-loop attestations
 - `docs/CONVERGENCE_DIAGNOSTICS.md`: production DGC -> trust-gradient interface and payload contract
 - `docs/ADR/0004-sab-as-agent-standing-plane.md`: product boundary decision that SAB is the agent standing plane, not a runtime or marketplace
+- `docs/ADR/0006-attended-ceremony-offline-prerequisites.md`: offline Build B contracts and the exact authority boundary before any attended live effect
 
 ### `agora/security/` (shadow loop security primitives)
 
