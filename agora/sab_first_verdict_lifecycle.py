@@ -460,7 +460,10 @@ def table_content_digest(
         raise ValueError("unsafe table name")
     if exclude_column is not None and not _TABLE_NAME.fullmatch(exclude_column):
         raise ValueError("unsafe column name")
-    cursor = conn.execute(f'SELECT * FROM "{table}"')
+    # SQLite does not support bound parameters for identifiers.  The strict
+    # ASCII allowlist above excludes quotes, whitespace, comments, and every
+    # SQL metacharacter before this identifier is interpolated and quoted.
+    cursor = conn.execute(f'SELECT * FROM "{table}"')  # nosec B608
     columns = [item[0] for item in cursor.description or ()]
     if exclude_column is not None and exclude_column not in columns:
         raise ValueError(f"unknown exclusion column {exclude_column} for {table}")

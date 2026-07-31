@@ -284,6 +284,24 @@ def _database_digest(conn: sqlite3.Connection) -> str:
     )
 
 
+@pytest.mark.parametrize(
+    ("table", "exclude_column", "message"),
+    (
+        ('web_agents"; DROP TABLE web_agents; --', None, "unsafe table name"),
+        ("web_agents", 'agent_id" OR 1=1 --', "unsafe column name"),
+    ),
+)
+def test_table_content_digest_rejects_sql_identifier_injection(
+    table: str,
+    exclude_column: str | None,
+    message: str,
+) -> None:
+    conn = _connect()
+    with pytest.raises(ValueError, match=message):
+        table_content_digest(conn, table, exclude_column=exclude_column)
+    assert conn.execute("SELECT COUNT(*) FROM web_agents").fetchone() == (1,)
+
+
 def _backup_fixture_to_path(fixture: "LifecycleFixture", destination: Path) -> None:
     copied = sqlite3.connect(destination)
     try:
