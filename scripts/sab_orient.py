@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -130,8 +130,8 @@ def _artifact_identity(repo_root: Path) -> dict:
     }
 
 
-JsonGetter = Callable[[str, str, float], tuple[int | None, object]]
-UrlProbe = Callable[[str, str, float], tuple[int | None, str, str]]
+JsonGetter = Callable[[str, str, float], tuple[Optional[int], object]]
+UrlProbe = Callable[[str, str, float], tuple[Optional[int], str, str]]
 
 
 class _CrossOriginRedirectError(Exception):
