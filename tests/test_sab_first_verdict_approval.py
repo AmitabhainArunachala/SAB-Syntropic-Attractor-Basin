@@ -1,162 +1,346 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
+from agora.sab_artifact_verdict import canonical_sha256
 from agora.sab_first_verdict_approval import (
+    SIGNING_INSTRUCTION,
+    SIGNING_INSTRUCTION_SHA256,
     ApprovalPacketError,
+    CeremonyApprovalEvidence,
+    bind_operator_approval_evidence,
     build_operator_approval_packet,
     canonical_packet_json,
     render_operator_approval_markdown,
     short_display_checksum,
     verify_operator_approval_packet,
 )
+from agora.sab_first_verdict_ceremony import (
+    StructurallyCompleteAwaitingAuthority,
+)
+from tests.test_sab_attended_ceremony_e2e import (
+    ARTIFACT_ID,
+    CASE_ID,
+    build_attended_ceremony_fixture,
+)
 
 
-SHA_A = "a" * 64
-SHA_B = "b" * 64
-SHA_C = "c" * 64
-GIT_A = "a" * 40
-GIT_B = "b" * 40
+@pytest.fixture(scope="module")
+def complete_fixture() -> dict[str, Any]:
+    return build_attended_ceremony_fixture()
 
 
-def _envelope() -> dict:
-    return {
-        "schema_version": "sab.ceremony_approval_envelope.v1",
-        "ceremony_id": "ceremony-fixture-1",
-        "prepared_at": "2026-07-31T15:00:00Z",
-        "requested_scope": "Live",
-        "code": {
-            "commit_sha": GIT_A,
-            "tree_sha": GIT_B,
-            "build_a_closeout_sha256": SHA_A,
-        },
-        "authority": {
-            "case_id": "case-fixture-1",
-            "case_sha256": SHA_A,
-            "policy_sha256": SHA_B,
-            "authority_evaluation_sha256": SHA_C,
-            "authority_result": "Authorized<Live>",
-        },
-        "bench": {
-            "frozen_manifest_sha256": SHA_A,
-            "provider_probe_bundle_sha256": SHA_B,
-            "cost_envelope_sha256": SHA_C,
-            "transcript_head_sha256": SHA_A,
-            "final_ballot_set_sha256": SHA_B,
-            "compiled_outcome_kind": "verdict",
-            "compiled_outcome_sha256": SHA_C,
-        },
-        "maintenance": {
-            "runtime_attestation_sha256": SHA_A,
-            "service_state_snapshot_sha256": SHA_B,
-            "tick_exclusion_receipt_sha256": SHA_C,
-            "restoration_plan_sha256": SHA_A,
-            "write_lease_sha256": SHA_B,
-        },
-        "proposed_effect": {
-            "effect_type": "seed:supersede",
-            "effect_payload_sha256": SHA_C,
-            "idempotency_key": "first-verdict-fixture-1",
-        },
-        "operator_limits": {
-            "public_key_fingerprint": SHA_A,
-            "spend_cap_usd": "12.50",
-            "automatic_top_up": False,
-        },
-    }
+def _closeout_bytes(
+    complete_fixture: dict[str, Any],
+    *path_and_value: Any,
+) -> bytes:
+    payload = json.loads(complete_fixture["build_a_closeout_bytes"])
+    *path, value = path_and_value
+    target = payload
+    for part in path[:-1]:
+        target = target[part]
+    target[path[-1]] = value
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
-def test_packet_is_deterministic_unsigned_and_non_authorizing() -> None:
-    first = build_operator_approval_packet(_envelope())
-    second = build_operator_approval_packet(copy.deepcopy(_envelope()))
+def test_packet_is_deterministic_unsigned_and_non_authorizing(
+    complete_fixture: dict[str, Any],
+) -> None:
+    first = complete_fixture["packet"]
+    second = build_operator_approval_packet(complete_fixture["evidence"])
 
     assert canonical_packet_json(first) == canonical_packet_json(second)
     assert first["status"] == "awaiting_operator_countersign"
     assert first["operator_signature"] is None
     assert first["effect_executable"] is False
+    assert first["live_authority_created"] is False
+    assert first["signing_instruction"] == SIGNING_INSTRUCTION
+    assert first["signing_instruction_sha256"] == SIGNING_INSTRUCTION_SHA256
     assert first["short_display_checksum"] == short_display_checksum(
         first["approval_payload_sha256"]
     )
 
     verified = verify_operator_approval_packet(first)
-    assert verified["valid"] is True
+    assert verified["packet_integrity_valid"] is True
+    assert verified["evidence_reverified"] is False
     assert verified["live_authority_created"] is False
     assert verified["effect_executable"] is False
 
 
-def test_markdown_requires_full_digest_and_demotes_short_checksum() -> None:
-    packet = build_operator_approval_packet(_envelope())
+def test_payload_exposes_distinct_code_roots_closed_proposals_and_trust_sets(
+    complete_fixture: dict[str, Any],
+) -> None:
+    payload = complete_fixture["packet"]["approval_payload"]
+    code = payload["code"]
+    assert code["runtime_commit_sha"] == "a" * 40
+    assert code["build_a_merge_commit"] == "b" * 40
+    assert code["runtime_commit_sha"] != code["build_a_merge_commit"]
+    assert code["build_a_merge_tree"] == "c" * 40
+    assert (
+        code["build_a_closeout_sha256"]
+        == hashlib.sha256(complete_fixture["build_a_closeout_bytes"]).hexdigest()
+    )
+
+    proposals = {
+        item["proposal"]["effect_type"]: item for item in payload["proposed_effects"]
+    }
+    assert set(proposals) == {"challenge:resolve", "seed:supersede"}
+    assert proposals["challenge:resolve"]["proposal"]["target_id"] == CASE_ID
+    assert proposals["seed:supersede"]["proposal"]["target_id"] == ARTIFACT_ID
+    for item in proposals.values():
+        proposal = item["proposal"]
+        assert proposal["schema_version"] == "sab.ceremony_effect_proposal.v1"
+        assert proposal["effect_executable"] is False
+        assert proposal["standing_effect"] == "none"
+        assert item["proposal_sha256"] == canonical_sha256(proposal)
+
+    anchors = payload["trust_anchors"]
+    ceremony = complete_fixture["ceremony"]
+    assert (
+        tuple(anchors["frozen_trust_anchor_set_sha256s"])
+        == ceremony["frozen_readiness"].trust_anchor_set_sha256s
+    )
+    assert (
+        tuple(anchors["live_trust_anchor_set_sha256s"])
+        == ceremony["live_readiness"].trust_anchor_set_sha256s
+    )
+
+
+def test_markdown_requires_full_digest_and_shows_exact_evidence_roots(
+    complete_fixture: dict[str, Any],
+) -> None:
+    packet = complete_fixture["packet"]
     rendered = render_operator_approval_markdown(packet)
 
     assert packet["approval_payload_sha256"] in rendered
     assert packet["short_display_checksum"] in rendered
-    assert "Do not sign the short checksum" in rendered
-    assert "non-authorizing" in rendered
-    assert "awaiting_operator_countersign" in rendered
+    assert SIGNING_INSTRUCTION in rendered
+    assert "Build A merge commit" in rendered
+    assert "Build B runtime commit" in rendered
+    assert "Out-of-band trust-anchor set digests" in rendered
+    for digest in packet["approval_payload"]["trust_anchors"][
+        "live_trust_anchor_set_sha256s"
+    ]:
+        assert digest in rendered
+    for item in packet["approval_payload"]["proposed_effects"]:
+        assert item["proposal_sha256"] in rendered
+        assert item["proposal"]["target_id"] in rendered
+    assert ("Authorized" + "<Live>") not in rendered
 
 
-def test_payload_tampering_and_extra_packet_fields_fail_closed() -> None:
-    packet = build_operator_approval_packet(_envelope())
-    changed = copy.deepcopy(packet)
-    changed["approval_payload"]["operator_limits"]["spend_cap_usd"] = "99.00"
+def test_raw_mapping_and_forged_evidence_cannot_construct_packet(
+    complete_fixture: dict[str, Any],
+) -> None:
+    with pytest.raises(TypeError, match="evaluator-constructed"):
+        CeremonyApprovalEvidence()
+
+    with pytest.raises(ApprovalPacketError) as raised:
+        build_operator_approval_packet({})  # type: ignore[arg-type]
+    assert raised.value.code == "approval_evidence_not_locally_bound"
+
+    evidence = complete_fixture["evidence"]
+    forged = object.__new__(CeremonyApprovalEvidence)
+    object.__setattr__(forged, "_payload", evidence._payload)
+    object.__setattr__(forged, "_payload_sha256", evidence._payload_sha256)
+    with pytest.raises(ApprovalPacketError) as raised:
+        build_operator_approval_packet(forged)
+    assert raised.value.code == "approval_evidence_not_locally_bound"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("signing_instruction", "Sign the short checksum."),
+        ("signing_instruction_sha256", "0" * 64),
+    ],
+)
+def test_signing_instruction_is_immutable(
+    complete_fixture: dict[str, Any], field: str, value: str
+) -> None:
+    packet = copy.deepcopy(complete_fixture["packet"])
+    packet[field] = value
+    if field == "signing_instruction":
+        packet["signing_instruction_sha256"] = hashlib.sha256(
+            value.encode()
+        ).hexdigest()
+    with pytest.raises(ApprovalPacketError) as raised:
+        verify_operator_approval_packet(packet)
+    assert raised.value.code == "signing_instruction_mismatch"
+
+
+def test_payload_tampering_and_extra_fields_fail_closed(
+    complete_fixture: dict[str, Any],
+) -> None:
+    changed = copy.deepcopy(complete_fixture["packet"])
+    changed["approval_payload"]["bench"]["attended_manifest_sha256"] = "0" * 64
     with pytest.raises(ApprovalPacketError) as raised:
         verify_operator_approval_packet(changed)
     assert raised.value.code == "packet_digest_mismatch"
 
-    extra = copy.deepcopy(packet)
+    proposal = copy.deepcopy(complete_fixture["packet"])
+    proposal["approval_payload"]["proposed_effects"][0]["proposal"]["target_id"] = (
+        "caller-selected-target"
+    )
+    proposal_body = proposal["approval_payload"]["proposed_effects"][0]["proposal"]
+    proposal["approval_payload"]["proposed_effects"][0]["proposal_sha256"] = (
+        canonical_sha256(proposal_body)
+    )
+    proposal["approval_payload_sha256"] = canonical_sha256(proposal["approval_payload"])
+    proposal["short_display_checksum"] = short_display_checksum(
+        proposal["approval_payload_sha256"]
+    )
+    with pytest.raises(ApprovalPacketError) as raised:
+        verify_operator_approval_packet(proposal)
+    assert raised.value.code == "approval_payload_invalid"
+
+    extra = copy.deepcopy(complete_fixture["packet"])
     extra["approval_hint"] = "approve"
     with pytest.raises(ApprovalPacketError) as raised:
         verify_operator_approval_packet(extra)
     assert raised.value.code == "packet_shape_invalid"
 
 
-def test_non_live_authority_cannot_enter_approval_contract() -> None:
-    envelope = _envelope()
-    envelope["authority"]["authority_result"] = "AdvisoryOnly"
-    with pytest.raises(ValidationError):
-        build_operator_approval_packet(envelope)
+def test_serialized_readiness_and_nonterminal_outcome_are_rejected(
+    complete_fixture: dict[str, Any],
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    readiness = arguments["frozen_readiness"]
+    arguments["frozen_readiness"] = (
+        StructurallyCompleteAwaitingAuthority.model_validate(
+            readiness.canonical_payload()
+        )
+    )
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == "frozen_execution_facts_not_locally_verified"
+
+    arguments = dict(complete_fixture["binding_arguments"])
+    arguments["compiled_outcome"] = arguments["compiled_outcome"].model_copy(
+        update={
+            "terminality": "no_terminal_verdict",
+            "decision": "no_terminal_verdict",
+            "requested_effects": (),
+        }
+    )
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == "compiled_outcome_binding_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("argument", "update", "expected_code"),
+    [
+        (
+            "bench_manifest",
+            {"terminality_rule_sha256": "f" * 64},
+            "frozen_execution_facts_receipt_set_mismatch",
+        ),
+        (
+            "cost_envelope",
+            {"spend_cap_microusd": 99_999},
+            "cost_approval_signature_invalid",
+        ),
+        (
+            "live_write_lease",
+            {"allowed_effects": ("challenge:resolve",)},
+            "live_write_lease_signature_invalid",
+        ),
+    ],
+)
+def test_binder_rejects_roster_cost_and_lease_mismatches(
+    complete_fixture: dict[str, Any],
+    argument: str,
+    update: dict[str, Any],
+    expected_code: str,
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    arguments[argument] = arguments[argument].model_copy(update=update)
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == expected_code
+
+
+def test_compiler_authority_must_be_local_and_rederived(
+    complete_fixture: dict[str, Any],
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    authority = arguments["compiler_authority"]
+    arguments["compiler_authority"] = type(authority).model_validate(
+        authority.canonical_payload()
+    )
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == "compiled_outcome_reverification_failed"
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "expected_code"),
+    [
+        (("github_ci", "security"), "FAIL", "build_a_closeout_invalid"),
+        (("pull_request", "state"), "OPEN", "build_a_closeout_invalid"),
+        (("terminal_claim", "live_mutations"), 1, "build_a_closeout_invalid"),
+        (
+            ("pull_request", "merge_commit"),
+            "a" * 40,
+            "build_a_build_b_commit_not_distinct",
+        ),
+    ],
+)
+def test_build_a_closeout_must_be_merged_green_non_live_and_distinct(
+    complete_fixture: dict[str, Any],
+    path: tuple[str, ...],
+    value: Any,
+    expected_code: str,
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    arguments["build_a_closeout_bytes"] = _closeout_bytes(
+        complete_fixture, *path, value
+    )
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == expected_code
+
+
+def test_arbitrary_effect_payload_is_not_an_approval_input(
+    complete_fixture: dict[str, Any],
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    arguments["effect_payloads"] = {
+        "seed:supersede": {"target_id": "caller-selected-target"}
+    }
+    with pytest.raises(TypeError, match="effect_payloads"):
+        bind_operator_approval_evidence(**arguments)
 
 
 @pytest.mark.parametrize("field", ["private_key", "api_key", "access_token"])
-def test_secret_bearing_fields_are_rejected_without_echoing_values(field: str) -> None:
+def test_secret_bearing_packet_fields_are_rejected_without_echoing_values(
+    complete_fixture: dict[str, Any], field: str
+) -> None:
     marker = "DO-NOT-ECHO-SECRET-MARKER"
-    envelope = _envelope()
-    envelope["operator_limits"][field] = marker
+    packet = copy.deepcopy(complete_fixture["packet"])
+    packet["approval_payload"][field] = marker
     with pytest.raises(ApprovalPacketError) as raised:
-        build_operator_approval_packet(envelope)
+        verify_operator_approval_packet(packet)
     assert raised.value.code == "secret_field_forbidden"
     assert marker not in str(raised.value)
 
 
-def test_cli_prepares_markdown_and_verifies_canonical_packet(tmp_path: Path) -> None:
-    input_path = tmp_path / "envelope.json"
+def test_cli_only_verifies_and_renders_existing_packet(
+    complete_fixture: dict[str, Any], tmp_path: Path
+) -> None:
     packet_path = tmp_path / "packet.json"
-    input_path.write_text(json.dumps(_envelope()), encoding="utf-8")
+    packet_path.write_text(json.dumps(complete_fixture["packet"]), encoding="utf-8")
     script = (
         Path(__file__).resolve().parents[1] / "scripts" / "sab_attended_ceremony.py"
     )
-
-    prepared = subprocess.run(
-        [
-            sys.executable,
-            str(script),
-            "prepare-unsigned-packet",
-            "--input",
-            str(input_path),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert prepared.returncode == 0, prepared.stderr
-    packet_path.write_text(prepared.stdout, encoding="utf-8")
 
     verified = subprocess.run(
         [
@@ -171,21 +355,38 @@ def test_cli_prepares_markdown_and_verifies_canonical_packet(tmp_path: Path) -> 
         text=True,
     )
     assert verified.returncode == 0, verified.stderr
-    assert json.loads(verified.stdout)["live_authority_created"] is False
+    verification = json.loads(verified.stdout)
+    assert verification["packet_integrity_valid"] is True
+    assert verification["evidence_reverified"] is False
+    assert verification["live_authority_created"] is False
 
-    markdown = subprocess.run(
+    rendered = subprocess.run(
         [
             sys.executable,
             str(script),
-            "prepare-unsigned-packet",
-            "--input",
-            str(input_path),
-            "--format",
-            "markdown",
+            "render-unsigned-packet",
+            "--packet",
+            str(packet_path),
         ],
         check=False,
         capture_output=True,
         text=True,
     )
-    assert markdown.returncode == 0, markdown.stderr
-    assert "Full canonical digest to sign" in markdown.stdout
+    assert rendered.returncode == 0, rendered.stderr
+    assert "Full canonical digest to sign" in rendered.stdout
+    assert SIGNING_INSTRUCTION in rendered.stdout
+
+    prepare = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "prepare-unsigned-packet",
+            "--input",
+            str(packet_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert prepare.returncode == 2
+    assert "invalid choice" in prepare.stderr

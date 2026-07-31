@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline-only CLI for SAB attended-ceremony preparation artifacts."""
+"""Integrity-check and render existing unsigned SAB ceremony packets."""
 
 from __future__ import annotations
 
@@ -9,16 +9,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from agora.sab_first_verdict_approval import (  # noqa: E402
     ApprovalPacketError,
-    build_operator_approval_packet,
-    canonical_packet_json,
     render_operator_approval_markdown,
     verify_operator_approval_packet,
 )
@@ -38,42 +34,32 @@ def _print_json(value: Any) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Prepare or verify non-authorizing SAB ceremony packets offline"
+        description=(
+            "Verify or render an existing non-authorizing SAB ceremony packet; "
+            "trusted packets can only be built from in-memory typed evidence"
+        )
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    prepare = commands.add_parser("prepare-unsigned-packet")
-    prepare.add_argument("--input", type=Path, required=True)
-    prepare.add_argument("--format", choices=("json", "markdown"), default="json")
-
     verify = commands.add_parser("verify-unsigned-packet")
     verify.add_argument("--packet", type=Path, required=True)
+
+    render = commands.add_parser("render-unsigned-packet")
+    render.add_argument("--packet", type=Path, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "prepare-unsigned-packet":
-            packet = build_operator_approval_packet(_load_object(args.input))
-            if args.format == "markdown":
-                print(render_operator_approval_markdown(packet), end="")
-            else:
-                print(canonical_packet_json(packet))
-        else:
-            result = verify_operator_approval_packet(_load_object(args.packet))
+        packet = _load_object(args.packet)
+        if args.command == "verify-unsigned-packet":
+            result = verify_operator_approval_packet(packet)
             _print_json(result)
+        else:
+            print(render_operator_approval_markdown(packet), end="")
     except ApprovalPacketError as exc:
         _print_json({"ok": False, "error": exc.code, "detail": str(exc)})
-        return 2
-    except ValidationError:
-        _print_json(
-            {
-                "ok": False,
-                "error": "approval_contract_invalid",
-                "detail": "approval material does not satisfy the closed contract",
-            }
-        )
         return 2
     except (OSError, json.JSONDecodeError):
         _print_json(
