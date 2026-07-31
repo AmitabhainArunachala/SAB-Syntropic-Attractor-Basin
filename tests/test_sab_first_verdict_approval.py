@@ -12,6 +12,10 @@ import pytest
 
 from agora.sab_artifact_verdict import canonical_sha256
 from agora.sab_first_verdict_approval import (
+    BUILD_A_CLOSEOUT_CANONICAL_SHA256,
+    BUILD_A_CLOSEOUT_SHA256,
+    BUILD_A_MERGE_COMMIT,
+    BUILD_A_MERGE_TREE,
     SIGNING_INSTRUCTION,
     SIGNING_INSTRUCTION_SHA256,
     ApprovalPacketError,
@@ -81,13 +85,30 @@ def test_payload_exposes_distinct_code_roots_closed_proposals_and_trust_sets(
     payload = complete_fixture["packet"]["approval_payload"]
     code = payload["code"]
     assert code["runtime_commit_sha"] == "a" * 40
-    assert code["build_a_merge_commit"] == "b" * 40
+    assert code["build_a_merge_commit"] == BUILD_A_MERGE_COMMIT
     assert code["runtime_commit_sha"] != code["build_a_merge_commit"]
-    assert code["build_a_merge_tree"] == "c" * 40
+    assert code["build_a_merge_tree"] == BUILD_A_MERGE_TREE
+    assert code["build_a_closeout_sha256"] == BUILD_A_CLOSEOUT_SHA256
     assert (
-        code["build_a_closeout_sha256"]
-        == hashlib.sha256(complete_fixture["build_a_closeout_bytes"]).hexdigest()
+        code["build_a_closeout_canonical_sha256"] == BUILD_A_CLOSEOUT_CANONICAL_SHA256
     )
+    assert (
+        hashlib.sha256(complete_fixture["build_a_closeout_bytes"]).hexdigest()
+        == BUILD_A_CLOSEOUT_SHA256
+    )
+    assert (
+        canonical_sha256(json.loads(complete_fixture["build_a_closeout_bytes"]))
+        == BUILD_A_CLOSEOUT_CANONICAL_SHA256
+    )
+
+    authority = payload["authority_evidence"]
+    assert tuple(authority["requested_effects"]) == (
+        "challenge:resolve",
+        "seed:supersede",
+    )
+    assert "reported_result" not in authority
+    assert "reported_live_eligible" not in authority
+    assert ("Authorized" + "<Live>") not in json.dumps(payload, sort_keys=True)
 
     proposals = {
         item["proposal"]["effect_type"]: item for item in payload["proposed_effects"]
@@ -208,6 +229,66 @@ def test_payload_tampering_and_extra_fields_fail_closed(
     assert raised.value.code == "packet_shape_invalid"
 
 
+def test_rehashed_cross_field_contradiction_fails_closed(
+    complete_fixture: dict[str, Any],
+) -> None:
+    packet = copy.deepcopy(complete_fixture["packet"])
+    effect = packet["approval_payload"]["proposed_effects"][0]
+    effect["proposal"]["compiled_outcome_sha256"] = "f" * 64
+    effect["proposal_sha256"] = canonical_sha256(effect["proposal"])
+    idempotency_sha256 = canonical_sha256(
+        {
+            "ceremony_id": packet["approval_payload"]["ceremony_id"],
+            "effect_type": effect["proposal"]["effect_type"],
+            "proposal_sha256": effect["proposal_sha256"],
+            "write_lease_sha256": packet["approval_payload"]["maintenance"][
+                "write_lease_sha256"
+            ],
+        }
+    )
+    effect["idempotency_key"] = f"sab-{idempotency_sha256[:32]}"
+    packet["approval_payload_sha256"] = canonical_sha256(packet["approval_payload"])
+    packet["short_display_checksum"] = short_display_checksum(
+        packet["approval_payload_sha256"]
+    )
+
+    with pytest.raises(ApprovalPacketError) as raised:
+        verify_operator_approval_packet(packet)
+    assert raised.value.code == "approval_payload_invalid"
+
+
+def test_rehashed_requested_effect_contradiction_fails_closed(
+    complete_fixture: dict[str, Any],
+) -> None:
+    packet = copy.deepcopy(complete_fixture["packet"])
+    packet["approval_payload"]["authority_evidence"]["requested_effects"] = [
+        "challenge:resolve"
+    ]
+    packet["approval_payload_sha256"] = canonical_sha256(packet["approval_payload"])
+    packet["short_display_checksum"] = short_display_checksum(
+        packet["approval_payload_sha256"]
+    )
+
+    with pytest.raises(ApprovalPacketError) as raised:
+        verify_operator_approval_packet(packet)
+    assert raised.value.code == "approval_payload_invalid"
+
+
+def test_rehashed_decision_effect_contradiction_fails_closed(
+    complete_fixture: dict[str, Any],
+) -> None:
+    packet = copy.deepcopy(complete_fixture["packet"])
+    packet["approval_payload"]["bench"]["compiled_decision"] = "canon"
+    packet["approval_payload_sha256"] = canonical_sha256(packet["approval_payload"])
+    packet["short_display_checksum"] = short_display_checksum(
+        packet["approval_payload_sha256"]
+    )
+
+    with pytest.raises(ApprovalPacketError) as raised:
+        verify_operator_approval_packet(packet)
+    assert raised.value.code == "approval_payload_invalid"
+
+
 def test_serialized_readiness_and_nonterminal_outcome_are_rejected(
     complete_fixture: dict[str, Any],
 ) -> None:
@@ -282,23 +363,18 @@ def test_compiler_authority_must_be_local_and_rederived(
 
 
 @pytest.mark.parametrize(
-    ("path", "value", "expected_code"),
+    ("path", "value"),
     [
-        (("github_ci", "security"), "FAIL", "build_a_closeout_invalid"),
-        (("pull_request", "state"), "OPEN", "build_a_closeout_invalid"),
-        (("terminal_claim", "live_mutations"), 1, "build_a_closeout_invalid"),
-        (
-            ("pull_request", "merge_commit"),
-            "a" * 40,
-            "build_a_build_b_commit_not_distinct",
-        ),
+        (("github_ci", "security"), "FAIL"),
+        (("pull_request", "state"), "OPEN"),
+        (("terminal_claim", "live_mutations"), 1),
+        (("pull_request", "merge_commit"), "a" * 40),
     ],
 )
-def test_build_a_closeout_must_be_merged_green_non_live_and_distinct(
+def test_mutated_build_a_closeout_fails_pinned_provenance(
     complete_fixture: dict[str, Any],
     path: tuple[str, ...],
     value: Any,
-    expected_code: str,
 ) -> None:
     arguments = dict(complete_fixture["binding_arguments"])
     arguments["build_a_closeout_bytes"] = _closeout_bytes(
@@ -306,7 +382,29 @@ def test_build_a_closeout_must_be_merged_green_non_live_and_distinct(
     )
     with pytest.raises(ApprovalPacketError) as raised:
         bind_operator_approval_evidence(**arguments)
-    assert raised.value.code == expected_code
+    assert raised.value.code == "build_a_closeout_provenance_mismatch"
+
+
+def test_arbitrary_green_build_a_closeout_fails_pinned_provenance(
+    complete_fixture: dict[str, Any],
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    arguments["build_a_closeout_bytes"] = _closeout_bytes(
+        complete_fixture, "github_ci", "run_id", 30_643_074_766
+    )
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == "build_a_closeout_provenance_mismatch"
+
+
+def test_build_a_closeout_duplicate_json_key_fails_closed(
+    complete_fixture: dict[str, Any],
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    arguments["build_a_closeout_bytes"] = b'{"schema":"first","schema":"second"}'
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == "build_a_closeout_duplicate_key"
 
 
 def test_arbitrary_effect_payload_is_not_an_approval_input(

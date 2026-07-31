@@ -76,6 +76,14 @@ SIGNING_INSTRUCTION = (
     "this unsigned packet are non-authorizing."
 )
 SIGNING_INSTRUCTION_SHA256 = hashlib.sha256(SIGNING_INSTRUCTION.encode()).hexdigest()
+BUILD_A_MERGE_COMMIT = "6ad237af3414288cee52148a5f0dec7c69f32b71"
+BUILD_A_MERGE_TREE = "92e523eec91c8dc52573835625bf1fb2ddc30b3a"
+BUILD_A_CLOSEOUT_SHA256 = (
+    "a19ebdc01d6d487239f213f6cfe539ad159a0bdb1c286984a0600f16182e890e"
+)
+BUILD_A_CLOSEOUT_CANONICAL_SHA256 = (
+    "4fe873c21aab72d5079211988f803c6bc51022c4dfc37196f33223b9fada7a06"
+)
 _FORBIDDEN_KEY_PARTS = frozenset(
     {
         "api_key",
@@ -105,6 +113,20 @@ class _CeremonyCodeBindingV2(_StrictModel):
     build_a_merge_commit: str = Field(pattern=GIT_OBJECT_PATTERN)
     build_a_merge_tree: str = Field(pattern=GIT_OBJECT_PATTERN)
     build_a_closeout_sha256: str = Field(pattern=SHA256_PATTERN)
+    build_a_closeout_canonical_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _known_build_a_roots_are_distinct(self) -> "_CeremonyCodeBindingV2":
+        if (
+            self.build_a_merge_commit != BUILD_A_MERGE_COMMIT
+            or self.build_a_merge_tree != BUILD_A_MERGE_TREE
+            or self.build_a_closeout_sha256 != BUILD_A_CLOSEOUT_SHA256
+            or self.build_a_closeout_canonical_sha256
+            != BUILD_A_CLOSEOUT_CANONICAL_SHA256
+            or self.runtime_commit_sha == self.build_a_merge_commit
+        ):
+            raise ValueError("code roots do not bind the pinned Build A closeout")
+        return self
 
 
 class _BuildAPullRequestV1(_StrictModel):
@@ -215,19 +237,35 @@ class _BuildAMergeCloseoutV1(_StrictModel):
 class _CeremonyAuthorityEvidenceV2(_StrictModel):
     case_id: str = Field(pattern=IDENTIFIER_PATTERN)
     case_sha256: str = Field(pattern=SHA256_PATTERN)
+    artifact_id: str = Field(pattern=IDENTIFIER_PATTERN)
+    artifact_sha256: str = Field(pattern=SHA256_PATTERN)
+    expected_evaluated_state_sha256: str = Field(pattern=SHA256_PATTERN)
+    requested_effects: tuple[Literal["challenge:resolve", "seed:supersede"], ...] = (
+        Field(min_length=1)
+    )
     policy_sha256: str = Field(pattern=SHA256_PATTERN)
     founder_decision_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
     founder_decision: Literal["alternate_artifact_terminal_disposition"] = (
         "alternate_artifact_terminal_disposition"
     )
     authority_evaluation_sha256: str = Field(pattern=SHA256_PATTERN)
-    reported_result: Literal["Authorized"] = "Authorized"
-    reported_live_eligible: Literal[True] = True
     compiler_copy_authority_sha256: str = Field(pattern=SHA256_PATTERN)
     evidence_semantics: Literal["signed_receipts_not_capabilities"] = (
         "signed_receipts_not_capabilities"
     )
     live_authority_created: Literal[False] = False
+
+    @field_validator("requested_effects", mode="before")
+    @classmethod
+    def _requested_effects_are_canonical(cls, value: Any) -> tuple[Any, ...]:
+        if isinstance(value, (str, bytes, bytearray)) or not isinstance(
+            value, Sequence
+        ):
+            raise ValueError("requested effects must be a sequence")
+        normalized = tuple(value)
+        if normalized != tuple(sorted(set(normalized))):
+            raise ValueError("requested effects must be unique and canonically sorted")
+        return normalized
 
 
 class _CeremonyBenchBindingV2(_StrictModel):
@@ -241,7 +279,7 @@ class _CeremonyBenchBindingV2(_StrictModel):
     final_ballot_set_sha256: str = Field(pattern=SHA256_PATTERN)
     compiled_outcome_sha256: str = Field(pattern=SHA256_PATTERN)
     compiled_outcome_scope: Literal["Copy"] = "Copy"
-    compiled_decision: Literal["canon", "compost", "correct_and_supersede"]
+    compiled_decision: Literal["correct_and_supersede"] = "correct_and_supersede"
     live_promotion_claimed: Literal[False] = False
 
 
@@ -401,6 +439,59 @@ class _CeremonyApprovalPayloadV2(_StrictModel):
             raise ValueError("proposed effects must be unique and canonically sorted")
         return value
 
+    @model_validator(mode="after")
+    def _all_persisted_cross_bindings_are_exact(
+        self,
+    ) -> "_CeremonyApprovalPayloadV2":
+        if self.cost.total_maximum_cost_microusd > self.cost.spend_cap_microusd:
+            raise ValueError("maximum cost exceeds the persisted spend cap")
+        if not set(self.trust_anchors.frozen_trust_anchor_set_sha256s).issubset(
+            self.trust_anchors.live_trust_anchor_set_sha256s
+        ):
+            raise ValueError("live trust anchors do not preserve frozen trust anchors")
+        proposal_effects = tuple(
+            item.proposal.effect_type for item in self.proposed_effects
+        )
+        if proposal_effects != self.authority_evidence.requested_effects:
+            raise ValueError(
+                "proposal effects differ from persisted authority requested effects"
+            )
+        expected_effects = {"challenge:resolve", "seed:supersede"}
+        if set(proposal_effects) != expected_effects:
+            raise ValueError("proposal set differs from the closed Build B effect set")
+        for item in self.proposed_effects:
+            proposal = item.proposal
+            if not all(
+                (
+                    proposal.ceremony_id == self.ceremony_id,
+                    proposal.case_id == self.authority_evidence.case_id,
+                    proposal.case_sha256 == self.authority_evidence.case_sha256,
+                    proposal.artifact_id == self.authority_evidence.artifact_id,
+                    proposal.artifact_sha256 == self.authority_evidence.artifact_sha256,
+                    proposal.expected_evaluated_state_sha256
+                    == self.authority_evidence.expected_evaluated_state_sha256,
+                    proposal.compiled_outcome_sha256
+                    == self.bench.compiled_outcome_sha256,
+                    proposal.transcript_sha256 == self.bench.transcript_head_sha256,
+                )
+            ):
+                raise ValueError(
+                    "effect proposal differs from persisted evidence roots"
+                )
+            expected_idempotency = canonical_sha256(
+                {
+                    "ceremony_id": self.ceremony_id,
+                    "effect_type": proposal.effect_type,
+                    "proposal_sha256": item.proposal_sha256,
+                    "write_lease_sha256": self.maintenance.write_lease_sha256,
+                }
+            )
+            if item.idempotency_key != f"sab-{expected_idempotency[:32]}":
+                raise ValueError(
+                    "proposal idempotency key does not bind the write lease"
+                )
+        return self
+
 
 class CeremonyApprovalEvidence:
     """Locally sealed evidence derivation; it is intentionally not serializable."""
@@ -555,14 +646,26 @@ def _prepared_at(value: datetime) -> tuple[datetime, str]:
 
 def _build_a_closeout_binding(
     value: bytes,
-) -> tuple[_BuildAMergeCloseoutV1, str]:
+) -> tuple[_BuildAMergeCloseoutV1, str, str]:
     _require(
         isinstance(value, bytes) and bool(value),
         "build_a_closeout_invalid",
         "Build A closeout must be supplied as non-empty receipt bytes",
     )
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, child in pairs:
+            if key in result:
+                raise ApprovalPacketError(
+                    "build_a_closeout_duplicate_key",
+                    "Build A closeout contains a duplicate JSON key",
+                )
+            result[key] = child
+        return result
+
     try:
-        payload = json.loads(value)
+        payload = json.loads(value, object_pairs_hook=unique_object)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ApprovalPacketError(
             "build_a_closeout_invalid", "Build A closeout is not JSON receipt bytes"
@@ -573,6 +676,14 @@ def _build_a_closeout_binding(
         "Build A closeout must be a JSON object",
     )
     _reject_secret_bearing_keys(payload)
+    raw_digest = hashlib.sha256(value).hexdigest()
+    canonical_digest = canonical_sha256(payload)
+    _require(
+        raw_digest == BUILD_A_CLOSEOUT_SHA256
+        and canonical_digest == BUILD_A_CLOSEOUT_CANONICAL_SHA256,
+        "build_a_closeout_provenance_mismatch",
+        "Build A closeout differs from the pinned immutable receipt",
+    )
     try:
         closeout = _BuildAMergeCloseoutV1.model_validate(payload)
     except Exception as exc:
@@ -580,7 +691,7 @@ def _build_a_closeout_binding(
             "build_a_closeout_invalid",
             "Build A closeout fails the exact merged, green, non-live contract",
         ) from exc
-    return closeout, hashlib.sha256(value).hexdigest()
+    return closeout, raw_digest, canonical_digest
 
 
 def bind_operator_approval_evidence(
@@ -1046,9 +1157,11 @@ def bind_operator_approval_evidence(
             )
         )
 
-    build_a_closeout, closeout_sha256 = _build_a_closeout_binding(
-        build_a_closeout_bytes
-    )
+    (
+        build_a_closeout,
+        closeout_sha256,
+        closeout_canonical_sha256,
+    ) = _build_a_closeout_binding(build_a_closeout_bytes)
     _require(
         build_a_closeout.pull_request.merge_commit != manifest.expected_code_commit,
         "build_a_build_b_commit_not_distinct",
@@ -1066,18 +1179,21 @@ def bind_operator_approval_evidence(
             build_a_merge_commit=build_a_closeout.pull_request.merge_commit,
             build_a_merge_tree=build_a_closeout.pull_request.merge_tree,
             build_a_closeout_sha256=closeout_sha256,
+            build_a_closeout_canonical_sha256=closeout_canonical_sha256,
         ),
         authority_evidence=_CeremonyAuthorityEvidenceV2(
             case_id=manifest.case_id,
             case_sha256=manifest.case_sha256,
+            artifact_id=manifest.artifact_id,
+            artifact_sha256=manifest.artifact_sha256,
+            expected_evaluated_state_sha256=(manifest.expected_evaluated_state_sha256),
+            requested_effects=manifest.requested_effects,
             policy_sha256=manifest.policy_sha256,
             founder_decision_receipt_sha256=(
                 founder_decision_receipt.canonical_sha256()
             ),
             founder_decision=founder_decision_receipt.decision,
             authority_evaluation_sha256=authority_evaluation.canonical_sha256(),
-            reported_result=authority_evaluation.reported_result,
-            reported_live_eligible=authority_evaluation.reported_live_eligible,
             compiler_copy_authority_sha256=compiler_authority.authority_digest,
         ),
         bench=_CeremonyBenchBindingV2(
@@ -1270,6 +1386,8 @@ def render_operator_approval_markdown(packet: Mapping[str, Any]) -> str:
             f"- Build A merge commit: `{payload.code.build_a_merge_commit}`",
             f"- Build A merge tree: `{payload.code.build_a_merge_tree}`",
             f"- Build A closeout SHA-256: `{payload.code.build_a_closeout_sha256}`",
+            "- Pinned Build A closeout canonical SHA-256: "
+            f"`{payload.code.build_a_closeout_canonical_sha256}`",
             f"- Case: `{payload.authority_evidence.case_id}`",
             f"- Compiler scope: `{payload.bench.compiled_outcome_scope}`",
             f"- Compiled decision: `{payload.bench.compiled_decision}`",
@@ -1307,6 +1425,10 @@ def canonical_packet_json(packet: Mapping[str, Any]) -> str:
 
 __all__ = [
     "ApprovalPacketError",
+    "BUILD_A_CLOSEOUT_CANONICAL_SHA256",
+    "BUILD_A_CLOSEOUT_SHA256",
+    "BUILD_A_MERGE_COMMIT",
+    "BUILD_A_MERGE_TREE",
     "CeremonyApprovalEvidence",
     "CeremonyEffectProposalV1",
     "SIGNING_INSTRUCTION",

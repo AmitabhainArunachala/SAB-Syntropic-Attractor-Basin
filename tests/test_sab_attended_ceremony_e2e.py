@@ -25,6 +25,10 @@ from agora.sab_artifact_verdict import (
     verify_contract_signature,
 )
 from agora.sab_first_verdict_approval import (
+    BUILD_A_CLOSEOUT_CANONICAL_SHA256,
+    BUILD_A_CLOSEOUT_SHA256,
+    BUILD_A_MERGE_COMMIT,
+    BUILD_A_MERGE_TREE,
     SIGNING_INSTRUCTION,
     bind_operator_approval_evidence,
     build_operator_approval_packet,
@@ -848,64 +852,7 @@ def build_attended_ceremony_fixture() -> dict[str, Any]:
     outcome = compile_council_outcome(**compiler_arguments)
     assert isinstance(outcome, CompiledVerdictV1)
 
-    closeout_bytes = json.dumps(
-        {
-            "schema": "sab.first_verdict.build_a_merge_closeout.v1",
-            "created_at_utc": "2026-07-31T15:31:25Z",
-            "repository": "AmitabhainArunachala/SAB-Syntropic-Attractor-Basin",
-            "pull_request": {
-                "number": 11,
-                "url": (
-                    "https://github.com/AmitabhainArunachala/"
-                    "SAB-Syntropic-Attractor-Basin/pull/11"
-                ),
-                "state": "MERGED",
-                "head": "d" * 40,
-                "head_tree": "c" * 40,
-                "merge_commit": "b" * 40,
-                "merge_tree": "c" * 40,
-                "merged_at_utc": "2026-07-31T15:31:25Z",
-            },
-            "github_ci": {
-                "run_id": 30_643_074_765,
-                "test_python_3_10": "PASS",
-                "test_python_3_11": "PASS",
-                "test_python_3_12": "PASS",
-                "security": "PASS",
-                "lint": "PASS",
-                "docker": "PASS",
-            },
-            "final_local_verification": {
-                "full_pytest": "732 passed, 33 warnings in 35.46s",
-                "atomic_pytest": "31 passed",
-                "bandit": "0 high, 0 medium, 0 low",
-                "ruff_check": "PASS",
-                "ruff_format_check": "PASS",
-                "compileall": "PASS",
-                "governance_and_orientation": "PASS",
-                "worktree_clean": True,
-            },
-            "ci_repairs": {"e" * 40: "fixture repair proved by green CI"},
-            "prior_receipts": {
-                "integration_replay": "fixture:integration-replay",
-                "integration_replay_sha256": _digest("integration-replay"),
-                "linux_portability": "fixture:linux-portability",
-                "linux_portability_sha256": _digest("linux-portability"),
-            },
-            "terminal_claim": {
-                "engineering_status": "proven_on_copy_and_merged",
-                "historic_live_win": False,
-                "live_mutations": 0,
-                "service_mutations": 0,
-                "provider_calls": 0,
-                "standing_effect": "none",
-                "master_vision_effect": "none",
-                "build_b": "not_run_at_build_a_merge",
-            },
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
+    closeout_bytes = (FIXTURES / "sab.build_a_merge_closeout.v1.json").read_bytes()
     binding_arguments = {
         "manifest": ceremony["manifest"],
         "frozen_readiness": ceremony["frozen_readiness"],
@@ -1041,7 +988,13 @@ def test_offline_attended_ceremony_is_copy_only_non_authorizing_and_sealed(
     assert packet["signing_instruction"] == SIGNING_INSTRUCTION
     payload = packet["approval_payload"]
     assert payload["code"]["runtime_commit_sha"] == "a" * 40
-    assert payload["code"]["build_a_merge_commit"] == "b" * 40
+    assert payload["code"]["build_a_merge_commit"] == BUILD_A_MERGE_COMMIT
+    assert payload["code"]["build_a_merge_tree"] == BUILD_A_MERGE_TREE
+    assert payload["code"]["build_a_closeout_sha256"] == BUILD_A_CLOSEOUT_SHA256
+    assert (
+        payload["code"]["build_a_closeout_canonical_sha256"]
+        == BUILD_A_CLOSEOUT_CANONICAL_SHA256
+    )
     assert (
         payload["code"]["runtime_commit_sha"] != payload["code"]["build_a_merge_commit"]
     )
