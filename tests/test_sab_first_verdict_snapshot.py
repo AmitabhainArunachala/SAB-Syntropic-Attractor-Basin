@@ -18,6 +18,8 @@ from agora.sab_first_verdict_evidence import (
     lifecycle_fingerprint,
     open_sqlite_readonly,
     snapshot_database,
+    sqlite_lifecycle_table_digest,
+    table_content_digest,
     verify_database_snapshot,
     verify_preexisting_table_digests,
 )
@@ -186,6 +188,32 @@ def test_preexisting_column_digests_survive_additive_column_but_detect_row_drift
         verification = verify_preexisting_table_digests(conn, baseline)
     assert verification["verified"] is False
     assert any(item["table"] == "user_values" for item in verification["mismatches"])
+
+
+@pytest.mark.parametrize(
+    ("table", "columns", "lifecycle_digest"),
+    (
+        ('user_values"; DROP TABLE user_values; --', ("id",), False),
+        ("user_values", ('id" FROM user_values; --',), False),
+        ('user_values"; DROP TABLE user_values; --', (), True),
+    ),
+)
+def test_evidence_digests_reject_unsafe_sql_identifiers(
+    tmp_path: Path,
+    table: str,
+    columns: tuple[str, ...],
+    lifecycle_digest: bool,
+) -> None:
+    database = tmp_path / "database.sqlite"
+    _database(database)
+    with closing(sqlite3.connect(database)) as conn:
+        with pytest.raises(EvidenceValidationError) as raised:
+            if lifecycle_digest:
+                sqlite_lifecycle_table_digest(conn, table)
+            else:
+                table_content_digest(conn, table, columns)
+        assert raised.value.code == "unsafe_identifier"
+        assert conn.execute("SELECT COUNT(*) FROM user_values").fetchone() == (1,)
 
 
 def test_snapshot_is_deterministic_and_tamper_is_rejected(tmp_path: Path) -> None:

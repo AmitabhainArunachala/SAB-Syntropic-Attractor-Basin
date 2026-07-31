@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import stat
 from collections import Counter
@@ -57,6 +58,7 @@ SQLITE_LIFECYCLE_TABLES = (
     "spark_witness_chain",
     "sparks",
 )
+_SQLITE_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 class EvidenceValidationError(ValueError):
@@ -265,9 +267,19 @@ def backup_database_readonly(
 
 
 def _quote_identifier(identifier: str) -> str:
-    if "\x00" in identifier:
-        raise EvidenceValidationError("unsafe_identifier", "NUL in SQLite identifier")
-    return '"' + identifier.replace('"', '""') + '"'
+    """Return a quoted identifier after applying the Build A SQL allowlist.
+
+    SQLite cannot bind table or column names as query parameters.  Restricting
+    identifiers to this ASCII grammar excludes whitespace, quotes, comments,
+    and every SQL metacharacter before any identifier reaches interpolation.
+    """
+
+    if not _SQLITE_IDENTIFIER.fullmatch(identifier):
+        raise EvidenceValidationError(
+            "unsafe_identifier",
+            "SQLite identifiers must match [A-Za-z_][A-Za-z0-9_]*",
+        )
+    return f'"{identifier}"'
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -281,10 +293,11 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    quoted_table = _quote_identifier(table)
     return [
         str(row[1])
         for row in conn.execute(
-            f"PRAGMA table_info({_quote_identifier(table)})"
+            f"PRAGMA table_info({quoted_table})"
         ).fetchall()
     ]
 
@@ -308,6 +321,8 @@ def table_content_digest(
 ) -> dict[str, Any]:
     """Digest a table over an explicit column set, independent of row order."""
 
+    quoted_table = _quote_identifier(table)
+    quoted_columns = [_quote_identifier(column) for column in columns]
     available = set(_table_columns(conn, table))
     if not columns or not set(columns).issubset(available):
         missing = sorted(set(columns) - available)
@@ -315,9 +330,11 @@ def table_content_digest(
             "preexisting_columns_missing",
             f"{table} is missing pre-existing columns: {missing}",
         )
-    select_columns = ",".join(_quote_identifier(column) for column in columns)
+    select_columns = ",".join(quoted_columns)
     row_hashes = []
-    for row in conn.execute(f"SELECT {select_columns} FROM {_quote_identifier(table)}"):
+    # Identifiers are allowlisted and quoted above; SQLite cannot bind them.
+    query = f"SELECT {select_columns} FROM {quoted_table}"  # nosec B608
+    for row in conn.execute(query):
         encoded = [_typed_sql_value(value) for value in tuple(row)]
         row_hashes.append(canonical_sha256(encoded))
     row_hashes.sort()
@@ -332,15 +349,16 @@ def table_content_digest(
 def sqlite_lifecycle_table_digest(conn: sqlite3.Connection, table: str) -> str:
     """Reproduce A0's deterministic full-table content digest exactly."""
 
+    quoted_table = _quote_identifier(table)
     columns = _table_columns(conn, table)
+    # ``quoted_table`` passed the strict identifier allowlist above.
+    query = f"SELECT * FROM {quoted_table} ORDER BY rowid"  # nosec B608
     rows = [
         [
             {"bytes_hex": value.hex()} if isinstance(value, bytes) else value
             for value in tuple(row)
         ]
-        for row in conn.execute(
-            f"SELECT * FROM {_quote_identifier(table)} ORDER BY rowid"
-        )
+        for row in conn.execute(query)
     ]
     return canonical_sha256({"columns": columns, "rows": rows})
 
@@ -353,8 +371,9 @@ def schema_manifest(conn: sqlite3.Connection) -> dict[str, Any]:
     for row in rows:
         name = str(row["name"] if isinstance(row, sqlite3.Row) else row[0])
         sql = row["sql"] if isinstance(row, sqlite3.Row) else row[1]
+        quoted_name = _quote_identifier(name)
         columns = []
-        for column in conn.execute(f"PRAGMA table_info({_quote_identifier(name)})"):
+        for column in conn.execute(f"PRAGMA table_info({quoted_name})"):
             columns.append(
                 {
                     "cid": int(column[0]),
@@ -442,44 +461,59 @@ def _histogram(
 ) -> dict[str, int]:
     if table is None or column not in _table_columns(conn, table):
         return {}
-    rows = conn.execute(
-        f"SELECT {_quote_identifier(column)}, COUNT(*) FROM {_quote_identifier(table)} "
-        f"GROUP BY {_quote_identifier(column)}"
-    ).fetchall()
+    quoted_column = _quote_identifier(column)
+    quoted_table = _quote_identifier(table)
+    # Both identifiers are schema-checked, allowlisted, and quoted above.
+    query = (
+        f"SELECT {quoted_column}, COUNT(*) FROM {quoted_table} "  # nosec B608
+        f"GROUP BY {quoted_column}"
+    )
+    rows = conn.execute(query).fetchall()
     return {str(row[0]): int(row[1]) for row in rows}
 
 
 def _count(conn: sqlite3.Connection, table: str | None) -> int:
     if table is None:
         return 0
-    return int(
-        conn.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table)}").fetchone()[0]
-    )
+    quoted_table = _quote_identifier(table)
+    # ``quoted_table`` passed the strict identifier allowlist above.
+    query = f"SELECT COUNT(*) FROM {quoted_table}"  # nosec B608
+    return int(conn.execute(query).fetchone()[0])
 
 
 def witness_forest_heads(conn: sqlite3.Connection) -> dict[str, str]:
     table = _authoritative_table(conn, ("sab_witness_events_v1", "witness_events"))
     if table is None:
         return {}
+    quoted_table = _quote_identifier(table)
     columns = set(_table_columns(conn, table))
     if {"chain_scope", "event_hash", "id"}.issubset(columns):
-        rows = conn.execute(
-            "SELECT outer_event.chain_scope, outer_event.event_hash "
-            f"FROM {_quote_identifier(table)} outer_event "
+        # ``table`` came from the fixed authoritative-table candidates and was
+        # schema-checked, allowlisted, and quoted above.
+        query = (
+            "SELECT outer_event.chain_scope, outer_event.event_hash "  # nosec B608
+            f"FROM {quoted_table} outer_event "
             "WHERE outer_event.id=("
-            f"SELECT MAX(inner_event.id) FROM {_quote_identifier(table)} inner_event "
+            f"SELECT MAX(inner_event.id) FROM {quoted_table} inner_event "
             "WHERE inner_event.chain_scope=outer_event.chain_scope) "
             "ORDER BY outer_event.chain_scope"
+        )
+        rows = conn.execute(
+            query
         ).fetchall()
     elif {"subject_type", "subject_id", "event_hash", "id"}.issubset(columns):
-        rows = conn.execute(
-            "SELECT outer_event.subject_type || ':' || outer_event.subject_id AS scope, "
+        # Same fixed-candidate and identifier validation as the branch above.
+        query = (
+            "SELECT outer_event.subject_type || ':' || outer_event.subject_id AS scope, "  # nosec B608
             "outer_event.event_hash "
-            f"FROM {_quote_identifier(table)} outer_event "
+            f"FROM {quoted_table} outer_event "
             "WHERE outer_event.id=("
-            f"SELECT MAX(inner_event.id) FROM {_quote_identifier(table)} inner_event "
+            f"SELECT MAX(inner_event.id) FROM {quoted_table} inner_event "
             "WHERE inner_event.subject_type=outer_event.subject_type "
             "AND inner_event.subject_id=outer_event.subject_id) ORDER BY scope"
+        )
+        rows = conn.execute(
+            query
         ).fetchall()
     else:
         return {}
@@ -508,12 +542,17 @@ def _migration_ids(conn: sqlite3.Connection) -> list[str]:
             None,
         )
         if id_column:
+            quoted_id_column = _quote_identifier(id_column)
+            quoted_table = _quote_identifier(table)
+            # Both values come from fixed candidates, are confirmed in the
+            # schema, and pass the strict identifier allowlist.
+            query = (
+                f"SELECT {quoted_id_column} FROM {quoted_table} "  # nosec B608
+                f"ORDER BY {quoted_id_column}"
+            )
             identifiers.extend(
                 f"{table}:{row[0]}"
-                for row in conn.execute(
-                    f"SELECT {_quote_identifier(id_column)} FROM {_quote_identifier(table)} "
-                    f"ORDER BY {_quote_identifier(id_column)}"
-                )
+                for row in conn.execute(query)
             )
     return identifiers
 
@@ -545,11 +584,16 @@ def _lifecycle_semantic_summary(conn: sqlite3.Connection) -> dict[str, Any]:
 
     seed_hashes: list[str] = []
     if seed_table and packet_hash_column in seed_columns:
+        quoted_hash_column = _quote_identifier(packet_hash_column)
+        quoted_seed_table = _quote_identifier(seed_table)
+        # Both values are selected from fixed candidates, schema-checked, and
+        # pass the strict identifier allowlist.
+        query = (
+            f"SELECT {quoted_hash_column} FROM {quoted_seed_table}"  # nosec B608
+        )
         seed_hashes = sorted(
             str(row[0])
-            for row in conn.execute(
-                f"SELECT {_quote_identifier(packet_hash_column)} FROM {_quote_identifier(seed_table)}"
-            )
+            for row in conn.execute(query)
         )
     heads = witness_forest_heads(conn)
     return {
@@ -692,12 +736,22 @@ def observe_master_vision_state(conn: sqlite3.Connection) -> Any:
         sorted({event["event_type"] for event in witness_events})
     )
 
-    def target_count(table: str, predicate: str, parameters: tuple[str, ...]) -> int:
-        return int(
-            conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE {predicate}", parameters
-            ).fetchone()[0]
-        )
+    # These proof obligations are fixed by the Master Vision observation
+    # schema.  Keep their SQL static and bind only the seed value.
+    supersession_edge_count = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM sab_seed_lineage_edges_v1 "
+            "WHERE predecessor_seed_id = ? OR successor_seed_id = ?",
+            (MASTER_VISION_SEED_ID, MASTER_VISION_SEED_ID),
+        ).fetchone()[0]
+    )
+    effective_disposition_count = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM sab_rehearsal_dispositions_v1 "
+            "WHERE target_artifact_id = ?",
+            (MASTER_VISION_SEED_ID,),
+        ).fetchone()[0]
+    )
 
     observation = {
         "schema": "sab.master_vision_state_observation.v1",
@@ -720,16 +774,8 @@ def observe_master_vision_state(conn: sqlite3.Connection) -> Any:
             event["event_type"] not in {"submit", "challenge"}
             for event in witness_events
         ),
-        "supersession_edge_count": target_count(
-            "sab_seed_lineage_edges_v1",
-            "predecessor_seed_id = ? OR successor_seed_id = ?",
-            (MASTER_VISION_SEED_ID, MASTER_VISION_SEED_ID),
-        ),
-        "effective_disposition_count": target_count(
-            "sab_rehearsal_dispositions_v1",
-            "target_artifact_id = ?",
-            (MASTER_VISION_SEED_ID,),
-        ),
+        "supersession_edge_count": supersession_edge_count,
+        "effective_disposition_count": effective_disposition_count,
     }
     observation["observed_state_hash"] = contract_json_sha256(observation)
     try:
@@ -812,10 +858,17 @@ def _relation_count(
     count = 0
     for table, column in candidates:
         if _table_exists(conn, table) and column in _table_columns(conn, table):
+            quoted_table = _quote_identifier(table)
+            quoted_column = _quote_identifier(column)
+            # Candidates are caller-owned fixed tuples; both identifiers are
+            # also schema-checked, allowlisted, and quoted above.
+            query = (
+                f"SELECT COUNT(*) FROM {quoted_table} "  # nosec B608
+                f"WHERE {quoted_column}=?"
+            )
             count += int(
                 conn.execute(
-                    f"SELECT COUNT(*) FROM {_quote_identifier(table)} "
-                    f"WHERE {_quote_identifier(column)}=?",
+                    query,
                     (seed_id,),
                 ).fetchone()[0]
             )
