@@ -939,8 +939,10 @@ def upsert_spark_projection(
         raise ValueError("sparks table is missing required projection columns")
     placeholders = ", ".join("?" for _ in selected)
     column_sql = ", ".join(selected)
+    # `selected` contains only literal keys from `insert_values`; no caller-
+    # controlled identifier reaches this statement, and every value is bound.
     cursor = conn.execute(
-        f"INSERT INTO sparks ({column_sql}) VALUES ({placeholders})",
+        f"INSERT INTO sparks ({column_sql}) VALUES ({placeholders})",  # nosec B608
         tuple(insert_values[name] for name in selected),
     )
     spark_id = int(cursor.lastrowid)
