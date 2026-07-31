@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +76,8 @@ def test_packet_is_deterministic_unsigned_and_non_authorizing(
     verified = verify_operator_approval_packet(first)
     assert verified["packet_integrity_valid"] is True
     assert verified["evidence_reverified"] is False
+    assert verified["evidence_freshness_reverified"] is False
+    assert verified["operator_signing_eligible"] is False
     assert verified["live_authority_created"] is False
     assert verified["effect_executable"] is False
 
@@ -154,7 +157,54 @@ def test_markdown_requires_full_digest_and_shows_exact_evidence_roots(
     for item in packet["approval_payload"]["proposed_effects"]:
         assert item["proposal_sha256"] in rendered
         assert item["proposal"]["target_id"] in rendered
+
+    def sha256_leaves(value: Any) -> set[str]:
+        if isinstance(value, dict):
+            return set().union(*(sha256_leaves(child) for child in value.values()))
+        if isinstance(value, list):
+            return set().union(*(sha256_leaves(child) for child in value))
+        if (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value)
+        ):
+            return {value}
+        return set()
+
+    for digest in sha256_leaves(packet["approval_payload"]):
+        assert digest in rendered
+    assert "integrity_only_not_signable" in rendered
+    assert "Operator signing eligible from this view:** `false`" in rendered
+    assert "do not sign from this persisted view" in rendered
+    assert "Full canonical digest to sign" not in rendered
     assert ("Authorized" + "<Live>") not in rendered
+
+
+def test_persisted_freshness_is_explicitly_non_authorizing(
+    complete_fixture: dict[str, Any],
+) -> None:
+    packet = complete_fixture["packet"]
+    before = verify_operator_approval_packet(
+        packet,
+        checked_at=datetime(2026, 7, 31, 23, 59, 59, tzinfo=timezone.utc),
+    )
+    during = verify_operator_approval_packet(
+        packet,
+        checked_at=datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+    )
+    expired = verify_operator_approval_packet(
+        packet,
+        checked_at=datetime(2026, 8, 1, 0, 10, tzinfo=timezone.utc),
+    )
+
+    assert before["evidence_time_state"] == "not_yet_prepared"
+    assert during["evidence_time_state"] == "within_recorded_window_unreverified"
+    assert expired["evidence_time_state"] == "expired"
+    assert all(
+        result["operator_signing_eligible"] is False
+        and result["evidence_freshness_reverified"] is False
+        for result in (before, during, expired)
+    )
 
 
 def test_raw_mapping_and_forged_evidence_cannot_construct_packet(
@@ -456,6 +506,7 @@ def test_cli_only_verifies_and_renders_existing_packet(
     verification = json.loads(verified.stdout)
     assert verification["packet_integrity_valid"] is True
     assert verification["evidence_reverified"] is False
+    assert verification["operator_signing_eligible"] is False
     assert verification["live_authority_created"] is False
 
     rendered = subprocess.run(
@@ -471,8 +522,26 @@ def test_cli_only_verifies_and_renders_existing_packet(
         text=True,
     )
     assert rendered.returncode == 0, rendered.stderr
-    assert "Full canonical digest to sign" in rendered.stdout
+    assert "integrity_only_not_signable" in rendered.stdout
+    assert "Full canonical digest to sign" not in rendered.stdout
     assert SIGNING_INSTRUCTION in rendered.stdout
+
+    duplicate_path = tmp_path / "duplicate-packet.json"
+    duplicate_path.write_text('{"status":"first","status":"second"}', encoding="utf-8")
+    duplicate = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "verify-unsigned-packet",
+            "--packet",
+            str(duplicate_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert duplicate.returncode == 2
+    assert json.loads(duplicate.stdout)["error"] == "approval_input_duplicate_key"
 
     prepare = subprocess.run(
         [

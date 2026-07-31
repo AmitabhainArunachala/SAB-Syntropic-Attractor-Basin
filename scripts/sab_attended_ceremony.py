@@ -20,9 +20,21 @@ from agora.sab_first_verdict_approval import (  # noqa: E402
 )
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, child in pairs:
+        if key in value:
+            raise ApprovalPacketError(
+                "approval_input_duplicate_key",
+                "approval input contains a duplicate JSON key",
+            )
+        value[key] = child
+    return value
+
+
 def _load_object(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
-        value = json.load(handle)
+        value = json.load(handle, object_pairs_hook=_unique_object)
     if not isinstance(value, dict):
         raise ApprovalPacketError("input_shape_invalid", "input must be a JSON object")
     return value

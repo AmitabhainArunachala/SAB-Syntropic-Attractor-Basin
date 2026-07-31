@@ -71,9 +71,11 @@ GIT_OBJECT_PATTERN = r"^[0-9a-f]{40}$"
 IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 SIGNING_INSTRUCTION = (
-    "Inspect every full evidence digest and the current attended-window state; "
-    "then sign the full approval_payload_sha256 only. The short checksum and "
-    "this unsigned packet are non-authorizing."
+    "Only inside an attended controller that has re-derived current source "
+    "evidence, inspect every full evidence digest and the attended-window state; "
+    "then sign the full approval_payload_sha256 only. Never sign from a persisted "
+    "integrity-only view; the short checksum and this unsigned packet are "
+    "non-authorizing."
 )
 SIGNING_INSTRUCTION_SHA256 = hashlib.sha256(SIGNING_INSTRUCTION.encode()).hexdigest()
 BUILD_A_MERGE_COMMIT = "6ad237af3414288cee52148a5f0dec7c69f32b71"
@@ -393,6 +395,7 @@ class _CeremonyApprovalPayloadV2(_StrictModel):
     schema_version: Literal["sab.ceremony_approval_payload.v2"]
     ceremony_id: str = Field(pattern=IDENTIFIER_PATTERN)
     prepared_at: str
+    source_evidence_valid_until: str
     requested_scope: Literal["Live"] = "Live"
     evidence_derivation: Literal["typed_objects_rederived_in_memory_v1"] = (
         "typed_objects_rederived_in_memory_v1"
@@ -410,14 +413,16 @@ class _CeremonyApprovalPayloadV2(_StrictModel):
     effect_executable: Literal[False] = False
     live_authority_created: Literal[False] = False
 
-    @field_validator("prepared_at")
+    @field_validator("prepared_at", "source_evidence_valid_until")
     @classmethod
-    def _prepared_at_is_exact_utc(cls, value: str) -> str:
+    def _evidence_times_are_exact_utc(cls, value: str) -> str:
         if not UTC_PATTERN.fullmatch(value):
-            raise ValueError("prepared_at must use exact second-resolution UTC Z form")
+            raise ValueError(
+                "evidence times must use exact second-resolution UTC Z form"
+            )
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
         if parsed.tzinfo is None or parsed.astimezone(timezone.utc) != parsed:
-            raise ValueError("prepared_at must be UTC")
+            raise ValueError("evidence times must be UTC")
         return value
 
     @field_validator("proposed_effects", mode="before")
@@ -443,6 +448,14 @@ class _CeremonyApprovalPayloadV2(_StrictModel):
     def _all_persisted_cross_bindings_are_exact(
         self,
     ) -> "_CeremonyApprovalPayloadV2":
+        prepared_at = datetime.fromisoformat(self.prepared_at[:-1] + "+00:00")
+        valid_until = datetime.fromisoformat(
+            self.source_evidence_valid_until[:-1] + "+00:00"
+        )
+        if prepared_at >= valid_until:
+            raise ValueError(
+                "source evidence has no positive persisted validity window"
+            )
         if self.cost.total_maximum_cost_microusd > self.cost.spend_cap_microusd:
             raise ValueError("maximum cost exceeds the persisted spend cap")
         if not set(self.trust_anchors.frozen_trust_anchor_set_sha256s).issubset(
@@ -1174,6 +1187,14 @@ def bind_operator_approval_evidence(
         schema_version="sab.ceremony_approval_payload.v2",
         ceremony_id=manifest.ceremony_id,
         prepared_at=prepared_text,
+        source_evidence_valid_until=min(
+            frozen_readiness.valid_until,
+            live_readiness.valid_until,
+        )
+        .astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
         code=_CeremonyCodeBindingV2(
             runtime_commit_sha=manifest.expected_code_commit,
             build_a_merge_commit=build_a_closeout.pull_request.merge_commit,
@@ -1275,8 +1296,12 @@ def build_operator_approval_packet(
     }
 
 
-def verify_operator_approval_packet(packet: Mapping[str, Any]) -> dict[str, Any]:
-    """Verify packet integrity without recreating its in-memory evidence seals."""
+def verify_operator_approval_packet(
+    packet: Mapping[str, Any],
+    *,
+    checked_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Verify persisted integrity while keeping freshness explicitly non-positive."""
 
     _reject_secret_bearing_keys(packet)
     required = {
@@ -1335,6 +1360,22 @@ def verify_operator_approval_packet(packet: Mapping[str, Any]) -> dict[str, Any]
         raise ApprovalPacketError(
             "display_checksum_mismatch", "short display checksum does not verify"
         )
+    observed_at = checked_at or datetime.now(timezone.utc)
+    if not isinstance(observed_at, datetime) or observed_at.tzinfo is None:
+        raise ApprovalPacketError(
+            "verification_time_invalid", "verification time must be timezone-aware"
+        )
+    observed_at = observed_at.astimezone(timezone.utc)
+    prepared_at = datetime.fromisoformat(payload.prepared_at[:-1] + "+00:00")
+    valid_until = datetime.fromisoformat(
+        payload.source_evidence_valid_until[:-1] + "+00:00"
+    )
+    if observed_at < prepared_at:
+        evidence_time_state = "not_yet_prepared"
+    elif observed_at >= valid_until:
+        evidence_time_state = "expired"
+    else:
+        evidence_time_state = "within_recorded_window_unreverified"
     return {
         "packet_integrity_valid": True,
         "schema_version": "sab.operator_approval_packet_verification.v2",
@@ -1343,6 +1384,10 @@ def verify_operator_approval_packet(packet: Mapping[str, Any]) -> dict[str, Any]
         "approval_payload_sha256": digest,
         "short_display_checksum": short_display_checksum(digest),
         "evidence_reverified": False,
+        "evidence_freshness_reverified": False,
+        "evidence_time_state": evidence_time_state,
+        "source_evidence_valid_until": payload.source_evidence_valid_until,
+        "operator_signing_eligible": False,
         "effect_executable": False,
         "live_authority_created": False,
     }
@@ -1353,10 +1398,29 @@ def _format_microusd(value: int) -> str:
     return f"{dollars}.{micros:06d}"
 
 
-def render_operator_approval_markdown(packet: Mapping[str, Any]) -> str:
-    """Render a verified unsigned packet as a phone-readable inspection view."""
+def _sha256_inventory_lines(value: Any, *, path: str = "approval_payload") -> list[str]:
+    """List every persisted SHA-256 leaf with its unambiguous payload path."""
 
-    verified = verify_operator_approval_packet(packet)
+    lines: list[str] = []
+    if isinstance(value, Mapping):
+        for key in sorted(value):
+            lines.extend(_sha256_inventory_lines(value[key], path=f"{path}.{key}"))
+    elif isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            lines.extend(_sha256_inventory_lines(child, path=f"{path}[{index}]"))
+    elif isinstance(value, str) and re.fullmatch(SHA256_PATTERN, value):
+        lines.append(f"- `{path}`: `{value}`")
+    return lines
+
+
+def render_operator_approval_markdown(
+    packet: Mapping[str, Any],
+    *,
+    checked_at: datetime | None = None,
+) -> str:
+    """Render a complete but deliberately non-signable persisted inspection view."""
+
+    verified = verify_operator_approval_packet(packet, checked_at=checked_at)
     payload = _CeremonyApprovalPayloadV2.model_validate(packet["approval_payload"])
     effects = ", ".join(
         f"{item.proposal.effect_type} -> "
@@ -1372,14 +1436,21 @@ def render_operator_approval_markdown(packet: Mapping[str, Any]) -> str:
         f"- Live-preflight trust anchor: `{digest}`"
         for digest in payload.trust_anchors.live_trust_anchor_set_sha256s
     )
+    digest_inventory = "\n".join(
+        _sha256_inventory_lines(payload.model_dump(mode="json"))
+    )
     return "\n".join(
         [
             "# SAB attended ceremony approval — unsigned",
             "",
-            "**Status:** `awaiting_operator_countersign`",
+            "**Persisted-view status:** `integrity_only_not_signable`",
+            f"**Evidence time state:** `{verified['evidence_time_state']}`",
+            "**Operator signing eligible from this view:** `false`",
             "",
             "This is a non-authorizing evidence summary. Persisted verification "
-            "checks canonical integrity only; it does not recreate verifier seals.",
+            "checks canonical integrity only; it does not recreate verifier seals, "
+            "fresh source evidence, human presence, or current control authority. "
+            "Re-derive the packet inside the attended controller before signing.",
             "",
             f"- Ceremony: `{payload.ceremony_id}`",
             f"- Build B runtime commit: `{payload.code.runtime_commit_sha}`",
@@ -1389,6 +1460,12 @@ def render_operator_approval_markdown(packet: Mapping[str, Any]) -> str:
             "- Pinned Build A closeout canonical SHA-256: "
             f"`{payload.code.build_a_closeout_canonical_sha256}`",
             f"- Case: `{payload.authority_evidence.case_id}`",
+            f"- Artifact: `{payload.authority_evidence.artifact_id}`",
+            "- Expected evaluated state: "
+            f"`{payload.authority_evidence.expected_evaluated_state_sha256}`",
+            f"- Operator key fingerprint: `{payload.cost.operator_public_key_fingerprint}`",
+            f"- Prepared at: `{payload.prepared_at}`",
+            f"- Source evidence valid until: `{payload.source_evidence_valid_until}`",
             f"- Compiler scope: `{payload.bench.compiled_outcome_scope}`",
             f"- Compiled decision: `{payload.bench.compiled_decision}`",
             f"- Proposed effects: `{effects}`",
@@ -1402,7 +1479,11 @@ def render_operator_approval_markdown(packet: Mapping[str, Any]) -> str:
             frozen_anchors,
             live_anchors,
             "",
-            "## Full canonical digest to sign",
+            "## Complete persisted SHA-256 inventory",
+            "",
+            digest_inventory,
+            "",
+            "## Canonical payload digest — do not sign from this persisted view",
             "",
             f"`{verified['approval_payload_sha256']}`",
             "",
