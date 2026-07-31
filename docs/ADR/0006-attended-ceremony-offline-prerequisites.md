@@ -29,6 +29,7 @@ following type boundary:
 ```text
 StructurallyCompleteAwaitingAuthority != Authorized<Live>
 PersistedAuthorityReceipt !-> EvaluatorCapability
+SignedObservationReceipt !-> LiveObservation
 UnsignedOperatorPacket !-> OperatorCountersign
 CompiledVerdict<Copy> !-> EffectiveVerdict<Live>
 ```
@@ -37,10 +38,10 @@ The slice has four deliberately separate components:
 
 | Component | Public role | Strongest positive result | Forbidden result |
 | --- | --- | --- | --- |
-| `sab_first_verdict_ceremony.py` | Verify frozen authority receipts, provider facts, cost, runtime, state, tick exclusion, and restoration bindings | `StructurallyCompleteAwaitingAuthority` | live authority or permission to execute |
+| `sab_first_verdict_ceremony.py` | Verify signed founder, provider, cost, runtime, state, control, tick, restoration, and prepared-Live-lease evidence against exact out-of-band trust-anchor sets | locally sealed `StructurallyCompleteAwaitingAuthority` | live authority or permission to execute |
 | `sab_first_verdict_transcript.py` | Verify and append an exact nine-seat, three-stage commitment/reveal transcript to an in-memory fixture or attested copy | structural readiness plus an immutable transcript digest | provider calls, live persistence, standing effects |
 | `sab_first_verdict_compiler.py` | Re-derive raw and clean-cluster tallies under an explicit self-hashed terminality rule | verified Copy-scoped verdict, refusal, or appeal | a Live capability or implicit terminality policy |
-| `sab_first_verdict_approval.py` | Bind the evidence to a full canonical digest and phone-readable unsigned packet | `awaiting_operator_countersign` | signature acceptance or effect execution |
+| `sab_first_verdict_approval.py` | Re-derive all cross-module evidence bindings in memory, then produce a full canonical digest and phone-readable unsigned packet | `awaiting_operator_countersign` | caller-authored hash envelopes, signature acceptance, or effect execution |
 
 The compiler checks evaluator-sealed Copy authority before it receives or
 parses the rule, case, roster, ballots, or other merits. Serialized authority
@@ -54,27 +55,55 @@ delete, exact replay is idempotent, and an injected failure rolls the whole
 three-stage write back. Storage accepts only an in-memory fixture or a
 connection already attested by Build A as a copy.
 
-The approval packet is always unsigned and non-executable. Its short checksum
-is a display aid only. An operator must inspect and sign the full 64-character
+The frozen bench contains exactly nine ordered `FrozenSeatV1` records. The
+same roster root and terminality-rule digest are required by provider
+preflight, all three transcript stages, the compiler, and the approval
+derivation. Every ballot signature is verified over the canonical ballot
+bytes against that seat's exact signer and execution key. A reordered seat,
+substituted route, changed cluster, changed key, or invalid signature is a
+typed non-positive result.
+
+Founder, provider, maintenance, control, and prepared-lease records carry
+Ed25519 attestations and are checked against role-specific out-of-band trust
+sets. Their signatures authenticate persisted bytes; they do not prove that a
+live observation occurred or recreate a control/evaluator capability. A
+readiness result therefore also carries the digests of the trust-anchor sets
+used and an evaluator-local seal. Serialization, direct construction, or a
+tampered model copy cannot be promoted into readiness.
+
+The approval packet is always unsigned and non-executable. Its constructor
+accepts only a locally sealed evidence derivation produced from the typed
+manifest, both readiness values, transcript, terminal compiler outcome,
+signed maintenance evidence, exact effect proposals, and Build A closeout.
+It does not accept a caller-authored JSON envelope. Its short checksum is a
+display aid only. An operator must inspect and sign the full 64-character
 canonical digest during the attended window; this offline slice deliberately
 contains no signature-ingest or live-effect path.
 
+The Build A closeout parser accepts the exact merged/green/non-live receipt
+schema and records its merge commit and tree separately from the later Build B
+runtime commit. A copied SHA string in an arbitrary JSON object is not a
+closeout receipt.
+
 ## Offline CLI
 
-The checked-in CLI prepares or verifies only the unsigned packet:
+The checked-in CLI can integrity-check or render an already derived unsigned
+packet. It cannot synthesize a trusted packet from JSON:
 
 ```bash
-python scripts/sab_attended_ceremony.py prepare-unsigned-packet \
-  --input ceremony-approval-envelope.json
-
-python scripts/sab_attended_ceremony.py prepare-unsigned-packet \
-  --input ceremony-approval-envelope.json --format markdown
-
 python scripts/sab_attended_ceremony.py verify-unsigned-packet \
+  --packet unsigned-operator-packet.json
+
+python scripts/sab_attended_ceremony.py render-unsigned-packet \
   --packet unsigned-operator-packet.json
 ```
 
-Successful verification still returns `live_authority_created=false` and
+This is intentionally a source-checkout operator tool, not a service endpoint
+or container entrypoint. Adding it to a deployed image would be a separate
+reviewed packaging decision.
+
+Successful persisted verification reports canonical packet integrity only,
+with `evidence_reverified=false`, `live_authority_created=false`, and
 `effect_executable=false`.
 
 ## Authorities Still Required
@@ -94,13 +123,17 @@ No additional ordinary coding work may truthfully manufacture these inputs:
    procedure. No production or persistent private key belongs in this repo.
 4. **Provider and spend authority.** Supply credentials outside artifacts,
    run fresh catalog/balance/requested-versus-served/model-lineage/transport
-   probes, approve the exact cost ceiling, and prohibit automatic top-up.
+   probes, sign them with an approved probe-attestor key, approve the exact
+   cost ceiling, and prohibit automatic top-up.
 5. **Maintenance authority.** Approve the service and tick pause/restore
    controls, deployment topology, maintenance window, dedicated accepted SHA,
    and sole-writer runtime. A passing validator does not grant those controls.
-6. **Fresh live state.** During the window, produce the backup, integrity
-   result, database hash, lifecycle fingerprint, state snapshot, exclusion
-   receipt, write lease, and restoration plan from the actual deployment.
+6. **Fresh live state.** During the window, produce and attest the backup,
+   integrity result, database hash, lifecycle fingerprint, state snapshot,
+   exclusion receipt, prepared Live lease, narrow service/tick control
+   receipts, and restoration plan from the actual deployment. Test signatures
+   prove the verifier; they are not substitutes for these operator-controlled
+   receipts.
 7. **Exact Live effect semantics.** Only after the founder choice and a fresh
    `Authorized<Live>` value exist may an attended controller expose one
    idempotent effect. This slice intentionally does not guess that policy or
