@@ -336,7 +336,15 @@ def test_attested_open_rejects_inode_swap_between_binding_and_connect(
         replacement.replace(copied)
         return real_connect(*args, **kwargs)
 
+    def descriptor_reopen_must_not_run(
+        *args: object, **kwargs: object
+    ) -> sqlite3.Connection:
+        raise AssertionError("one-way swaps must fail before descriptor reopening")
+
     monkeypatch.setattr(storage_module.sqlite3, "connect", swap_then_connect)
+    monkeypatch.setattr(
+        storage_module, "_RAW_SQLITE_CONNECT", descriptor_reopen_must_not_run
+    )
     with pytest.raises(DatabaseSafetyError, match="attested copy descriptor"):
         open_attested_copy_connection(
             attestation, expected_file_identity=bound_identity
@@ -415,6 +423,27 @@ def test_attested_open_aba_path_swap_cannot_redirect_sqlite(
         assert (
             restored.execute("SELECT COUNT(*) FROM expected_marker").fetchone()[0] == 1
         )
+
+
+def test_attested_open_fails_closed_when_descriptor_reopen_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, _, attestation = _build_attestation(tmp_path)
+
+    def unavailable_descriptor_reopen(
+        *args: object, **kwargs: object
+    ) -> sqlite3.Connection:
+        raise sqlite3.OperationalError("descriptor reopen unavailable")
+
+    monkeypatch.setattr(
+        storage_module, "_RAW_SQLITE_CONNECT", unavailable_descriptor_reopen
+    )
+    with pytest.raises(DatabaseSafetyError, match="could not verify.*lock identity"):
+        open_attested_copy_connection(attestation)
+
+    monkeypatch.setattr(storage_module, "_RAW_SQLITE_CONNECT", sqlite3.connect)
+    reopened = open_attested_copy_connection(attestation)
+    reopened.close()
 
 
 def test_attested_receipt_rejects_unknown_schema(tmp_path: Path) -> None:
@@ -578,9 +607,9 @@ def test_attested_delete_journal_recovers_after_process_crash(
 
     recovered = open_attested_copy_connection(attestation)
     try:
-        assert recovered.execute("SELECT value FROM legacy WHERE id=1").fetchone()[0] == (
-            "preserved"
-        )
+        assert recovered.execute("SELECT value FROM legacy WHERE id=1").fetchone()[
+            0
+        ] == ("preserved")
     finally:
         recovered.close()
 

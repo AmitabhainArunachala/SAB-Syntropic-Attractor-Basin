@@ -478,7 +478,12 @@ def _prove_connection_matches_descriptor(
     try:
         descriptor_path = f"/dev/fd/{open_fd}"
         uri = f"file:{quote(descriptor_path, safe='/')}?mode=rw"
-        verifier = _RAW_SQLITE_CONNECT(uri, uri=True, timeout=0)
+        try:
+            verifier = _RAW_SQLITE_CONNECT(uri, uri=True, timeout=0)
+        except sqlite3.Error as exc:
+            raise DatabaseSafetyError(
+                "could not verify the attested database lock identity"
+            ) from exc
         verifier.execute("PRAGMA busy_timeout=0")
         try:
             verifier.execute("BEGIN IMMEDIATE")
@@ -646,6 +651,14 @@ def open_attested_copy_connection(
         if _regular_fd_identity(open_fd) != descriptor_identity:
             raise DatabaseSafetyError(
                 "copy descriptor identity changed while opening the connection"
+            )
+        # SQLite's Linux pathname VFS may be unable to open /dev/fd/N once the
+        # bound inode is unlinked.  Detect the ordinary one-way path swap
+        # directly before the lock-domain challenge; the challenge remains
+        # necessary for an ABA swap that restores the original pathname.
+        if _regular_file_identity(resolved) != descriptor_identity:
+            raise DatabaseSafetyError(
+                "SQLite connection differs from the attested copy descriptor"
             )
         _prove_connection_matches_descriptor(conn, open_fd)
         database_rows = conn.execute("PRAGMA database_list").fetchall()
