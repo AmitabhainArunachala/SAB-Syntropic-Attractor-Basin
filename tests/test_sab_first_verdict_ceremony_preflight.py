@@ -13,6 +13,8 @@ from pydantic import ValidationError
 
 from agora.sab_artifact_verdict import (
     ContractSignatureV1,
+    EvidenceRefV1,
+    FrozenSeatV1,
     MASTER_VISION_SEED_ID,
     canonical_json_bytes,
     canonical_sha256,
@@ -23,8 +25,11 @@ from agora.sab_first_verdict_ceremony import (
     BenchSeatCostV1,
     Blocked,
     FROZEN_MAINTENANCE_OPERATIONS_SHA256,
+    FounderDecisionReceiptV1,
     FrozenBenchManifestV1,
     FrozenBenchSeatV1,
+    LiveWriteLeaseEnvelopeV1,
+    MaintenanceControlAuthorityReceiptV1,
     MaintenanceRuntimeAttestationV1,
     ProviderProbeReceiptV1,
     RestorationPlanV1,
@@ -32,6 +37,7 @@ from agora.sab_first_verdict_ceremony import (
     SignedAuthorityEvaluationEnvelopeV1,
     StructurallyCompleteAwaitingAuthority,
     TickExclusionReceiptV1,
+    readiness_is_locally_verified,
     validate_live_preflight_receipts,
     verify_frozen_execution_facts,
 )
@@ -45,6 +51,21 @@ SHA_D = "d" * 64
 SHA_E = "e" * 64
 SHA_F = "f" * 64
 GIT_A = "a" * 40
+EFFECT = "record_terminal_disposition"
+
+
+def _sha(label: str) -> str:
+    return hashlib.sha256(label.encode("utf-8")).hexdigest()
+
+
+def _key(label: str) -> SigningKey:
+    """Return a deterministic key which exists only inside this test process."""
+
+    return SigningKey(hashlib.sha256(f"sab-test-key:{label}".encode()).digest())
+
+
+def _public_key(key: SigningKey) -> str:
+    return bytes(key.verify_key).hex()
 
 
 def _fingerprint(key: SigningKey) -> str:
@@ -54,25 +75,48 @@ def _fingerprint(key: SigningKey) -> str:
 def _signature(key: SigningKey, signer: str, message: bytes) -> ContractSignatureV1:
     return ContractSignatureV1(
         signer=signer,
-        public_key=bytes(key.verify_key).hex(),
+        public_key=_public_key(key),
         signature=key.sign(message).signature.hex(),
         signed_payload_sha256=hashlib.sha256(message).hexdigest(),
     )
 
 
 def _dummy_signature(key: SigningKey, signer: str) -> ContractSignatureV1:
+    """Structurally valid nonzero metadata used only to derive signing bytes."""
+
     return ContractSignatureV1(
         signer=signer,
-        public_key=bytes(key.verify_key).hex(),
-        signature="0" * 128,
-        signed_payload_sha256="0" * 64,
+        public_key=_public_key(key),
+        signature="01" * 64,
+        signed_payload_sha256="01" * 32,
+    )
+
+
+def _signed_observation(
+    model_type: type[Any],
+    key: SigningKey,
+    signer: str,
+    **payload: Any,
+) -> Any:
+    """Construct, sign, and reconstruct any signed observation model."""
+
+    provisional = model_type(
+        **payload,
+        attestor_identity=signer,
+        attestor_public_key=_public_key(key),
+        attestor_fingerprint=_fingerprint(key),
+        attestation_signature=_dummy_signature(key, signer),
+    )
+    return model_type(
+        **provisional.canonical_payload(exclude={"attestation_signature"}),
+        attestation_signature=_signature(key, signer, provisional.signing_bytes()),
     )
 
 
 def _signed_authority(
     evaluator_key: SigningKey,
     *,
-    effect: str = "record_terminal_disposition",
+    effect: str = EFFECT,
 ) -> SignedAuthorityEvaluationEnvelopeV1:
     signer = "evaluator.primary"
     provisional = SignedAuthorityEvaluationEnvelopeV1(
@@ -89,16 +133,78 @@ def _signed_authority(
         reported_allowed_effects=(effect,),
         reported_live_eligible=True,
         evaluator_identity=signer,
-        evaluator_public_key=bytes(evaluator_key.verify_key).hex(),
+        evaluator_public_key=_public_key(evaluator_key),
         evaluator_fingerprint=_fingerprint(evaluator_key),
         evaluated_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=4),
         signature=_dummy_signature(evaluator_key, signer),
     )
-    message = provisional.signing_bytes()
     return SignedAuthorityEvaluationEnvelopeV1(
         **provisional.canonical_payload(exclude={"signature"}),
-        signature=_signature(evaluator_key, signer, message),
+        signature=_signature(evaluator_key, signer, provisional.signing_bytes()),
+    )
+
+
+def _frozen_seat(index: int, execution_key: SigningKey) -> FrozenSeatV1:
+    seat = f"seat-{index:02d}"
+    route = f"route-{index:02d}"
+    correlation = f"correlation-{index:02d}"
+    return FrozenSeatV1(
+        seat_id=seat,
+        requested_lab=f"lab-{index:02d}",
+        requested_model=f"model-{index:02d}",
+        adapter="provider-api-v1",
+        transport="https",
+        requested_route=route,
+        served_provider=f"provider-{index:02d}",
+        served_model=f"model-{index:02d}",
+        model_family=f"lineage-{index:02d}",
+        credited_cluster=f"cluster-{index:02d}",
+        model_lineage_evidence_refs=(
+            EvidenceRefV1(
+                ref=f"fixture://lineage/{index:02d}",
+                content_sha256=_sha(f"lineage-evidence-{index:02d}"),
+                proof_class="deterministic_test_fixture",
+            ),
+        ),
+        possible_underlying_routes=(route,),
+        transport_correlation_refs=(correlation,),
+        correlation_smeared=True,
+        execution_public_key=_public_key(execution_key),
+        common_operator_backing="ephemeral deterministic test operator",
+        liveness_receipt_sha256=_sha(f"liveness-{index:02d}"),
+    )
+
+
+def _signed_probe(
+    index: int,
+    *,
+    seat: FrozenSeatV1,
+    provider_key: SigningKey,
+    balance_microusd: int,
+) -> ProviderProbeReceiptV1:
+    correlation = f"correlation-{index:02d}"
+    return _signed_observation(
+        ProviderProbeReceiptV1,
+        provider_key,
+        "provider.attestor",
+        probe_id=f"probe-{index:02d}",
+        ceremony_id="ceremony-1",
+        provider=seat.served_provider,
+        requested_route=seat.requested_route,
+        served_route=seat.requested_route,
+        requested_model=seat.requested_model,
+        served_model=seat.served_model,
+        requested_lineage=seat.model_family,
+        served_lineage=seat.model_family,
+        requested_correlation_id=correlation,
+        served_correlation_id=correlation,
+        frozen_seat=seat,
+        catalog_sha256=_sha(f"catalog-{index:02d}"),
+        response_sha256=_sha(f"probe-response-{index:02d}"),
+        available_balance_microusd=balance_microusd,
+        probed_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=4),
     )
 
 
@@ -106,83 +212,113 @@ def _signed_cost(
     operator_key: SigningKey,
     *,
     bench: FrozenBenchManifestV1,
-    probe: ProviderProbeReceiptV1,
-    maximum_cost_microusd: int = 1_000,
+    probes: tuple[ProviderProbeReceiptV1, ...],
+    maximum_cost_microusd: int = 100,
     spend_cap_microusd: int = 1_500,
 ) -> BenchCostEnvelopeV1:
     signer = "operator.primary"
+    seat_costs = tuple(
+        BenchSeatCostV1(
+            seat_id=seat.seat_id,
+            provider_probe_sha256=probe.canonical_sha256(),
+            pricing_catalog_sha256=probe.catalog_sha256,
+            maximum_cost_microusd=maximum_cost_microusd,
+        )
+        for seat, probe in zip(bench.seats, probes, strict=True)
+    )
     provisional = BenchCostEnvelopeV1(
         cost_envelope_id="cost-1",
         ceremony_id="ceremony-1",
         bench_manifest_sha256=bench.canonical_sha256(),
-        seat_costs=(
-            BenchSeatCostV1(
-                seat_id="seat-1",
-                provider_probe_sha256=probe.canonical_sha256(),
-                pricing_catalog_sha256=probe.catalog_sha256,
-                maximum_cost_microusd=maximum_cost_microusd,
-            ),
-        ),
-        total_maximum_cost_microusd=maximum_cost_microusd,
+        seat_costs=seat_costs,
+        total_maximum_cost_microusd=maximum_cost_microusd * len(seat_costs),
         spend_cap_microusd=spend_cap_microusd,
         approved_by=signer,
-        approver_public_key=bytes(operator_key.verify_key).hex(),
+        approver_public_key=_public_key(operator_key),
         approver_fingerprint=_fingerprint(operator_key),
         approved_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=4),
         approval_signature=_dummy_signature(operator_key, signer),
     )
-    message = provisional.signing_bytes()
     return BenchCostEnvelopeV1(
         **provisional.canonical_payload(exclude={"approval_signature"}),
-        approval_signature=_signature(operator_key, signer, message),
+        approval_signature=_signature(
+            operator_key, signer, provisional.signing_bytes()
+        ),
     )
 
 
 def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
-    evaluator_key = SigningKey(bytes(range(32)))
-    operator_key = SigningKey(bytes(reversed(range(32))))
-    authority = _signed_authority(evaluator_key)
-    probe = ProviderProbeReceiptV1(
-        probe_id="probe-1",
+    keys = {
+        name: _key(name)
+        for name in (
+            "founder",
+            "evaluator",
+            "provider",
+            "operator",
+            "maintenance",
+            "control",
+            "lease",
+        )
+    }
+    execution_keys = tuple(_key(f"execution-{index:02d}") for index in range(1, 10))
+
+    founder = _signed_observation(
+        FounderDecisionReceiptV1,
+        keys["founder"],
+        "founder.primary",
+        decision_id="founder-decision-1",
         ceremony_id="ceremony-1",
-        provider="provider-a",
-        requested_route="route-a",
-        served_route="route-a",
-        requested_model="model-a",
-        served_model="model-a",
-        requested_lineage="lineage-a",
-        served_lineage="lineage-a",
-        requested_correlation_id="correlation-a",
-        served_correlation_id="correlation-a",
-        catalog_sha256=SHA_E,
-        response_sha256=SHA_F,
-        available_balance_microusd=balance_microusd,
-        probed_at=NOW - timedelta(minutes=1),
+        case_id="case-1",
+        case_sha256=SHA_A,
+        artifact_id="artifact-1",
+        artifact_sha256=SHA_B,
+        decision="alternate_artifact_terminal_disposition",
+        requested_effects=(EFFECT,),
+        decided_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=4),
     )
-    seat = FrozenBenchSeatV1(
-        seat_id="seat-1",
-        role="jurist-1",
-        provider=probe.provider,
-        route=probe.requested_route,
-        model=probe.requested_model,
-        lineage=probe.requested_lineage,
-        transport_correlation_id=probe.requested_correlation_id,
-        provider_probe_sha256=probe.canonical_sha256(),
+    authority = _signed_authority(keys["evaluator"])
+
+    frozen_seats = tuple(
+        _frozen_seat(index, execution_keys[index - 1]) for index in range(1, 10)
+    )
+    probes = tuple(
+        _signed_probe(
+            index,
+            seat=frozen_seats[index - 1],
+            provider_key=keys["provider"],
+            balance_microusd=balance_microusd,
+        )
+        for index in range(1, 10)
+    )
+    bench_seats = tuple(
+        FrozenBenchSeatV1(
+            role=f"jurist-{index:02d}",
+            frozen_seat=frozen_seats[index - 1],
+            probe_correlation_id=f"correlation-{index:02d}",
+            provider_probe_sha256=probes[index - 1].canonical_sha256(),
+        )
+        for index in range(1, 10)
     )
     bench = FrozenBenchManifestV1(
         bench_id="bench-1",
         ceremony_id="ceremony-1",
         case_id="case-1",
         case_sha256=SHA_A,
-        seats=(seat,),
-        roster_sha256=canonical_sha256([seat.canonical_payload()]),
+        seats=bench_seats,
+        roster_sha256=canonical_sha256(
+            [seat.canonical_payload() for seat in frozen_seats]
+        ),
+        terminality_rule_sha256=_sha("council-terminality-rule-v1"),
         frozen_at=NOW - timedelta(minutes=1),
     )
-    cost = _signed_cost(operator_key, bench=bench, probe=probe)
+    cost = _signed_cost(keys["operator"], bench=bench, probes=probes)
 
-    runtime = MaintenanceRuntimeAttestationV1(
+    runtime = _signed_observation(
+        MaintenanceRuntimeAttestationV1,
+        keys["maintenance"],
+        "maintenance.attestor",
         attestation_id="runtime-attestation-1",
         ceremony_id="ceremony-1",
         runtime_id="maintenance-runtime-1",
@@ -201,7 +337,52 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         attested_at=NOW - timedelta(seconds=20),
         expires_at=NOW + timedelta(minutes=4),
     )
-    snapshot = ServiceStateSnapshotV1(
+    service_control = _signed_observation(
+        MaintenanceControlAuthorityReceiptV1,
+        keys["control"],
+        "control.authority",
+        authority_id="service-control-1",
+        ceremony_id="ceremony-1",
+        control_kind="service",
+        target_id="agora-live",
+        authority_scope="pause_and_restore_exact_prior_service",
+        authorized_from=NOW - timedelta(minutes=1),
+        authorized_until=NOW + timedelta(minutes=5),
+        issued_at=NOW - timedelta(minutes=2),
+        expires_at=NOW + timedelta(minutes=6),
+    )
+    tick_control = _signed_observation(
+        MaintenanceControlAuthorityReceiptV1,
+        keys["control"],
+        "control.authority",
+        authority_id="tick-control-1",
+        ceremony_id="ceremony-1",
+        control_kind="tick",
+        target_id="agora-tick",
+        authority_scope="exclude_and_restore_exact_prior_tick",
+        authorized_from=NOW - timedelta(minutes=1),
+        authorized_until=NOW + timedelta(minutes=5),
+        issued_at=NOW - timedelta(minutes=2),
+        expires_at=NOW + timedelta(minutes=6),
+    )
+    lease = _signed_observation(
+        LiveWriteLeaseEnvelopeV1,
+        keys["lease"],
+        "lease.issuer",
+        lease_id="live-write-lease-1",
+        ceremony_id="ceremony-1",
+        runtime_id=runtime.runtime_id,
+        writer_id=runtime.writer_id,
+        database_sha256=runtime.database_sha256,
+        lifecycle_fingerprint=runtime.lifecycle_fingerprint,
+        allowed_effects=(EFFECT,),
+        issued_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    snapshot = _signed_observation(
+        ServiceStateSnapshotV1,
+        keys["maintenance"],
+        "maintenance.attestor",
         snapshot_id="service-snapshot-1",
         ceremony_id="ceremony-1",
         service_name="agora-live",
@@ -214,8 +395,8 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         tick_id="agora-tick",
         prior_tick_state="enabled",
         prior_tick_definition_sha256=SHA_B,
-        service_control_authority_sha256=SHA_C,
-        tick_control_authority_sha256=SHA_D,
+        service_control_authority_sha256=service_control.canonical_sha256(),
+        tick_control_authority_sha256=tick_control.canonical_sha256(),
         database_sha256=runtime.database_sha256,
         lifecycle_fingerprint=runtime.lifecycle_fingerprint,
         backup_sha256=SHA_F,
@@ -223,22 +404,28 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         captured_at=NOW - timedelta(seconds=15),
         expires_at=NOW + timedelta(minutes=4),
     )
-    tick = TickExclusionReceiptV1(
+    tick = _signed_observation(
+        TickExclusionReceiptV1,
+        keys["maintenance"],
+        "maintenance.attestor",
         receipt_id="tick-exclusion-1",
         ceremony_id="ceremony-1",
         tick_id=snapshot.tick_id,
         tick_definition_sha256=snapshot.prior_tick_definition_sha256,
-        tick_control_authority_sha256=snapshot.tick_control_authority_sha256,
+        tick_control_authority_sha256=tick_control.canonical_sha256(),
         excluded_from=NOW - timedelta(minutes=1),
-        excluded_until=NOW + timedelta(minutes=6),
+        excluded_until=NOW + timedelta(minutes=4),
         ceremony_window_start=NOW - timedelta(seconds=30),
-        ceremony_window_end=NOW + timedelta(minutes=5),
+        ceremony_window_end=NOW + timedelta(minutes=3),
         last_tick_completed_at=NOW - timedelta(minutes=2),
-        next_tick_not_before=NOW + timedelta(minutes=6),
+        next_tick_not_before=NOW + timedelta(minutes=4),
         observed_at=NOW - timedelta(seconds=10),
         expires_at=NOW + timedelta(minutes=4),
     )
-    restoration = RestorationPlanV1(
+    restoration = _signed_observation(
+        RestorationPlanV1,
+        keys["maintenance"],
+        "maintenance.attestor",
         plan_id="restoration-1",
         ceremony_id="ceremony-1",
         service_state_snapshot_sha256=snapshot.canonical_sha256(),
@@ -253,8 +440,8 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         restore_tick_definition_sha256=snapshot.prior_tick_definition_sha256,
         restore_database_sha256=snapshot.database_sha256,
         restore_lifecycle_fingerprint=snapshot.lifecycle_fingerprint,
-        service_control_authority_sha256=snapshot.service_control_authority_sha256,
-        tick_control_authority_sha256=snapshot.tick_control_authority_sha256,
+        service_control_authority_sha256=service_control.canonical_sha256(),
+        tick_control_authority_sha256=tick_control.canonical_sha256(),
         generated_at=NOW - timedelta(seconds=5),
     )
     manifest = AttendedCeremonyManifestV1(
@@ -264,13 +451,17 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         artifact_id="artifact-1",
         artifact_sha256=SHA_B,
         policy_sha256=SHA_C,
-        requested_effects=("record_terminal_disposition",),
+        requested_effects=(EFFECT,),
         founder_decision="alternate_artifact_terminal_disposition",
-        founder_decision_receipt_sha256=SHA_F,
+        founder_decision_receipt_sha256=founder.canonical_sha256(),
         authority_evaluation_sha256=authority.canonical_sha256(),
         bench_manifest_sha256=bench.canonical_sha256(),
+        frozen_roster_sha256=bench.roster_sha256,
+        terminality_rule_sha256=bench.terminality_rule_sha256,
         bench_cost_envelope_sha256=cost.canonical_sha256(),
-        provider_probe_sha256s=(probe.canonical_sha256(),),
+        provider_probe_sha256s=tuple(
+            sorted(probe.canonical_sha256() for probe in probes)
+        ),
         maintenance_runtime_attestation_sha256=runtime.canonical_sha256(),
         service_state_snapshot_sha256=snapshot.canonical_sha256(),
         tick_exclusion_receipt_sha256=tick.canonical_sha256(),
@@ -286,24 +477,29 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
         expected_writer_id=runtime.writer_id,
         expected_service_name=snapshot.service_name,
         expected_tick_id=tick.tick_id,
-        service_control_authority_sha256=snapshot.service_control_authority_sha256,
-        tick_control_authority_sha256=snapshot.tick_control_authority_sha256,
+        service_control_authority_sha256=service_control.canonical_sha256(),
+        tick_control_authority_sha256=tick_control.canonical_sha256(),
+        live_write_lease_sha256=lease.canonical_sha256(),
         operator_identity="operator.primary",
-        operator_public_key=bytes(operator_key.verify_key).hex(),
-        operator_fingerprint=_fingerprint(operator_key),
+        operator_public_key=_public_key(keys["operator"]),
+        operator_fingerprint=_fingerprint(keys["operator"]),
         frozen_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=4),
         maintenance_window_start=NOW - timedelta(seconds=30),
-        maintenance_window_end=NOW + timedelta(minutes=5),
+        maintenance_window_end=NOW + timedelta(minutes=3),
     )
     return {
-        "evaluator_key": evaluator_key,
-        "operator_key": operator_key,
+        "keys": keys,
+        "execution_keys": execution_keys,
+        "founder": founder,
         "authority": authority,
-        "probe": probe,
+        "probes": probes,
         "bench": bench,
         "cost": cost,
         "runtime": runtime,
+        "service_control": service_control,
+        "tick_control": tick_control,
+        "lease": lease,
         "snapshot": snapshot,
         "tick": tick,
         "restoration": restoration,
@@ -314,11 +510,17 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
 def _frozen(packet: dict[str, Any], **overrides: Any):
     arguments = {
         "manifest": packet["manifest"],
+        "founder_decision_receipt": packet["founder"],
         "authority_evaluation": packet["authority"],
-        "provider_probes": (packet["probe"],),
+        "provider_probes": packet["probes"],
         "bench_manifest": packet["bench"],
         "cost_envelope": packet["cost"],
-        "trusted_evaluator_fingerprints": {packet["authority"].evaluator_fingerprint},
+        "trusted_founder_fingerprints": {_fingerprint(packet["keys"]["founder"])},
+        "trusted_evaluator_fingerprints": {_fingerprint(packet["keys"]["evaluator"])},
+        "trusted_operator_fingerprints": {_fingerprint(packet["keys"]["operator"])},
+        "trusted_provider_attestor_fingerprints": {
+            _fingerprint(packet["keys"]["provider"])
+        },
         "now": NOW,
     }
     arguments.update(overrides)
@@ -333,6 +535,18 @@ def _live(packet: dict[str, Any], **overrides: Any):
         "service_state_snapshot": packet["snapshot"],
         "tick_exclusion_receipt": packet["tick"],
         "restoration_plan": packet["restoration"],
+        "service_control_authority_receipt": packet["service_control"],
+        "tick_control_authority_receipt": packet["tick_control"],
+        "write_lease": packet["lease"],
+        "trusted_maintenance_attestor_fingerprints": {
+            _fingerprint(packet["keys"]["maintenance"])
+        },
+        "trusted_control_authority_fingerprints": {
+            _fingerprint(packet["keys"]["control"])
+        },
+        "trusted_write_lease_issuer_fingerprints": {
+            _fingerprint(packet["keys"]["lease"])
+        },
         "now": NOW,
     }
     arguments.update(overrides)
@@ -343,11 +557,20 @@ def _codes(result: Blocked) -> set[str]:
     return {issue.code for issue in result.blockers}
 
 
-def test_frozen_facts_are_canonical_and_explicitly_non_authorizing() -> None:
+def _tampered_signature(
+    value: Any, field: str = "attestation_signature"
+) -> dict[str, Any]:
+    raw = value.canonical_payload()
+    raw[field]["signature"] = "02" * 64
+    return raw
+
+
+def test_genuine_frozen_facts_are_locally_sealed_and_non_authorizing() -> None:
     packet = _packet()
     result = _frozen(packet)
 
     assert isinstance(result, StructurallyCompleteAwaitingAuthority)
+    assert readiness_is_locally_verified(result, phase="frozen_execution_facts")
     assert result.status == "StructurallyCompleteAwaitingAuthority"
     assert result.phase == "frozen_execution_facts"
     assert result.live_authority_state == "absent"
@@ -358,17 +581,84 @@ def test_frozen_facts_are_canonical_and_explicitly_non_authorizing() -> None:
     assert "Authorized<Live>" not in result.canonical_json()
 
 
-def test_valid_maintenance_receipts_still_await_authority_and_human_signature() -> None:
+def test_genuine_live_preflight_is_locally_sealed_but_never_live_authority() -> None:
     packet = _packet()
     result = _live(packet)
 
     assert isinstance(result, StructurallyCompleteAwaitingAuthority)
+    assert readiness_is_locally_verified(result, phase="live_maintenance_preflight")
     assert result.phase == "live_maintenance_preflight"
     assert (
         result.next_requirement == "fresh_authority_capability_and_operator_signature"
     )
     assert result.live_authority_state == "absent"
     assert result.permits_live_effect is False
+    assert "Authorized<Live>" not in result.canonical_json()
+
+
+@pytest.mark.parametrize("seat_count", [1, 8, 10])
+def test_non_nine_seat_benches_are_rejected(seat_count: int) -> None:
+    packet = _packet()
+    raw = packet["bench"].canonical_payload()
+    if seat_count <= 9:
+        raw["seats"] = raw["seats"][:seat_count]
+    else:
+        raw["seats"] = [*raw["seats"], copy.deepcopy(raw["seats"][-1])]
+    raw["roster_sha256"] = canonical_sha256(
+        [seat["frozen_seat"] for seat in raw["seats"]]
+    )
+
+    with pytest.raises(ValidationError):
+        FrozenBenchManifestV1.model_validate(raw)
+    result = _frozen(packet, bench_manifest=raw)
+    assert isinstance(result, Blocked)
+    assert "bench_manifest_invalid" in _codes(result)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("execution_public_key", _public_key(_key("substituted-execution-key"))),
+        ("requested_route", "route-substituted"),
+        ("credited_cluster", "cluster-substituted"),
+    ],
+)
+def test_frozen_seat_key_route_or_cluster_mutation_blocks(
+    field: str, value: str
+) -> None:
+    packet = _packet()
+    raw = packet["bench"].canonical_payload()
+    raw["seats"][0]["frozen_seat"][field] = value
+    raw["roster_sha256"] = canonical_sha256(
+        [seat["frozen_seat"] for seat in raw["seats"]]
+    )
+
+    result = _frozen(packet, bench_manifest=raw)
+    assert isinstance(result, Blocked)
+    assert _codes(result) & {"bench_binding_mismatch", "bench_route_substitution"}
+
+
+def test_noncanonical_seat_order_is_rejected_not_silently_repaired() -> None:
+    packet = _packet()
+    raw = packet["bench"].canonical_payload()
+    raw["seats"] = list(reversed(raw["seats"]))
+
+    with pytest.raises(ValidationError, match="canonical seat-id order"):
+        FrozenBenchManifestV1.model_validate(raw)
+    result = _frozen(packet, bench_manifest=raw)
+    assert isinstance(result, Blocked)
+    assert "bench_manifest_invalid" in _codes(result)
+
+
+def test_transcript_roster_is_the_exact_nested_frozen_seat_roster() -> None:
+    packet = _packet()
+
+    assert packet["bench"].transcript_roster == tuple(
+        seat.frozen_seat for seat in packet["bench"].seats
+    )
+    assert packet["bench"].roster_sha256 == canonical_sha256(
+        [seat.canonical_payload() for seat in packet["bench"].transcript_roster]
+    )
 
 
 @pytest.mark.parametrize("condition", ["missing", "stale"])
@@ -377,20 +667,15 @@ def test_missing_or_stale_provider_probe_fails_closed(condition: str) -> None:
     if condition == "missing":
         probes: tuple[ProviderProbeReceiptV1, ...] = ()
     else:
-        probes = (
-            packet["probe"].model_copy(
-                update={
-                    "probed_at": NOW - timedelta(minutes=9),
-                    "expires_at": NOW - timedelta(seconds=1),
-                }
-            ),
-        )
-    result = _frozen(packet, provider_probes=probes)
+        raw = packet["probes"][0].canonical_payload()
+        raw["expires_at"] = (NOW - timedelta(seconds=1)).isoformat()
+        probes = (raw, *packet["probes"][1:])  # type: ignore[assignment]
 
+    result = _frozen(packet, provider_probes=probes)
     assert isinstance(result, Blocked)
-    assert result.permits_live_effect is False
     assert _codes(result) & {
         "provider_probes_missing",
+        "provider_probe_invalid",
         "provider_probe_stale",
         "provider_probe_set_mismatch",
     }
@@ -398,124 +683,234 @@ def test_missing_or_stale_provider_probe_fails_closed(condition: str) -> None:
 
 @pytest.mark.parametrize(
     "field",
-    [
-        "served_route",
-        "served_model",
-        "served_lineage",
-        "served_correlation_id",
-    ],
+    ["served_route", "served_model", "served_lineage", "served_correlation_id"],
 )
 def test_requested_served_substitution_is_rejected(field: str) -> None:
     packet = _packet()
-    raw_probe = packet["probe"].canonical_payload()
+    raw_probe = packet["probes"][0].canonical_payload()
     raw_probe[field] = "substituted"
 
     with pytest.raises(ValidationError, match="substitution"):
         ProviderProbeReceiptV1.model_validate(raw_probe)
-    result = _frozen(packet, provider_probes=(raw_probe,))
+    result = _frozen(packet, provider_probes=(raw_probe, *packet["probes"][1:]))
     assert isinstance(result, Blocked)
     assert "provider_probe_invalid" in _codes(result)
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [("costs_known", False), ("spend_cap_microusd", 999)],
+    ("trust_override", "receipt_override", "expected_code"),
+    [
+        ({SHA_F}, None, "founder_decision_attestor_untrusted"),
+        (None, "tamper", "founder_decision_signature_invalid"),
+    ],
 )
-def test_unknown_or_over_cap_cost_is_rejected(field: str, value: Any) -> None:
+def test_founder_receipt_must_be_trusted_and_cryptographically_valid(
+    trust_override: set[str] | None,
+    receipt_override: str | None,
+    expected_code: str,
+) -> None:
     packet = _packet()
-    raw_cost = packet["cost"].canonical_payload()
-    raw_cost[field] = value
+    overrides: dict[str, Any] = {}
+    if trust_override is not None:
+        overrides["trusted_founder_fingerprints"] = trust_override
+    if receipt_override:
+        overrides["founder_decision_receipt"] = _tampered_signature(packet["founder"])
 
-    result = _frozen(packet, cost_envelope=raw_cost)
+    result = _frozen(packet, **overrides)
     assert isinstance(result, Blocked)
-    assert "cost_envelope_invalid" in _codes(result)
+    assert expected_code in _codes(result)
 
 
-def test_aggregate_provider_balance_must_cover_frozen_maximum() -> None:
-    packet = _packet(balance_microusd=999)
+def test_provider_receipt_must_be_trusted_and_cryptographically_valid() -> None:
+    packet = _packet()
+    untrusted = _frozen(packet, trusted_provider_attestor_fingerprints={SHA_F})
+    assert isinstance(untrusted, Blocked)
+    assert "provider_probe_attestor_untrusted" in _codes(untrusted)
+
+    probes = list(packet["probes"])
+    probes[0] = _tampered_signature(probes[0])
+    tampered = _frozen(packet, provider_probes=tuple(probes))
+    assert isinstance(tampered, Blocked)
+    assert "provider_probe_signature_invalid" in _codes(tampered)
+
+
+def test_evaluator_and_cost_approval_signatures_are_verified() -> None:
+    packet = _packet()
+    untrusted = _frozen(packet, trusted_evaluator_fingerprints={SHA_F})
+    assert isinstance(untrusted, Blocked)
+    assert "evaluator_untrusted" in _codes(untrusted)
+
+    authority = _tampered_signature(packet["authority"], "signature")
+    bad_authority = _frozen(packet, authority_evaluation=authority)
+    assert isinstance(bad_authority, Blocked)
+    assert "authority_signature_invalid" in _codes(bad_authority)
+
+    cost = _tampered_signature(packet["cost"], "approval_signature")
+    bad_cost = _frozen(packet, cost_envelope=cost)
+    assert isinstance(bad_cost, Blocked)
+    assert "cost_approval_signature_invalid" in _codes(bad_cost)
+
+
+def test_aggregate_provider_balance_must_cover_each_frozen_maximum() -> None:
+    packet = _packet(balance_microusd=99)
     result = _frozen(packet)
 
     assert isinstance(result, Blocked)
     assert "provider_balance_insufficient" in _codes(result)
 
 
-def test_evaluator_must_be_trusted_and_signature_must_verify() -> None:
+@pytest.mark.parametrize(
+    ("receipt_name", "argument_name", "expected_code"),
+    [
+        ("runtime", "runtime_attestation", "maintenance_runtime_signature_invalid"),
+        ("snapshot", "service_state_snapshot", "service_state_signature_invalid"),
+        ("tick", "tick_exclusion_receipt", "tick_exclusion_signature_invalid"),
+        ("restoration", "restoration_plan", "restoration_plan_signature_invalid"),
+    ],
+)
+def test_maintenance_observations_require_valid_signatures(
+    receipt_name: str, argument_name: str, expected_code: str
+) -> None:
     packet = _packet()
-    untrusted = _frozen(packet, trusted_evaluator_fingerprints={SHA_F})
+    result = _live(packet, **{argument_name: _tampered_signature(packet[receipt_name])})
+
+    assert isinstance(result, Blocked)
+    assert expected_code in _codes(result)
+
+
+def test_maintenance_observations_require_out_of_band_trust() -> None:
+    packet = _packet()
+    result = _live(packet, trusted_maintenance_attestor_fingerprints={SHA_F})
+
+    assert isinstance(result, Blocked)
+    assert {
+        "maintenance_runtime_attestor_untrusted",
+        "service_state_attestor_untrusted",
+        "tick_exclusion_attestor_untrusted",
+        "restoration_plan_attestor_untrusted",
+    }.issubset(_codes(result))
+
+
+@pytest.mark.parametrize(
+    ("receipt_name", "argument_name", "expected_code"),
+    [
+        (
+            "service_control",
+            "service_control_authority_receipt",
+            "service_control_signature_invalid",
+        ),
+        (
+            "tick_control",
+            "tick_control_authority_receipt",
+            "tick_control_signature_invalid",
+        ),
+    ],
+)
+def test_control_receipts_require_valid_signatures(
+    receipt_name: str, argument_name: str, expected_code: str
+) -> None:
+    packet = _packet()
+    result = _live(packet, **{argument_name: _tampered_signature(packet[receipt_name])})
+
+    assert isinstance(result, Blocked)
+    assert expected_code in _codes(result)
+
+
+def test_control_receipts_require_out_of_band_trust() -> None:
+    packet = _packet()
+    result = _live(packet, trusted_control_authority_fingerprints={SHA_F})
+
+    assert isinstance(result, Blocked)
+    assert {
+        "service_control_attestor_untrusted",
+        "tick_control_attestor_untrusted",
+    }.issubset(_codes(result))
+
+
+def test_write_lease_is_mandatory_trusted_and_signed() -> None:
+    packet = _packet()
+
+    missing = _live(packet, write_lease=None)
+    assert isinstance(missing, Blocked)
+    assert "write_lease_invalid" in _codes(missing)
+
+    untrusted = _live(packet, trusted_write_lease_issuer_fingerprints={SHA_F})
     assert isinstance(untrusted, Blocked)
-    assert "evaluator_untrusted" in _codes(untrusted)
+    assert "write_lease_attestor_untrusted" in _codes(untrusted)
 
-    tampered = packet["authority"].canonical_payload()
-    tampered["signature"]["signature"] = "0" * 128
-    bad_signature = _frozen(packet, authority_evaluation=tampered)
-    assert isinstance(bad_signature, Blocked)
-    assert "authority_signature_invalid" in _codes(bad_signature)
+    tampered = _live(packet, write_lease=_tampered_signature(packet["lease"]))
+    assert isinstance(tampered, Blocked)
+    assert "write_lease_signature_invalid" in _codes(tampered)
 
 
-def test_cost_approval_signature_and_operator_rail_are_verified() -> None:
+@pytest.mark.parametrize(
+    ("model_type", "receipt_name", "field"),
+    [
+        (FounderDecisionReceiptV1, "founder", "case_sha256"),
+        (ProviderProbeReceiptV1, "probe", "response_sha256"),
+        (MaintenanceRuntimeAttestationV1, "runtime", "process_evidence_sha256"),
+        (MaintenanceControlAuthorityReceiptV1, "control", "attestor_fingerprint"),
+        (LiveWriteLeaseEnvelopeV1, "lease", "database_sha256"),
+        (AttendedCeremonyManifestV1, "manifest", "live_write_lease_sha256"),
+    ],
+)
+def test_zero_hash_placeholders_are_rejected(
+    model_type: type[Any], receipt_name: str, field: str
+) -> None:
     packet = _packet()
-    tampered = packet["cost"].canonical_payload()
-    tampered["approval_signature"]["signature"] = "0" * 128
+    source = {
+        "probe": packet["probes"][0],
+        "control": packet["service_control"],
+        **packet,
+    }[receipt_name]
+    raw = source.canonical_payload()
+    raw[field] = "0" * 64
 
-    result = _frozen(packet, cost_envelope=tampered)
-    assert isinstance(result, Blocked)
-    assert "cost_approval_signature_invalid" in _codes(result)
+    with pytest.raises(ValidationError):
+        model_type.model_validate(raw)
 
 
-def test_bench_cannot_substitute_probed_route() -> None:
+def test_direct_serialized_and_tampered_copies_of_readiness_are_unverifiable() -> None:
     packet = _packet()
-    raw_bench = packet["bench"].canonical_payload()
-    raw_bench["seats"][0]["route"] = "route-substituted"
-    raw_bench["roster_sha256"] = canonical_sha256(raw_bench["seats"])
+    genuine = _frozen(packet)
+    assert isinstance(genuine, StructurallyCompleteAwaitingAuthority)
+    assert readiness_is_locally_verified(genuine, phase="frozen_execution_facts")
 
-    result = _frozen(packet, bench_manifest=raw_bench)
-    assert isinstance(result, Blocked)
-    assert "bench_route_substitution" in _codes(result)
+    direct = StructurallyCompleteAwaitingAuthority.model_validate(
+        genuine.canonical_payload()
+    )
+    serialized = genuine.canonical_payload()
+    tampered_copy = genuine.model_copy(
+        update={"valid_until": NOW + timedelta(minutes=3)}
+    )
+
+    for forged in (direct, serialized, tampered_copy):
+        result = _live(packet, frozen_facts=forged)
+        assert isinstance(result, Blocked)
+        assert "frozen_facts_unverifiable" in _codes(result)
+
+
+def test_missing_frozen_facts_and_cross_manifest_rebind_fail_closed() -> None:
+    packet = _packet()
+    missing = _live(packet, frozen_facts=None)
+    assert isinstance(missing, Blocked)
+    assert "frozen_facts_missing" in _codes(missing)
+
+    other_manifest = packet["manifest"].model_copy(update={"case_sha256": SHA_F})
+    rebound = _live(packet, manifest=other_manifest)
+    assert isinstance(rebound, Blocked)
+    assert "frozen_manifest_mismatch" in _codes(rebound)
 
 
 @pytest.mark.parametrize("field", ["code_commit", "openapi_sha256", "runtime_sha256"])
-def test_wrong_code_openapi_or_runtime_identity_is_rejected(field: str) -> None:
+def test_wrong_runtime_identity_is_rejected(field: str) -> None:
     packet = _packet()
-    raw_runtime = packet["runtime"].canonical_payload()
-    raw_runtime[field] = "f" * (40 if field == "code_commit" else 64)
+    raw = packet["runtime"].canonical_payload()
+    raw[field] = "f" * (40 if field == "code_commit" else 64)
 
-    result = _live(packet, runtime_attestation=raw_runtime)
+    result = _live(packet, runtime_attestation=raw)
     assert isinstance(result, Blocked)
     assert "maintenance_runtime_identity_mismatch" in _codes(result)
-
-
-def test_non_loopback_bind_and_competing_writers_are_rejected() -> None:
-    packet = _packet()
-    public_bind = packet["runtime"].canonical_payload()
-    public_bind["bind_host"] = "0.0.0.0"
-    assert isinstance(_live(packet, runtime_attestation=public_bind), Blocked)
-
-    competitors = packet["runtime"].canonical_payload()
-    competitors["active_writer_ids"] = ["maintenance-writer-1", "legacy-writer"]
-    result = _live(packet, runtime_attestation=competitors)
-    assert isinstance(result, Blocked)
-    assert "maintenance_runtime_invalid" in _codes(result)
-
-
-def test_tick_overlap_is_rejected() -> None:
-    packet = _packet()
-    raw_tick = packet["tick"].canonical_payload()
-    raw_tick["overlapping_tick_ids"] = ["tick-run-overlap"]
-
-    result = _live(packet, tick_exclusion_receipt=raw_tick)
-    assert isinstance(result, Blocked)
-    assert "tick_exclusion_invalid" in _codes(result)
-
-
-def test_missing_prior_state_has_specific_fail_closed_blocker() -> None:
-    packet = _packet()
-    raw_snapshot = packet["snapshot"].canonical_payload()
-    del raw_snapshot["prior_service_state"]
-    del raw_snapshot["prior_tick_state"]
-
-    result = _live(packet, service_state_snapshot=raw_snapshot)
-    assert isinstance(result, Blocked)
-    assert {"prior_state_missing", "service_state_invalid"}.issubset(_codes(result))
 
 
 def test_restoration_plan_must_exactly_replay_captured_prior_state() -> None:
@@ -528,19 +923,7 @@ def test_restoration_plan_must_exactly_replay_captured_prior_state() -> None:
     assert "restoration_drift" in _codes(result)
 
 
-def test_frozen_facts_receipt_is_mandatory_and_cannot_be_rebound() -> None:
-    packet = _packet()
-    missing = _live(packet, frozen_facts=None)
-    assert isinstance(missing, Blocked)
-    assert "frozen_facts_missing" in _codes(missing)
-
-    other_manifest = packet["manifest"].model_copy(update={"case_sha256": SHA_F})
-    rebound = _live(packet, manifest=other_manifest)
-    assert isinstance(rebound, Blocked)
-    assert "frozen_manifest_mismatch" in _codes(rebound)
-
-
-def test_models_are_frozen_extra_forbid_and_canonicalize_set_like_fields() -> None:
+def test_models_are_frozen_extra_forbid_and_canonical() -> None:
     packet = _packet()
     manifest = packet["manifest"]
     with pytest.raises(ValidationError):
@@ -570,6 +953,7 @@ def test_module_has_no_live_io_or_private_key_surface() -> None:
         {"socket", "requests", "httpx", "subprocess", "sqlite3", "os", "pathlib"}
     )
     for model in (
+        FounderDecisionReceiptV1,
         SignedAuthorityEvaluationEnvelopeV1,
         ProviderProbeReceiptV1,
         FrozenBenchManifestV1,
@@ -579,12 +963,14 @@ def test_module_has_no_live_io_or_private_key_surface() -> None:
         ServiceStateSnapshotV1,
         TickExclusionReceiptV1,
         RestorationPlanV1,
+        MaintenanceControlAuthorityReceiptV1,
+        LiveWriteLeaseEnvelopeV1,
     ):
         assert "private_key" not in model.model_fields
         assert "secret" not in model.model_fields
 
 
-def test_adversarial_input_never_changes_the_result_type_into_live_authority() -> None:
+def test_adversarial_input_never_changes_result_type_into_live_authority() -> None:
     packet = _packet()
     raw = copy.deepcopy(packet["manifest"].canonical_payload())
     raw["live_authority_state"] = "Authorized<Live>"
