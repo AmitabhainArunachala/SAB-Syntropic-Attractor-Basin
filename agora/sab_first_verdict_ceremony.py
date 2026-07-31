@@ -19,11 +19,12 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Collection, Literal, Mapping, Sequence, Union, cast
 
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import Field, PrivateAttr, TypeAdapter, field_validator, model_validator
 
 from agora.sab_artifact_verdict import (
     ContractSignatureV1,
     FROZEN_MAINTENANCE_OPERATIONS,
+    FrozenSeatV1,
     GIT_SHA_PATTERN,
     HEX_PUBLIC_KEY_PATTERN,
     MASTER_VISION_SEED_ID,
@@ -42,6 +43,8 @@ MAX_FUTURE_CLOCK_SKEW = timedelta(seconds=30)
 ZERO_SHA256 = "0" * 64
 ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$"
 ISSUE_CODE_PATTERN = r"^[a-z][a-z0-9_]{0,119}$"
+CEREMONY_COUNCIL_SIZE = 9
+_READINESS_SEAL = object()
 
 
 def _utc(value: datetime) -> datetime:
@@ -74,6 +77,18 @@ def _key_fingerprint(public_key: str) -> str:
     return hashlib.sha256(bytes.fromhex(public_key)).hexdigest()
 
 
+def _contains_zero_sha256(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            (str(key).endswith("sha256") and child == ZERO_SHA256)
+            or _contains_zero_sha256(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_zero_sha256(child) for child in value)
+    return False
+
+
 def _safe_digest(value: Any) -> str:
     try:
         if isinstance(value, StrictCanonicalModel):
@@ -92,6 +107,36 @@ def _maintenance_operations_sha256() -> str:
 
 
 FROZEN_MAINTENANCE_OPERATIONS_SHA256 = _maintenance_operations_sha256()
+
+
+class _SignedObservationV1(StrictCanonicalModel):
+    """Common authenticated evidence shape; a signature is not a live capability."""
+
+    attestor_identity: str = Field(pattern=ID_PATTERN)
+    attestor_public_key: str = Field(pattern=HEX_PUBLIC_KEY_PATTERN)
+    attestor_fingerprint: str = Field(pattern=SHA256_PATTERN)
+    attestation_signature: ContractSignatureV1
+    authority_semantics: Literal["persisted_receipt_not_capability"] = (
+        "persisted_receipt_not_capability"
+    )
+
+    @model_validator(mode="after")
+    def attestor_identity_is_bound(self) -> "_SignedObservationV1":
+        if self.attestor_fingerprint != _key_fingerprint(self.attestor_public_key):
+            raise ValueError("attestor fingerprint does not bind attestor public key")
+        if (
+            self.attestation_signature.signer != self.attestor_identity
+            or self.attestation_signature.public_key != self.attestor_public_key
+        ):
+            raise ValueError("attestation signature does not bind named attestor")
+        if _contains_zero_sha256(
+            self.canonical_payload(exclude={"attestation_signature"})
+        ):
+            raise ValueError("signed evidence cannot contain zero SHA-256 placeholders")
+        return self
+
+    def signing_bytes(self) -> bytes:
+        return self.canonical_bytes(exclude={"attestation_signature"})
 
 
 class SignedAuthorityEvaluationEnvelopeV1(StrictCanonicalModel):
@@ -146,6 +191,10 @@ class SignedAuthorityEvaluationEnvelopeV1(StrictCanonicalModel):
 
     @model_validator(mode="after")
     def coherent_evaluation_receipt(self) -> "SignedAuthorityEvaluationEnvelopeV1":
+        if _contains_zero_sha256(self.canonical_payload(exclude={"signature"})):
+            raise ValueError(
+                "authority evaluation cannot contain zero hash placeholders"
+            )
         if not (
             self.evaluated_at < self.expires_at
             and self.expires_at - self.evaluated_at <= AUTHORITY_EVALUATION_MAX_AGE
@@ -186,7 +235,52 @@ class SignedAuthorityEvaluationEnvelopeV1(StrictCanonicalModel):
         return self.canonical_bytes(exclude={"signature"})
 
 
-class ProviderProbeReceiptV1(StrictCanonicalModel):
+class FounderDecisionReceiptV1(_SignedObservationV1):
+    """Founder-signed jurisdiction choice; still only persisted evidence."""
+
+    schema_: Literal["sab.founder_decision_receipt.v1"] = Field(
+        "sab.founder_decision_receipt.v1", alias="schema"
+    )
+    decision_id: str = Field(pattern=ID_PATTERN)
+    ceremony_id: str = Field(pattern=ID_PATTERN)
+    case_id: str = Field(pattern=ID_PATTERN)
+    case_sha256: str = Field(pattern=SHA256_PATTERN)
+    artifact_id: str = Field(pattern=ID_PATTERN)
+    artifact_sha256: str = Field(pattern=SHA256_PATTERN)
+    decision: Literal[
+        "jurisdictional_refusal", "alternate_artifact_terminal_disposition"
+    ]
+    requested_effects: tuple[str, ...] = Field(min_length=1)
+    decided_at: datetime
+    expires_at: datetime
+    standing_effect: Literal["none"] = "none"
+
+    @field_validator("requested_effects", mode="before")
+    @classmethod
+    def exact_effects(cls, value: Sequence[str]) -> tuple[str, ...]:
+        return _exact_strings(value, field="requested_effects")
+
+    @field_validator("decided_at", "expires_at")
+    @classmethod
+    def aware_times(cls, value: datetime) -> datetime:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def coherent_founder_decision(self) -> "FounderDecisionReceiptV1":
+        if not (
+            self.decided_at < self.expires_at
+            and self.expires_at - self.decided_at <= AUTHORITY_EVALUATION_MAX_AGE
+        ):
+            raise ValueError("founder decision receipt validity window is invalid")
+        if self.decision == "jurisdictional_refusal":
+            if self.requested_effects != ("record_jurisdictional_refusal",):
+                raise ValueError("jurisdictional refusal has an inexact effect")
+        elif self.requested_effects == ("record_jurisdictional_refusal",):
+            raise ValueError("alternate artifact decision requires a terminal effect")
+        return self
+
+
+class ProviderProbeReceiptV1(_SignedObservationV1):
     """Persisted response facts from a probe performed outside this module."""
 
     schema_: Literal["sab.provider_probe_receipt.v1"] = Field(
@@ -203,6 +297,7 @@ class ProviderProbeReceiptV1(StrictCanonicalModel):
     served_lineage: str = Field(pattern=ID_PATTERN)
     requested_correlation_id: str = Field(pattern=ID_PATTERN)
     served_correlation_id: str = Field(pattern=ID_PATTERN)
+    frozen_seat: FrozenSeatV1
     catalog_sha256: str = Field(pattern=SHA256_PATTERN)
     response_sha256: str = Field(pattern=SHA256_PATTERN)
     balance_known: Literal[True] = True
@@ -234,19 +329,30 @@ class ProviderProbeReceiptV1(StrictCanonicalModel):
         )
         if any(substitutions):
             raise ValueError("provider probe contains requested/served substitution")
+        seat = self.frozen_seat
+        if (
+            self.provider != seat.served_provider
+            or self.requested_route != seat.requested_route
+            or self.served_route not in seat.possible_underlying_routes
+            or self.requested_model != seat.requested_model
+            or self.served_model != seat.served_model
+            or self.requested_lineage != seat.model_family
+            or self.served_lineage != seat.model_family
+        ):
+            raise ValueError("provider probe differs from its exact frozen seat")
         return self
 
 
 class FrozenBenchSeatV1(StrictCanonicalModel):
-    seat_id: str = Field(pattern=ID_PATTERN)
     role: str = Field(pattern=ID_PATTERN)
-    provider: str = Field(pattern=ID_PATTERN)
-    route: str = Field(pattern=ID_PATTERN)
-    model: str = Field(pattern=ID_PATTERN)
-    lineage: str = Field(pattern=ID_PATTERN)
-    transport_correlation_id: str = Field(pattern=ID_PATTERN)
+    frozen_seat: FrozenSeatV1
+    probe_correlation_id: str = Field(pattern=ID_PATTERN)
     provider_probe_sha256: str = Field(pattern=SHA256_PATTERN)
     terminal_capable: Literal[True] = True
+
+    @property
+    def seat_id(self) -> str:
+        return self.frozen_seat.seat_id
 
 
 class FrozenBenchManifestV1(StrictCanonicalModel):
@@ -257,8 +363,11 @@ class FrozenBenchManifestV1(StrictCanonicalModel):
     ceremony_id: str = Field(pattern=ID_PATTERN)
     case_id: str = Field(pattern=ID_PATTERN)
     case_sha256: str = Field(pattern=SHA256_PATTERN)
-    seats: tuple[FrozenBenchSeatV1, ...] = Field(min_length=1, max_length=64)
+    seats: tuple[FrozenBenchSeatV1, ...] = Field(
+        min_length=CEREMONY_COUNCIL_SIZE, max_length=CEREMONY_COUNCIL_SIZE
+    )
     roster_sha256: str = Field(pattern=SHA256_PATTERN)
+    terminality_rule_sha256: str = Field(pattern=SHA256_PATTERN)
     terminal_rule: Literal["every_frozen_seat_must_return_a_final_ballot"] = (
         "every_frozen_seat_must_return_a_final_ballot"
     )
@@ -278,22 +387,24 @@ class FrozenBenchManifestV1(StrictCanonicalModel):
             value, Sequence
         ):
             raise ValueError("seats must be a sequence")
-        return tuple(
-            sorted(
-                value,
-                key=lambda item: (
-                    str(item.get("seat_id", ""))
-                    if isinstance(item, Mapping)
-                    else item.seat_id
-                ),
-            )
+        items = tuple(value)
+        seat_ids = tuple(
+            str(item.get("frozen_seat", {}).get("seat_id", ""))
+            if isinstance(item, Mapping)
+            else item.seat_id
+            for item in items
         )
+        if seat_ids != tuple(sorted(seat_ids)):
+            raise ValueError("seats must already be in canonical seat-id order")
+        return items
 
     @model_validator(mode="after")
     def exact_roster(self) -> "FrozenBenchManifestV1":
+        if _contains_zero_sha256(self.canonical_payload()):
+            raise ValueError("frozen bench cannot contain zero hash placeholders")
         seat_ids = [seat.seat_id for seat in self.seats]
         roles = [seat.role for seat in self.seats]
-        correlations = [seat.transport_correlation_id for seat in self.seats]
+        correlations = [seat.probe_correlation_id for seat in self.seats]
         probes = [seat.provider_probe_sha256 for seat in self.seats]
         if any(
             len(set(items)) != len(items)
@@ -302,10 +413,18 @@ class FrozenBenchManifestV1(StrictCanonicalModel):
             raise ValueError(
                 "bench seats, roles, correlations, and probes must be unique"
             )
-        expected = canonical_sha256([seat.canonical_payload() for seat in self.seats])
+        if len(seat_ids) != CEREMONY_COUNCIL_SIZE:
+            raise ValueError("frozen bench must contain exactly nine seats")
+        expected = canonical_sha256(
+            [seat.frozen_seat.canonical_payload() for seat in self.seats]
+        )
         if self.roster_sha256 != expected:
             raise ValueError("roster_sha256 does not bind the exact frozen seats")
         return self
+
+    @property
+    def transcript_roster(self) -> tuple[FrozenSeatV1, ...]:
+        return tuple(seat.frozen_seat for seat in self.seats)
 
 
 class BenchSeatCostV1(StrictCanonicalModel):
@@ -323,7 +442,9 @@ class BenchCostEnvelopeV1(StrictCanonicalModel):
     ceremony_id: str = Field(pattern=ID_PATTERN)
     bench_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     currency: Literal["USD"] = "USD"
-    seat_costs: tuple[BenchSeatCostV1, ...] = Field(min_length=1, max_length=64)
+    seat_costs: tuple[BenchSeatCostV1, ...] = Field(
+        min_length=CEREMONY_COUNCIL_SIZE, max_length=CEREMONY_COUNCIL_SIZE
+    )
     total_maximum_cost_microusd: int = Field(ge=0)
     spend_cap_microusd: int = Field(ge=0)
     costs_known: Literal[True] = True
@@ -362,8 +483,15 @@ class BenchCostEnvelopeV1(StrictCanonicalModel):
 
     @model_validator(mode="after")
     def bounded_known_cost(self) -> "BenchCostEnvelopeV1":
-        if self.approved_at >= self.expires_at:
-            raise ValueError("cost approval must expire after approval")
+        if _contains_zero_sha256(
+            self.canonical_payload(exclude={"approval_signature"})
+        ):
+            raise ValueError("cost envelope cannot contain zero hash placeholders")
+        if not (
+            self.approved_at < self.expires_at
+            and self.expires_at - self.approved_at <= MAINTENANCE_RECEIPT_MAX_AGE
+        ):
+            raise ValueError("cost approval validity window is invalid")
         if len({item.seat_id for item in self.seat_costs}) != len(self.seat_costs):
             raise ValueError("each bench seat must have exactly one cost")
         if sum(item.maximum_cost_microusd for item in self.seat_costs) != (
@@ -404,8 +532,12 @@ class AttendedCeremonyManifestV1(StrictCanonicalModel):
     founder_decision_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
     authority_evaluation_sha256: str = Field(pattern=SHA256_PATTERN)
     bench_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
+    frozen_roster_sha256: str = Field(pattern=SHA256_PATTERN)
+    terminality_rule_sha256: str = Field(pattern=SHA256_PATTERN)
     bench_cost_envelope_sha256: str = Field(pattern=SHA256_PATTERN)
-    provider_probe_sha256s: tuple[str, ...] = Field(min_length=1, max_length=64)
+    provider_probe_sha256s: tuple[str, ...] = Field(
+        min_length=CEREMONY_COUNCIL_SIZE, max_length=CEREMONY_COUNCIL_SIZE
+    )
     maintenance_runtime_attestation_sha256: str = Field(pattern=SHA256_PATTERN)
     service_state_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
     tick_exclusion_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -423,6 +555,7 @@ class AttendedCeremonyManifestV1(StrictCanonicalModel):
     expected_tick_id: str = Field(pattern=ID_PATTERN)
     service_control_authority_sha256: str = Field(pattern=SHA256_PATTERN)
     tick_control_authority_sha256: str = Field(pattern=SHA256_PATTERN)
+    live_write_lease_sha256: str = Field(pattern=SHA256_PATTERN)
     service_control_scope: Literal["pause_and_restore_exact_prior_service"] = (
         "pause_and_restore_exact_prior_service"
     )
@@ -459,6 +592,11 @@ class AttendedCeremonyManifestV1(StrictCanonicalModel):
 
     @model_validator(mode="after")
     def coherent_non_authorizing_manifest(self) -> "AttendedCeremonyManifestV1":
+        if (
+            _contains_zero_sha256(self.canonical_payload())
+            or ZERO_SHA256 in self.provider_probe_sha256s
+        ):
+            raise ValueError("manifest cannot contain zero hash placeholders")
         if not (
             self.frozen_at < self.expires_at
             and self.maintenance_window_start < self.maintenance_window_end
@@ -490,7 +628,7 @@ class AttendedCeremonyManifestV1(StrictCanonicalModel):
         return self
 
 
-class MaintenanceRuntimeAttestationV1(StrictCanonicalModel):
+class MaintenanceRuntimeAttestationV1(_SignedObservationV1):
     schema_: Literal["sab.maintenance_runtime_attestation.v1"] = Field(
         "sab.maintenance_runtime_attestation.v1", alias="schema"
     )
@@ -550,7 +688,7 @@ class MaintenanceRuntimeAttestationV1(StrictCanonicalModel):
         return self
 
 
-class ServiceStateSnapshotV1(StrictCanonicalModel):
+class ServiceStateSnapshotV1(_SignedObservationV1):
     schema_: Literal["sab.service_state_snapshot.v1"] = Field(
         "sab.service_state_snapshot.v1", alias="schema"
     )
@@ -609,7 +747,7 @@ class ServiceStateSnapshotV1(StrictCanonicalModel):
         return self
 
 
-class TickExclusionReceiptV1(StrictCanonicalModel):
+class TickExclusionReceiptV1(_SignedObservationV1):
     schema_: Literal["sab.tick_exclusion_receipt.v1"] = Field(
         "sab.tick_exclusion_receipt.v1", alias="schema"
     )
@@ -673,7 +811,7 @@ class TickExclusionReceiptV1(StrictCanonicalModel):
         return self
 
 
-class RestorationPlanV1(StrictCanonicalModel):
+class RestorationPlanV1(_SignedObservationV1):
     schema_: Literal["sab.restoration_plan.v1"] = Field(
         "sab.restoration_plan.v1", alias="schema"
     )
@@ -718,8 +856,93 @@ class RestorationPlanV1(StrictCanonicalModel):
         return self
 
 
+class MaintenanceControlAuthorityReceiptV1(_SignedObservationV1):
+    """Signed proof of narrow service or tick control, not disposition authority."""
+
+    schema_: Literal["sab.maintenance_control_authority_receipt.v1"] = Field(
+        "sab.maintenance_control_authority_receipt.v1", alias="schema"
+    )
+    authority_id: str = Field(pattern=ID_PATTERN)
+    ceremony_id: str = Field(pattern=ID_PATTERN)
+    control_kind: Literal["service", "tick"]
+    target_id: str = Field(pattern=ID_PATTERN)
+    authority_scope: Literal[
+        "pause_and_restore_exact_prior_service",
+        "exclude_and_restore_exact_prior_tick",
+    ]
+    authorized_from: datetime
+    authorized_until: datetime
+    issued_at: datetime
+    expires_at: datetime
+    standing_effect: Literal["none"] = "none"
+
+    @field_validator("authorized_from", "authorized_until", "issued_at", "expires_at")
+    @classmethod
+    def aware_times(cls, value: datetime) -> datetime:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def narrow_control_scope(self) -> "MaintenanceControlAuthorityReceiptV1":
+        expected = {
+            "service": "pause_and_restore_exact_prior_service",
+            "tick": "exclude_and_restore_exact_prior_tick",
+        }[self.control_kind]
+        if self.authority_scope != expected:
+            raise ValueError("maintenance control kind has the wrong narrow scope")
+        if not (
+            self.issued_at <= self.authorized_from < self.authorized_until
+            and self.issued_at < self.expires_at
+            and self.authorized_until <= self.expires_at
+        ):
+            raise ValueError("maintenance control authority window is invalid")
+        return self
+
+
+class LiveWriteLeaseEnvelopeV1(_SignedObservationV1):
+    """Signed narrow lease evidence; never the evaluator's Live capability."""
+
+    schema_: Literal["sab.live_write_lease_envelope.v1"] = Field(
+        "sab.live_write_lease_envelope.v1", alias="schema"
+    )
+    lease_id: str = Field(pattern=ID_PATTERN)
+    ceremony_id: str = Field(pattern=ID_PATTERN)
+    scope: Literal["Live"] = "Live"
+    runtime_id: str = Field(pattern=ID_PATTERN)
+    writer_id: str = Field(pattern=ID_PATTERN)
+    database_sha256: str = Field(pattern=SHA256_PATTERN)
+    lifecycle_fingerprint: str = Field(pattern=SHA256_PATTERN)
+    allowed_effects: tuple[str, ...] = Field(min_length=1)
+    lease_state: Literal["prepared_for_attended_activation"] = (
+        "prepared_for_attended_activation"
+    )
+    issued_at: datetime
+    expires_at: datetime
+    permits_live_effect: Literal[False] = False
+    standing_effect: Literal["none"] = "none"
+
+    @field_validator("allowed_effects", mode="before")
+    @classmethod
+    def exact_effects(cls, value: Sequence[str]) -> tuple[str, ...]:
+        return _exact_strings(value, field="allowed_effects")
+
+    @field_validator("issued_at", "expires_at")
+    @classmethod
+    def aware_times(cls, value: datetime) -> datetime:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def short_lived_lease(self) -> "LiveWriteLeaseEnvelopeV1":
+        if not (
+            self.issued_at < self.expires_at
+            and self.expires_at - self.issued_at <= MAINTENANCE_RECEIPT_MAX_AGE
+        ):
+            raise ValueError("live write lease window is invalid")
+        return self
+
+
 ReceiptKind = Literal[
     "manifest",
+    "founder_decision",
     "authority_evaluation",
     "provider_probe",
     "bench_manifest",
@@ -729,6 +952,9 @@ ReceiptKind = Literal[
     "service_state",
     "tick_exclusion",
     "restoration_plan",
+    "service_control_authority",
+    "tick_control_authority",
+    "write_lease",
 ]
 
 
@@ -753,6 +979,7 @@ class StructurallyCompleteAwaitingAuthority(StrictCanonicalModel):
     valid_until: datetime
     manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     verified_receipt_sha256s: tuple[str, ...] = Field(min_length=1)
+    trust_anchor_set_sha256s: tuple[str, ...] = Field(min_length=1)
     blockers: tuple[PreflightIssueV1, ...] = Field(default=(), max_length=0)
     live_authority_state: Literal["absent"] = "absent"
     permits_live_effect: Literal[False] = False
@@ -760,22 +987,49 @@ class StructurallyCompleteAwaitingAuthority(StrictCanonicalModel):
         "fresh_authority_capability_and_operator_signature"
     )
     standing_effect: Literal["none"] = "none"
+    _verifier_token: object | None = PrivateAttr(default=None)
+    _sealed_payload_sha256: str | None = PrivateAttr(default=None)
 
     @field_validator("checked_at", "valid_until")
     @classmethod
     def aware_times(cls, value: datetime) -> datetime:
         return _utc(value)
 
-    @field_validator("verified_receipt_sha256s", mode="before")
+    @field_validator(
+        "verified_receipt_sha256s", "trust_anchor_set_sha256s", mode="before"
+    )
     @classmethod
     def exact_receipts(cls, value: Sequence[str]) -> tuple[str, ...]:
-        return _exact_strings(value, field="verified_receipt_sha256s")
+        return _exact_strings(value, field="receipt_or_trust_anchor_digests")
 
     @model_validator(mode="after")
     def useful_readiness_window(self) -> "StructurallyCompleteAwaitingAuthority":
         if self.valid_until <= self.checked_at:
             raise ValueError("readiness must have a future validity boundary")
         return self
+
+
+def _seal_readiness(
+    value: StructurallyCompleteAwaitingAuthority,
+) -> StructurallyCompleteAwaitingAuthority:
+    """Attach evaluator-local provenance without serializing a forgeable bearer token."""
+
+    value._verifier_token = _READINESS_SEAL
+    value._sealed_payload_sha256 = value.canonical_sha256()
+    return value
+
+
+def readiness_is_locally_verified(
+    value: object, *, phase: ReadinessPhase | None = None
+) -> bool:
+    """Return whether this exact in-memory value was emitted by this evaluator."""
+
+    return (
+        isinstance(value, StructurallyCompleteAwaitingAuthority)
+        and value._verifier_token is _READINESS_SEAL
+        and value._sealed_payload_sha256 == value.canonical_sha256()
+        and (phase is None or value.phase == phase)
+    )
 
 
 class Blocked(StrictCanonicalModel):
@@ -872,6 +1126,61 @@ def _freshness_issues(
     return issues
 
 
+def _trusted_fingerprint_set(
+    values: Collection[str],
+    *,
+    receipt: ReceiptKind,
+    code: str,
+) -> tuple[set[str], list[PreflightIssueV1]]:
+    try:
+        trusted = set(values)
+    except TypeError:
+        trusted = set()
+    if not trusted or any(
+        not isinstance(item, str)
+        or re.fullmatch(SHA256_PATTERN, item) is None
+        or item == ZERO_SHA256
+        for item in trusted
+    ):
+        return set(), [
+            _issue(
+                code,
+                receipt,
+                "trusted fingerprints must be a non-empty exact out-of-band set",
+            )
+        ]
+    return trusted, []
+
+
+def _signed_observation_issues(
+    value: _SignedObservationV1,
+    *,
+    trusted: set[str],
+    receipt: ReceiptKind,
+    prefix: str,
+) -> list[PreflightIssueV1]:
+    issues: list[PreflightIssueV1] = []
+    if value.attestor_fingerprint not in trusted:
+        issues.append(
+            _issue(
+                f"{prefix}_attestor_untrusted",
+                receipt,
+                "receipt attestor is absent from the exact out-of-band trust set",
+            )
+        )
+    if not verify_contract_signature(
+        value.signing_bytes(), value.attestation_signature
+    ):
+        issues.append(
+            _issue(
+                f"{prefix}_signature_invalid",
+                receipt,
+                "receipt attestation signature failed verification",
+            )
+        )
+    return issues
+
+
 def _blocked(
     *,
     phase: ReadinessPhase,
@@ -891,11 +1200,15 @@ def _blocked(
 def verify_frozen_execution_facts(
     *,
     manifest: AttendedCeremonyManifestV1 | Mapping[str, Any],
+    founder_decision_receipt: FounderDecisionReceiptV1 | Mapping[str, Any],
     authority_evaluation: SignedAuthorityEvaluationEnvelopeV1 | Mapping[str, Any],
     provider_probes: Sequence[ProviderProbeReceiptV1 | Mapping[str, Any]],
     bench_manifest: FrozenBenchManifestV1 | Mapping[str, Any],
     cost_envelope: BenchCostEnvelopeV1 | Mapping[str, Any],
+    trusted_founder_fingerprints: Collection[str],
     trusted_evaluator_fingerprints: Collection[str],
+    trusted_operator_fingerprints: Collection[str],
+    trusted_provider_attestor_fingerprints: Collection[str],
     now: datetime,
 ) -> CeremonyReadinessV1:
     """Verify frozen facts without calling a provider or constructing authority."""
@@ -907,6 +1220,13 @@ def verify_frozen_execution_facts(
         manifest,
         code="manifest_invalid",
         receipt="manifest",
+    )
+    issues.extend(new)
+    parsed_founder, new = _parse_receipt(
+        FounderDecisionReceiptV1,
+        founder_decision_receipt,
+        code="founder_decision_invalid",
+        receipt="founder_decision",
     )
     issues.extend(new)
     parsed_authority, new = _parse_receipt(
@@ -956,21 +1276,30 @@ def verify_frozen_execution_facts(
             if isinstance(parsed_probe, ProviderProbeReceiptV1):
                 probes.append(parsed_probe)
 
-    try:
-        trusted = set(trusted_evaluator_fingerprints)
-    except TypeError:
-        trusted = set()
-    if not trusted or any(
-        not isinstance(item, str) or re.fullmatch(SHA256_PATTERN, item) is None
-        for item in trusted
-    ):
-        issues.append(
-            _issue(
-                "trusted_evaluator_set_invalid",
-                "authority_evaluation",
-                "trusted evaluator fingerprints must be a non-empty exact set",
-            )
-        )
+    trusted_founders, new = _trusted_fingerprint_set(
+        trusted_founder_fingerprints,
+        receipt="founder_decision",
+        code="trusted_founder_set_invalid",
+    )
+    issues.extend(new)
+    trusted_evaluators, new = _trusted_fingerprint_set(
+        trusted_evaluator_fingerprints,
+        receipt="authority_evaluation",
+        code="trusted_evaluator_set_invalid",
+    )
+    issues.extend(new)
+    trusted_probe_attestors, new = _trusted_fingerprint_set(
+        trusted_provider_attestor_fingerprints,
+        receipt="provider_probe",
+        code="trusted_provider_attestor_set_invalid",
+    )
+    issues.extend(new)
+    trusted_operators, new = _trusted_fingerprint_set(
+        trusted_operator_fingerprints,
+        receipt="cost_envelope",
+        code="trusted_operator_set_invalid",
+    )
+    issues.extend(new)
 
     if isinstance(parsed_manifest, AttendedCeremonyManifestV1):
         issues.extend(
@@ -980,6 +1309,25 @@ def verify_frozen_execution_facts(
                 now=checked_at,
                 receipt="manifest",
                 prefix="manifest",
+            )
+        )
+
+    if isinstance(parsed_founder, FounderDecisionReceiptV1):
+        issues.extend(
+            _freshness_issues(
+                observed_at=parsed_founder.decided_at,
+                expires_at=parsed_founder.expires_at,
+                now=checked_at,
+                receipt="founder_decision",
+                prefix="founder_decision",
+            )
+        )
+        issues.extend(
+            _signed_observation_issues(
+                parsed_founder,
+                trusted=trusted_founders,
+                receipt="founder_decision",
+                prefix="founder_decision",
             )
         )
 
@@ -993,7 +1341,7 @@ def verify_frozen_execution_facts(
                 prefix="authority_evaluation",
             )
         )
-        if parsed_authority.evaluator_fingerprint not in trusted:
+        if parsed_authority.evaluator_fingerprint not in trusted_evaluators:
             issues.append(
                 _issue(
                     "evaluator_untrusted",
@@ -1001,6 +1349,7 @@ def verify_frozen_execution_facts(
                     "evaluator fingerprint is not in the out-of-band trust set",
                 )
             )
+
         if not verify_contract_signature(
             parsed_authority.signing_bytes(), parsed_authority.signature
         ):
@@ -1022,6 +1371,14 @@ def verify_frozen_execution_facts(
                 prefix="provider_probe",
             )
         )
+        issues.extend(
+            _signed_observation_issues(
+                probe,
+                trusted=trusted_probe_attestors,
+                receipt="provider_probe",
+                prefix="provider_probe",
+            )
+        )
 
     if isinstance(parsed_cost, BenchCostEnvelopeV1):
         issues.extend(
@@ -1033,6 +1390,14 @@ def verify_frozen_execution_facts(
                 prefix="cost_envelope",
             )
         )
+        if parsed_cost.approver_fingerprint not in trusted_operators:
+            issues.append(
+                _issue(
+                    "cost_approver_untrusted",
+                    "cost_envelope",
+                    "cost approver is absent from the out-of-band operator trust set",
+                )
+            )
         if not verify_contract_signature(
             parsed_cost.signing_bytes(), parsed_cost.approval_signature
         ):
@@ -1041,6 +1406,29 @@ def verify_frozen_execution_facts(
                     "cost_approval_signature_invalid",
                     "cost_envelope",
                     "operator cost approval signature failed verification",
+                )
+            )
+
+    if isinstance(parsed_manifest, AttendedCeremonyManifestV1) and isinstance(
+        parsed_founder, FounderDecisionReceiptV1
+    ):
+        founder_bindings = (
+            parsed_founder.ceremony_id == parsed_manifest.ceremony_id,
+            parsed_founder.case_id == parsed_manifest.case_id,
+            parsed_founder.case_sha256 == parsed_manifest.case_sha256,
+            parsed_founder.artifact_id == parsed_manifest.artifact_id,
+            parsed_founder.artifact_sha256 == parsed_manifest.artifact_sha256,
+            parsed_founder.decision == parsed_manifest.founder_decision,
+            parsed_founder.requested_effects == parsed_manifest.requested_effects,
+            parsed_founder.canonical_sha256()
+            == parsed_manifest.founder_decision_receipt_sha256,
+        )
+        if not all(founder_bindings):
+            issues.append(
+                _issue(
+                    "founder_decision_binding_mismatch",
+                    "founder_decision",
+                    "founder receipt does not bind the exact ceremony decision",
                 )
             )
 
@@ -1100,6 +1488,9 @@ def verify_frozen_execution_facts(
             parsed_bench.ceremony_id != parsed_manifest.ceremony_id
             or parsed_bench.case_id != parsed_manifest.case_id
             or parsed_bench.case_sha256 != parsed_manifest.case_sha256
+            or parsed_bench.roster_sha256 != parsed_manifest.frozen_roster_sha256
+            or parsed_bench.terminality_rule_sha256
+            != parsed_manifest.terminality_rule_sha256
             or parsed_bench.canonical_sha256() != parsed_manifest.bench_manifest_sha256
         ):
             issues.append(
@@ -1138,6 +1529,16 @@ def verify_frozen_execution_facts(
             )
 
     if isinstance(parsed_bench, FrozenBenchManifestV1):
+        if {seat.provider_probe_sha256 for seat in parsed_bench.seats} != set(
+            probe_by_digest
+        ):
+            issues.append(
+                _issue(
+                    "bench_probe_set_mismatch",
+                    "provider_probe",
+                    "provider probe set must exactly cover the nine frozen seats",
+                )
+            )
         for seat in parsed_bench.seats:
             probe = probe_by_digest.get(seat.provider_probe_sha256)
             if probe is None:
@@ -1150,11 +1551,8 @@ def verify_frozen_execution_facts(
                 )
                 continue
             if (
-                seat.provider != probe.provider
-                or seat.route != probe.requested_route
-                or seat.model != probe.requested_model
-                or seat.lineage != probe.requested_lineage
-                or seat.transport_correlation_id != probe.requested_correlation_id
+                seat.frozen_seat != probe.frozen_seat
+                or seat.probe_correlation_id != probe.requested_correlation_id
             ):
                 issues.append(
                     _issue(
@@ -1239,11 +1637,13 @@ def verify_frozen_execution_facts(
         )
 
     parsed_manifest = cast(AttendedCeremonyManifestV1, parsed_manifest)
+    parsed_founder = cast(FounderDecisionReceiptV1, parsed_founder)
     parsed_authority = cast(SignedAuthorityEvaluationEnvelopeV1, parsed_authority)
     parsed_bench = cast(FrozenBenchManifestV1, parsed_bench)
     parsed_cost = cast(BenchCostEnvelopeV1, parsed_cost)
     valid_until = min(
         parsed_manifest.expires_at,
+        parsed_founder.expires_at,
         parsed_authority.expires_at,
         parsed_cost.expires_at,
         *(probe.expires_at for probe in probes),
@@ -1261,22 +1661,55 @@ def verify_frozen_execution_facts(
                 ),
             ),
         )
-    return StructurallyCompleteAwaitingAuthority(
-        phase="frozen_execution_facts",
-        checked_at=checked_at,
-        valid_until=valid_until,
-        manifest_sha256=parsed_manifest.canonical_sha256(),
-        verified_receipt_sha256s=tuple(
-            sorted(
-                {
-                    parsed_manifest.canonical_sha256(),
-                    parsed_authority.canonical_sha256(),
-                    parsed_bench.canonical_sha256(),
-                    parsed_cost.canonical_sha256(),
-                    *(probe.canonical_sha256() for probe in probes),
-                }
-            )
-        ),
+    return _seal_readiness(
+        StructurallyCompleteAwaitingAuthority(
+            phase="frozen_execution_facts",
+            checked_at=checked_at,
+            valid_until=valid_until,
+            manifest_sha256=parsed_manifest.canonical_sha256(),
+            verified_receipt_sha256s=tuple(
+                sorted(
+                    {
+                        parsed_manifest.canonical_sha256(),
+                        parsed_founder.canonical_sha256(),
+                        parsed_authority.canonical_sha256(),
+                        parsed_bench.canonical_sha256(),
+                        parsed_cost.canonical_sha256(),
+                        *(probe.canonical_sha256() for probe in probes),
+                    }
+                )
+            ),
+            trust_anchor_set_sha256s=tuple(
+                sorted(
+                    {
+                        canonical_sha256(
+                            {
+                                "role": "founder",
+                                "fingerprints": sorted(trusted_founders),
+                            }
+                        ),
+                        canonical_sha256(
+                            {
+                                "role": "evaluator",
+                                "fingerprints": sorted(trusted_evaluators),
+                            }
+                        ),
+                        canonical_sha256(
+                            {
+                                "role": "provider_probe_attestor",
+                                "fingerprints": sorted(trusted_probe_attestors),
+                            }
+                        ),
+                        canonical_sha256(
+                            {
+                                "role": "operator",
+                                "fingerprints": sorted(trusted_operators),
+                            }
+                        ),
+                    }
+                )
+            ),
+        )
     )
 
 
@@ -1288,6 +1721,14 @@ def validate_live_preflight_receipts(
     service_state_snapshot: ServiceStateSnapshotV1 | Mapping[str, Any],
     tick_exclusion_receipt: TickExclusionReceiptV1 | Mapping[str, Any],
     restoration_plan: RestorationPlanV1 | Mapping[str, Any],
+    service_control_authority_receipt: MaintenanceControlAuthorityReceiptV1
+    | Mapping[str, Any],
+    tick_control_authority_receipt: MaintenanceControlAuthorityReceiptV1
+    | Mapping[str, Any],
+    write_lease: LiveWriteLeaseEnvelopeV1 | Mapping[str, Any],
+    trusted_maintenance_attestor_fingerprints: Collection[str],
+    trusted_control_authority_fingerprints: Collection[str],
+    trusted_write_lease_issuer_fingerprints: Collection[str],
     now: datetime,
 ) -> CeremonyReadinessV1:
     """Validate persisted maintenance evidence without inspecting live state."""
@@ -1350,6 +1791,46 @@ def validate_live_preflight_receipts(
         receipt="restoration_plan",
     )
     issues.extend(new)
+    parsed_service_control, new = _parse_receipt(
+        MaintenanceControlAuthorityReceiptV1,
+        service_control_authority_receipt,
+        code="service_control_authority_invalid",
+        receipt="service_control_authority",
+    )
+    issues.extend(new)
+    parsed_tick_control, new = _parse_receipt(
+        MaintenanceControlAuthorityReceiptV1,
+        tick_control_authority_receipt,
+        code="tick_control_authority_invalid",
+        receipt="tick_control_authority",
+    )
+    issues.extend(new)
+    parsed_lease, new = _parse_receipt(
+        LiveWriteLeaseEnvelopeV1,
+        write_lease,
+        code="write_lease_invalid",
+        receipt="write_lease",
+    )
+    issues.extend(new)
+
+    trusted_maintenance, new = _trusted_fingerprint_set(
+        trusted_maintenance_attestor_fingerprints,
+        receipt="maintenance_runtime",
+        code="trusted_maintenance_attestor_set_invalid",
+    )
+    issues.extend(new)
+    trusted_controls, new = _trusted_fingerprint_set(
+        trusted_control_authority_fingerprints,
+        receipt="service_control_authority",
+        code="trusted_control_authority_set_invalid",
+    )
+    issues.extend(new)
+    trusted_lease_issuers, new = _trusted_fingerprint_set(
+        trusted_write_lease_issuer_fingerprints,
+        receipt="write_lease",
+        code="trusted_write_lease_issuer_set_invalid",
+    )
+    issues.extend(new)
 
     parsed_frozen: CeremonyReadinessV1 | None = None
     if frozen_facts is None:
@@ -1360,22 +1841,18 @@ def validate_live_preflight_receipts(
                 "live preflight requires a frozen-facts readiness receipt",
             )
         )
+    elif not readiness_is_locally_verified(
+        frozen_facts, phase="frozen_execution_facts"
+    ):
+        issues.append(
+            _issue(
+                "frozen_facts_unverifiable",
+                "frozen_facts",
+                "frozen facts were not emitted by this evaluator from source receipts",
+            )
+        )
     else:
-        try:
-            payload = (
-                frozen_facts.canonical_payload()
-                if isinstance(frozen_facts, StrictCanonicalModel)
-                else frozen_facts
-            )
-            parsed_frozen = CEREMONY_READINESS_ADAPTER.validate_python(payload)
-        except Exception:
-            issues.append(
-                _issue(
-                    "frozen_facts_invalid",
-                    "frozen_facts",
-                    "frozen-facts readiness receipt is invalid",
-                )
-            )
+        parsed_frozen = cast(StructurallyCompleteAwaitingAuthority, frozen_facts)
 
     if isinstance(parsed_frozen, Blocked):
         issues.append(
@@ -1437,12 +1914,90 @@ def validate_live_preflight_receipts(
                 )
             )
 
+    if isinstance(parsed_manifest, AttendedCeremonyManifestV1):
+        controls = (
+            (
+                parsed_service_control,
+                "service",
+                parsed_manifest.expected_service_name,
+                parsed_manifest.service_control_scope,
+                parsed_manifest.service_control_authority_sha256,
+                "service_control_authority",
+            ),
+            (
+                parsed_tick_control,
+                "tick",
+                parsed_manifest.expected_tick_id,
+                parsed_manifest.tick_control_scope,
+                parsed_manifest.tick_control_authority_sha256,
+                "tick_control_authority",
+            ),
+        )
+        for (
+            control,
+            expected_kind,
+            expected_target,
+            expected_scope,
+            expected_digest,
+            receipt_name,
+        ) in controls:
+            if isinstance(control, MaintenanceControlAuthorityReceiptV1) and not all(
+                (
+                    control.ceremony_id == parsed_manifest.ceremony_id,
+                    control.control_kind == expected_kind,
+                    control.target_id == expected_target,
+                    control.authority_scope == expected_scope,
+                    control.authorized_from <= parsed_manifest.maintenance_window_start,
+                    control.authorized_until >= parsed_manifest.maintenance_window_end,
+                    control.canonical_sha256() == expected_digest,
+                )
+            ):
+                issues.append(
+                    _issue(
+                        f"{expected_kind}_control_authority_binding_mismatch",
+                        cast(ReceiptKind, receipt_name),
+                        "control receipt does not bind the exact target and window",
+                    )
+                )
+
+        if isinstance(parsed_lease, LiveWriteLeaseEnvelopeV1) and not all(
+            (
+                parsed_lease.canonical_sha256()
+                == parsed_manifest.live_write_lease_sha256,
+                parsed_lease.ceremony_id == parsed_manifest.ceremony_id,
+                parsed_lease.runtime_id == parsed_manifest.expected_runtime_id,
+                parsed_lease.writer_id == parsed_manifest.expected_writer_id,
+                parsed_lease.database_sha256
+                == parsed_manifest.expected_database_sha256,
+                parsed_lease.lifecycle_fingerprint
+                == parsed_manifest.expected_lifecycle_fingerprint,
+                parsed_lease.allowed_effects == parsed_manifest.requested_effects,
+                parsed_lease.issued_at <= parsed_manifest.maintenance_window_start,
+                parsed_lease.expires_at >= parsed_manifest.maintenance_window_end,
+            )
+        ):
+            issues.append(
+                _issue(
+                    "write_lease_binding_mismatch",
+                    "write_lease",
+                    "write lease does not bind exact runtime, state, effect, and window",
+                )
+            )
+
     if isinstance(parsed_runtime, MaintenanceRuntimeAttestationV1):
         issues.extend(
             _freshness_issues(
                 observed_at=parsed_runtime.attested_at,
                 expires_at=parsed_runtime.expires_at,
                 now=checked_at,
+                receipt="maintenance_runtime",
+                prefix="maintenance_runtime",
+            )
+        )
+        issues.extend(
+            _signed_observation_issues(
+                parsed_runtime,
+                trusted=trusted_maintenance,
                 receipt="maintenance_runtime",
                 prefix="maintenance_runtime",
             )
@@ -1457,6 +2012,14 @@ def validate_live_preflight_receipts(
                 prefix="service_state",
             )
         )
+        issues.extend(
+            _signed_observation_issues(
+                parsed_snapshot,
+                trusted=trusted_maintenance,
+                receipt="service_state",
+                prefix="service_state",
+            )
+        )
     if isinstance(parsed_tick, TickExclusionReceiptV1):
         issues.extend(
             _freshness_issues(
@@ -1465,6 +2028,75 @@ def validate_live_preflight_receipts(
                 now=checked_at,
                 receipt="tick_exclusion",
                 prefix="tick_exclusion",
+            )
+        )
+        issues.extend(
+            _signed_observation_issues(
+                parsed_tick,
+                trusted=trusted_maintenance,
+                receipt="tick_exclusion",
+                prefix="tick_exclusion",
+            )
+        )
+    if isinstance(parsed_restoration, RestorationPlanV1):
+        if (
+            parsed_restoration.generated_at > checked_at + MAX_FUTURE_CLOCK_SKEW
+            or checked_at - parsed_restoration.generated_at
+            > MAINTENANCE_RECEIPT_MAX_AGE
+        ):
+            issues.append(
+                _issue(
+                    "restoration_plan_stale",
+                    "restoration_plan",
+                    "restoration plan was not freshly generated",
+                )
+            )
+        issues.extend(
+            _signed_observation_issues(
+                parsed_restoration,
+                trusted=trusted_maintenance,
+                receipt="restoration_plan",
+                prefix="restoration_plan",
+            )
+        )
+    for control, receipt_name, prefix in (
+        (parsed_service_control, "service_control_authority", "service_control"),
+        (parsed_tick_control, "tick_control_authority", "tick_control"),
+    ):
+        if isinstance(control, MaintenanceControlAuthorityReceiptV1):
+            issues.extend(
+                _freshness_issues(
+                    observed_at=control.issued_at,
+                    expires_at=control.expires_at,
+                    now=checked_at,
+                    receipt=cast(ReceiptKind, receipt_name),
+                    prefix=prefix,
+                )
+            )
+            issues.extend(
+                _signed_observation_issues(
+                    control,
+                    trusted=trusted_controls,
+                    receipt=cast(ReceiptKind, receipt_name),
+                    prefix=prefix,
+                )
+            )
+    if isinstance(parsed_lease, LiveWriteLeaseEnvelopeV1):
+        issues.extend(
+            _freshness_issues(
+                observed_at=parsed_lease.issued_at,
+                expires_at=parsed_lease.expires_at,
+                now=checked_at,
+                receipt="write_lease",
+                prefix="write_lease",
+            )
+        )
+        issues.extend(
+            _signed_observation_issues(
+                parsed_lease,
+                trusted=trusted_lease_issuers,
+                receipt="write_lease",
+                prefix="write_lease",
             )
         )
 
@@ -1651,6 +2283,13 @@ def validate_live_preflight_receipts(
     parsed_snapshot = cast(ServiceStateSnapshotV1, parsed_snapshot)
     parsed_tick = cast(TickExclusionReceiptV1, parsed_tick)
     parsed_restoration = cast(RestorationPlanV1, parsed_restoration)
+    parsed_service_control = cast(
+        MaintenanceControlAuthorityReceiptV1, parsed_service_control
+    )
+    parsed_tick_control = cast(
+        MaintenanceControlAuthorityReceiptV1, parsed_tick_control
+    )
+    parsed_lease = cast(LiveWriteLeaseEnvelopeV1, parsed_lease)
     parsed_frozen = cast(StructurallyCompleteAwaitingAuthority, parsed_frozen)
     valid_until = min(
         parsed_manifest.expires_at,
@@ -1659,6 +2298,9 @@ def validate_live_preflight_receipts(
         parsed_runtime.expires_at,
         parsed_snapshot.expires_at,
         parsed_tick.expires_at,
+        parsed_service_control.expires_at,
+        parsed_tick_control.expires_at,
+        parsed_lease.expires_at,
     )
     if valid_until <= checked_at:
         return _blocked(
@@ -1673,22 +2315,52 @@ def validate_live_preflight_receipts(
                 ),
             ),
         )
-    return StructurallyCompleteAwaitingAuthority(
-        phase="live_maintenance_preflight",
-        checked_at=checked_at,
-        valid_until=valid_until,
-        manifest_sha256=parsed_manifest.canonical_sha256(),
-        verified_receipt_sha256s=tuple(
-            sorted(
-                {
-                    *parsed_frozen.verified_receipt_sha256s,
-                    parsed_runtime.canonical_sha256(),
-                    parsed_snapshot.canonical_sha256(),
-                    parsed_tick.canonical_sha256(),
-                    parsed_restoration.canonical_sha256(),
-                }
-            )
-        ),
+    return _seal_readiness(
+        StructurallyCompleteAwaitingAuthority(
+            phase="live_maintenance_preflight",
+            checked_at=checked_at,
+            valid_until=valid_until,
+            manifest_sha256=parsed_manifest.canonical_sha256(),
+            verified_receipt_sha256s=tuple(
+                sorted(
+                    {
+                        *parsed_frozen.verified_receipt_sha256s,
+                        parsed_runtime.canonical_sha256(),
+                        parsed_snapshot.canonical_sha256(),
+                        parsed_tick.canonical_sha256(),
+                        parsed_restoration.canonical_sha256(),
+                        parsed_service_control.canonical_sha256(),
+                        parsed_tick_control.canonical_sha256(),
+                        parsed_lease.canonical_sha256(),
+                    }
+                )
+            ),
+            trust_anchor_set_sha256s=tuple(
+                sorted(
+                    {
+                        *parsed_frozen.trust_anchor_set_sha256s,
+                        canonical_sha256(
+                            {
+                                "role": "maintenance_attestor",
+                                "fingerprints": sorted(trusted_maintenance),
+                            }
+                        ),
+                        canonical_sha256(
+                            {
+                                "role": "maintenance_controller",
+                                "fingerprints": sorted(trusted_controls),
+                            }
+                        ),
+                        canonical_sha256(
+                            {
+                                "role": "write_lease_issuer",
+                                "fingerprints": sorted(trusted_lease_issuers),
+                            }
+                        ),
+                    }
+                )
+            ),
+        )
     )
 
 
@@ -1701,9 +2373,12 @@ __all__ = [
     "CEREMONY_READINESS_ADAPTER",
     "CeremonyReadinessV1",
     "FROZEN_MAINTENANCE_OPERATIONS_SHA256",
+    "FounderDecisionReceiptV1",
     "FrozenBenchManifestV1",
     "FrozenBenchSeatV1",
     "MAINTENANCE_RECEIPT_MAX_AGE",
+    "LiveWriteLeaseEnvelopeV1",
+    "MaintenanceControlAuthorityReceiptV1",
     "MaintenanceRuntimeAttestationV1",
     "PROVIDER_PROBE_MAX_AGE",
     "PreflightIssueV1",
@@ -1714,5 +2389,6 @@ __all__ = [
     "StructurallyCompleteAwaitingAuthority",
     "TickExclusionReceiptV1",
     "validate_live_preflight_receipts",
+    "readiness_is_locally_verified",
     "verify_frozen_execution_facts",
 ]
