@@ -604,6 +604,7 @@ def _facts_match_frozen_seat(facts: BallotExecutionFactsV1, seat: FrozenSeatV1) 
         and facts.requested_route == seat.requested_route
         and facts.served_provider == seat.served_provider
         and facts.served_model == seat.served_model
+        and facts.served_route in seat.possible_underlying_routes
         and facts.credited_cluster == seat.credited_cluster
         and facts.cluster_basis == seat.cluster_basis
         and facts.model_lineage_evidence_refs == seat.model_lineage_evidence_refs

@@ -70,7 +70,13 @@ def _roster() -> tuple[FrozenSeatV1, ...]:
     )
 
 
-def _ballot(stage: str, position: int, seat: FrozenSeatV1) -> ArtifactBallotV1:
+def _ballot(
+    stage: str,
+    position: int,
+    seat: FrozenSeatV1,
+    *,
+    served_route: str | None = None,
+) -> ArtifactBallotV1:
     payload = deepcopy(BALLOT_TEMPLATE)
     payload.update(
         {
@@ -83,7 +89,7 @@ def _ballot(stage: str, position: int, seat: FrozenSeatV1) -> ArtifactBallotV1:
             "requested_route": seat.requested_route,
             "served_provider": seat.served_provider,
             "served_model": seat.served_model,
-            "served_route": f"offline/{stage}/{position}",
+            "served_route": served_route or seat.possible_underlying_routes[0],
             "credited_cluster": seat.credited_cluster,
             "cluster_basis": seat.cluster_basis,
             "model_lineage_evidence_refs": [
@@ -108,6 +114,7 @@ def _stage(
     *,
     roster: tuple[FrozenSeatV1, ...],
     stage_input_sha256: str | None = None,
+    served_route_override: str | None = None,
 ) -> CeremonyStageEnvelopeV1:
     stage_index = CEREMONY_STAGES.index(stage)  # type: ignore[arg-type]
     stage_input = stage_input_sha256 or _digest(f"stage-input:{stage}")
@@ -132,7 +139,12 @@ def _stage(
     ballots: list[ArtifactBallotV1] = []
     nonces: list[str] = []
     for position, seat in enumerate(roster):
-        ballot = _ballot(stage, position, seat)
+        ballot = _ballot(
+            stage,
+            position,
+            seat,
+            served_route=served_route_override if position == 0 else None,
+        )
         facts = BallotExecutionFactsV1.from_ballot(ballot)
         nonce = f"offline-public-nonce:{stage}:{position:02d}"
         draft: dict[str, Any] = {
@@ -474,6 +486,16 @@ def test_envelope_rejects_open_reveal_set_or_route_fact_substitution(
     )
     result = verify_ceremony_transcript((changed, ceremony[1], ceremony[2]))
     assert "invalid_stage_envelope_contract" in _codes(result)
+
+    with pytest.raises(
+        ValidationError, match="execution facts differ from frozen bench"
+    ):
+        _stage(
+            "sealed_first_pass",
+            EMPTY_REVEAL_SET_SHA256,
+            roster=_roster(),
+            served_route_override="unfrozen/substituted-route",
+        )
 
 
 def test_storage_migration_is_additive_and_preserves_build_a_ballot_uniqueness() -> (
