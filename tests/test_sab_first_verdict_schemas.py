@@ -667,6 +667,33 @@ def test_ballot_requires_source_self_binding_finding_and_round_one() -> None:
     invalid_round["round_no"] = 2
     with pytest.raises(ValidationError):
         ArtifactBallotV1.model_validate(invalid_round)
+    for repaired_round in ("1", 1.0, True):
+        coerced_round = copy.deepcopy(valid)
+        coerced_round["round_no"] = repaired_round
+        with pytest.raises(ValidationError, match="exact integer"):
+            ArtifactBallotV1.model_validate(coerced_round)
+
+
+@pytest.mark.parametrize("malformed", ["1", 1.0, True])
+def test_verdict_round_rejects_scalar_repair(malformed: object) -> None:
+    valid = verdict_payload()
+    invalid_round = copy.deepcopy(valid)
+    invalid_round["round_no"] = malformed
+    with pytest.raises(ValidationError, match="exact integer"):
+        CouncilVerdictV1.model_validate(invalid_round)
+
+
+@pytest.mark.parametrize("malformed", ["9", 9.0, True, -1])
+def test_verdict_tallies_reject_scalar_repair_or_negative_counts(
+    malformed: object,
+) -> None:
+    valid = verdict_payload()
+    for field in ("raw_tally", "clean_routing_tally"):
+        invalid_tally = copy.deepcopy(valid)
+        first_key = next(iter(invalid_tally[field]))
+        invalid_tally[field][first_key] = malformed
+        with pytest.raises(ValidationError):
+            CouncilVerdictV1.model_validate(invalid_tally)
 
 
 def test_appeal_ends_round_one_without_effect() -> None:

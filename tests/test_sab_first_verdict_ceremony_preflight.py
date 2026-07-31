@@ -182,6 +182,8 @@ def _signed_probe(
     seat: FrozenSeatV1,
     provider_key: SigningKey,
     balance_microusd: int,
+    probed_at: datetime = NOW - timedelta(minutes=1),
+    expires_at: datetime = NOW + timedelta(minutes=4),
 ) -> ProviderProbeReceiptV1:
     correlation = f"correlation-{index:02d}"
     return _signed_observation(
@@ -203,8 +205,8 @@ def _signed_probe(
         catalog_sha256=_sha(f"catalog-{index:02d}"),
         response_sha256=_sha(f"probe-response-{index:02d}"),
         available_balance_microusd=balance_microusd,
-        probed_at=NOW - timedelta(minutes=1),
-        expires_at=NOW + timedelta(minutes=4),
+        probed_at=probed_at,
+        expires_at=expires_at,
     )
 
 
@@ -215,6 +217,8 @@ def _signed_cost(
     probes: tuple[ProviderProbeReceiptV1, ...],
     maximum_cost_microusd: int = 100,
     spend_cap_microusd: int = 1_500,
+    approved_at: datetime = NOW - timedelta(minutes=1),
+    expires_at: datetime = NOW + timedelta(minutes=4),
 ) -> BenchCostEnvelopeV1:
     signer = "operator.primary"
     seat_costs = tuple(
@@ -236,8 +240,8 @@ def _signed_cost(
         approved_by=signer,
         approver_public_key=_public_key(operator_key),
         approver_fingerprint=_fingerprint(operator_key),
-        approved_at=NOW - timedelta(minutes=1),
-        expires_at=NOW + timedelta(minutes=4),
+        approved_at=approved_at,
+        expires_at=expires_at,
         approval_signature=_dummy_signature(operator_key, signer),
     )
     return BenchCostEnvelopeV1(
@@ -248,7 +252,14 @@ def _signed_cost(
     )
 
 
-def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
+def _packet(
+    *,
+    balance_microusd: int = 5_000,
+    probe_probed_at: datetime = NOW - timedelta(minutes=1),
+    probe_expires_at: datetime = NOW + timedelta(minutes=4),
+    bench_frozen_at: datetime = NOW - timedelta(minutes=1),
+    cost_approved_at: datetime = NOW - timedelta(minutes=1),
+) -> dict[str, Any]:
     keys = {
         name: _key(name)
         for name in (
@@ -289,6 +300,8 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
             seat=frozen_seats[index - 1],
             provider_key=keys["provider"],
             balance_microusd=balance_microusd,
+            probed_at=probe_probed_at,
+            expires_at=probe_expires_at,
         )
         for index in range(1, 10)
     )
@@ -311,9 +324,14 @@ def _packet(*, balance_microusd: int = 5_000) -> dict[str, Any]:
             [seat.canonical_payload() for seat in frozen_seats]
         ),
         terminality_rule_sha256=_sha("council-terminality-rule-v1"),
-        frozen_at=NOW - timedelta(minutes=1),
+        frozen_at=bench_frozen_at,
     )
-    cost = _signed_cost(keys["operator"], bench=bench, probes=probes)
+    cost = _signed_cost(
+        keys["operator"],
+        bench=bench,
+        probes=probes,
+        approved_at=cost_approved_at,
+    )
 
     runtime = _signed_observation(
         MaintenanceRuntimeAttestationV1,
@@ -723,6 +741,22 @@ def test_requested_served_substitution_is_rejected(field: str) -> None:
     assert "provider_probe_invalid" in _codes(result)
 
 
+def test_probe_rejects_a_multi_route_seat_even_when_the_served_route_is_listed() -> (
+    None
+):
+    packet = _packet()
+    raw_probe = packet["probes"][0].canonical_payload()
+    raw_probe["frozen_seat"]["possible_underlying_routes"].append(
+        "route-unprobed-substitute"
+    )
+
+    with pytest.raises(ValidationError, match="exact frozen seat"):
+        ProviderProbeReceiptV1.model_validate(raw_probe)
+    result = _frozen(packet, provider_probes=(raw_probe, *packet["probes"][1:]))
+    assert isinstance(result, Blocked)
+    assert "provider_probe_invalid" in _codes(result)
+
+
 @pytest.mark.parametrize(
     ("trust_override", "receipt_override", "expected_code"),
     [
@@ -783,6 +817,67 @@ def test_aggregate_provider_balance_must_cover_each_frozen_maximum() -> None:
 
     assert isinstance(result, Blocked)
     assert "provider_balance_insufficient" in _codes(result)
+
+
+@pytest.mark.parametrize("malformed", ["100", 100.0, True])
+def test_money_fields_reject_scalar_type_coercion(malformed: object) -> None:
+    packet = _packet()
+
+    probe = packet["probes"][0].canonical_payload()
+    probe["available_balance_microusd"] = malformed
+    with pytest.raises(ValidationError):
+        ProviderProbeReceiptV1.model_validate(probe)
+
+    seat_cost = packet["cost"].seat_costs[0].canonical_payload()
+    seat_cost["maximum_cost_microusd"] = malformed
+    with pytest.raises(ValidationError):
+        BenchSeatCostV1.model_validate(seat_cost)
+
+    for field in ("total_maximum_cost_microusd", "spend_cap_microusd"):
+        cost = packet["cost"].canonical_payload()
+        cost[field] = malformed
+        with pytest.raises(ValidationError):
+            BenchCostEnvelopeV1.model_validate(cost)
+
+    runtime = packet["runtime"].canonical_payload()
+    runtime["bind_port"] = malformed
+    with pytest.raises(ValidationError):
+        MaintenanceRuntimeAttestationV1.model_validate(runtime)
+
+
+@pytest.mark.parametrize(
+    ("packet_overrides", "expected_code"),
+    [
+        (
+            {"probe_probed_at": NOW - timedelta(seconds=59)},
+            "provider_probe_after_bench_freeze",
+        ),
+        (
+            {"cost_approved_at": NOW - timedelta(seconds=61)},
+            "cost_approval_before_bench_freeze",
+        ),
+    ],
+)
+def test_frozen_evidence_must_precede_the_object_which_commits_to_it(
+    packet_overrides: dict[str, Any],
+    expected_code: str,
+) -> None:
+    packet = _packet(**packet_overrides)
+    result = _frozen(packet)
+
+    assert isinstance(result, Blocked)
+    assert expected_code in _codes(result)
+
+
+def test_cost_approval_must_precede_every_provider_probe_expiry() -> None:
+    packet = _packet(
+        probe_expires_at=NOW + timedelta(seconds=10),
+        cost_approved_at=NOW + timedelta(seconds=10),
+    )
+    result = _frozen(packet)
+
+    assert isinstance(result, Blocked)
+    assert "provider_probe_expired_before_cost_approval" in _codes(result)
 
 
 @pytest.mark.parametrize(
@@ -1029,6 +1124,23 @@ def test_wrong_runtime_identity_is_rejected(field: str) -> None:
     result = _live(packet, runtime_attestation=raw)
     assert isinstance(result, Blocked)
     assert "maintenance_runtime_identity_mismatch" in _codes(result)
+
+
+def test_all_zero_runtime_git_object_is_rejected_at_both_roots() -> None:
+    packet = _packet()
+    runtime = packet["runtime"].canonical_payload()
+    runtime["code_commit"] = "0" * 40
+    with pytest.raises(ValidationError, match="all-zero Git object"):
+        MaintenanceRuntimeAttestationV1.model_validate(runtime)
+
+    manifest = packet["manifest"].canonical_payload()
+    manifest["expected_code_commit"] = "0" * 40
+    with pytest.raises(ValidationError, match="all-zero Git object"):
+        AttendedCeremonyManifestV1.model_validate(manifest)
+
+    result = _live(packet, runtime_attestation=runtime)
+    assert isinstance(result, Blocked)
+    assert "maintenance_runtime_invalid" in _codes(result)
 
 
 def test_restoration_plan_must_exactly_replay_captured_prior_state() -> None:

@@ -251,14 +251,14 @@ class BallotCommitmentV1(TranscriptCanonicalModel):
     authority_digest: str = Field(pattern=SHA256_PATTERN)
     rule_digest: str = Field(pattern=SHA256_PATTERN)
     stage: CeremonyStage
-    stage_index: int = Field(ge=0, le=2)
+    stage_index: int = Field(ge=0, le=2, strict=True)
     stage_input_sha256: str = Field(pattern=SHA256_PATTERN)
     preceding_reveal_set_sha256: str = Field(pattern=SHA256_PATTERN)
     final_deliberation_subject_sha256: str | None = Field(
         default=None, pattern=SHA256_PATTERN
     )
     seat_id: str = Field(min_length=1, max_length=120)
-    seat_position: int = Field(ge=0, le=8)
+    seat_position: int = Field(ge=0, le=8, strict=True)
     execution_facts: BallotExecutionFactsV1
     committed_preimage_sha256: str = Field(pattern=SHA256_PATTERN)
     commitment_signature: ContractSignatureV1
@@ -362,14 +362,14 @@ class BallotRevealV1(TranscriptCanonicalModel):
     authority_digest: str = Field(pattern=SHA256_PATTERN)
     rule_digest: str = Field(pattern=SHA256_PATTERN)
     stage: CeremonyStage
-    stage_index: int = Field(ge=0, le=2)
+    stage_index: int = Field(ge=0, le=2, strict=True)
     stage_input_sha256: str = Field(pattern=SHA256_PATTERN)
     preceding_reveal_set_sha256: str = Field(pattern=SHA256_PATTERN)
     final_deliberation_subject_sha256: str | None = Field(
         default=None, pattern=SHA256_PATTERN
     )
     seat_id: str = Field(min_length=1, max_length=120)
-    seat_position: int = Field(ge=0, le=8)
+    seat_position: int = Field(ge=0, le=8, strict=True)
     execution_facts: BallotExecutionFactsV1
     nonce: str = Field(min_length=16, max_length=512)
     ballot: ArtifactBallotV1
@@ -785,7 +785,7 @@ def _facts_match_frozen_seat(facts: BallotExecutionFactsV1, seat: FrozenSeatV1) 
         and facts.requested_route == seat.requested_route
         and facts.served_provider == seat.served_provider
         and facts.served_model == seat.served_model
-        and facts.served_route in seat.possible_underlying_routes
+        and seat.possible_underlying_routes == (facts.served_route,)
         and facts.credited_cluster == seat.credited_cluster
         and facts.cluster_basis == seat.cluster_basis
         and facts.model_lineage_evidence_refs == seat.model_lineage_evidence_refs
@@ -888,7 +888,7 @@ class CeremonyStageEnvelopeV1(TranscriptCanonicalModel):
     authority_digest: str = Field(pattern=SHA256_PATTERN)
     rule_digest: str = Field(pattern=SHA256_PATTERN)
     stage: CeremonyStage
-    stage_index: int = Field(ge=0, le=2)
+    stage_index: int = Field(ge=0, le=2, strict=True)
     stage_input_sha256: str = Field(pattern=SHA256_PATTERN)
     preceding_reveal_set_sha256: str = Field(pattern=SHA256_PATTERN)
     final_deliberation_subject: FinalDeliberationSubjectV1 | None = None

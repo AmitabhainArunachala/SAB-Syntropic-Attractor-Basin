@@ -23,6 +23,7 @@ from agora.sab_first_verdict_compiler import (
     CompiledVerdictV1,
     CouncilCompilationError,
     CouncilTerminalityRuleV1,
+    PreUnsealFeasibilityV1,
     PreUnsealSeatV1,
     RefusalReceiptV1,
     assess_pre_unseal_feasibility,
@@ -171,6 +172,7 @@ def _ballot(
     stage: str = "final",
     seat_id: str | None = None,
     ballot_id: str | None = None,
+    served_route: str | None = None,
     signature_fault: str | None = None,
 ) -> ArtifactBallotV1:
     actual_seat_id = seat_id or f"seat-{index}"
@@ -206,7 +208,7 @@ def _ballot(
         "requested_route": f"fixture/requested/{index}",
         "served_provider": "fixture-provider",
         "served_model": f"fixture-model-{index}",
-        "served_route": f"fixture/served/{index}",
+        "served_route": served_route or f"fixture/served/{index}",
         "credited_cluster": cluster or f"cluster-{index}",
         "cluster_basis": "evidenced_base_model_or_training_lineage",
         "model_lineage_evidence_refs": [_evidence(index + 60)],
@@ -365,6 +367,54 @@ def test_rule_rejects_noncanonical_effect_lists(
         )
 
 
+@pytest.mark.parametrize("malformed", ["5", 5.0, True])
+def test_integer_contract_fields_reject_scalar_type_coercion(
+    malformed: object,
+) -> None:
+    rule = _rule()
+    for field in ("minimum_raw_votes", "minimum_clean_clusters"):
+        payload = rule.canonical_payload()
+        payload[field] = malformed
+        with pytest.raises(ValidationError):
+            CouncilTerminalityRuleV1.model_validate(payload)
+
+    seats = [
+        PreUnsealSeatV1(
+            seat_id=seat_id,
+            credited_cluster=f"cluster-{index}",
+            correlation_smeared=False,
+        )
+        for index, seat_id in enumerate(SEATS)
+    ]
+    feasibility = assess_pre_unseal_feasibility(
+        rule=rule,
+        expected_seat_ids=SEATS,
+        seats=seats,
+    )
+    for field in (
+        "expected_seat_count",
+        "committed_seat_count",
+        "distinct_committed_seat_count",
+        "maximum_terminal_votes",
+        "maximum_clean_clusters",
+        "required_terminal_votes",
+        "required_clean_clusters",
+    ):
+        payload = feasibility.canonical_payload()
+        payload[field] = malformed
+        with pytest.raises(ValidationError):
+            PreUnsealFeasibilityV1.model_validate(payload)
+
+
+@pytest.mark.parametrize("malformed", ["9", 9.0])
+def test_council_size_rejects_numeric_coercion(malformed: object) -> None:
+    payload = _rule().canonical_payload()
+    payload["council_size"] = malformed
+    payload["rule_sha256"] = compute_council_terminality_rule_sha256(payload)
+    with pytest.raises(ValidationError, match="exact integer"):
+        CouncilTerminalityRuleV1.model_validate(payload)
+
+
 def test_five_of_nine_and_five_clean_clusters_compile_terminal_verdict() -> None:
     authority = _evaluated_authority()
     outcome = compile_council_outcome(**_compile_kwargs(authority, _terminal_ballots()))
@@ -464,6 +514,31 @@ def test_compiler_requires_exactly_nine_frozen_seats_and_matching_facts() -> Non
             **_compile_kwargs(authority, ballots, frozen_roster=roster)
         )
     assert facts_error.value.code == "ballot_frozen_seat_mismatch"
+
+
+def test_compiler_rejects_a_signed_ballot_from_an_unprobed_alternate_route() -> None:
+    authority = _evaluated_authority()
+    ballots = _terminal_ballots()
+    ballots[0] = _ballot(
+        0,
+        "correct_and_supersede",
+        served_route="fixture/unprobed/alternate",
+    )
+    roster = list(_frozen_roster())
+    roster[0] = roster[0].model_copy(
+        update={
+            "possible_underlying_routes": (
+                "fixture/served/0",
+                "fixture/unprobed/alternate",
+            )
+        }
+    )
+
+    with pytest.raises(CouncilCompilationError) as error:
+        compile_council_outcome(
+            **_compile_kwargs(authority, ballots, frozen_roster=roster)
+        )
+    assert error.value.code == "ballot_frozen_seat_mismatch"
 
 
 def test_smear_that_destroys_five_cluster_terminality_forces_appeal() -> None:

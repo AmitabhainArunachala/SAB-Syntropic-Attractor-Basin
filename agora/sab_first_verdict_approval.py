@@ -125,6 +125,7 @@ class _CeremonyCodeBindingV2(_StrictModel):
             or self.build_a_closeout_sha256 != BUILD_A_CLOSEOUT_SHA256
             or self.build_a_closeout_canonical_sha256
             != BUILD_A_CLOSEOUT_CANONICAL_SHA256
+            or self.runtime_commit_sha == "0" * 40
             or self.runtime_commit_sha == self.build_a_merge_commit
         ):
             raise ValueError("code roots do not bind the pinned Build A closeout")
@@ -1025,6 +1026,12 @@ def bind_operator_approval_evidence(
         == _ballot_set_sha256(transcript_validation.ordered_final_ballots),
         "compiled_outcome_binding_mismatch",
         "compiled outcome is nonterminal or differs from the exact transcript/rule",
+    )
+    compiled_at = compiled_outcome.compiled_at.astimezone(timezone.utc)
+    _require(
+        frozen_readiness.checked_at <= compiled_at <= normalized_time,
+        "compiled_outcome_time_invalid",
+        "compiled outcome must be produced after frozen readiness and no later than packet preparation",
     )
     _require(
         transcript_validation.frozen_roster_sha256 == bench_manifest.roster_sha256

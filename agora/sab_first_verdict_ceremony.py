@@ -42,6 +42,7 @@ AUTHORITY_EVALUATION_MAX_AGE = timedelta(minutes=15)
 MAINTENANCE_RECEIPT_MAX_AGE = timedelta(minutes=10)
 MAX_FUTURE_CLOCK_SKEW = timedelta(seconds=30)
 ZERO_SHA256 = "0" * 64
+ZERO_GIT_SHA = "0" * 40
 ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$"
 ISSUE_CODE_PATTERN = r"^[a-z][a-z0-9_]{0,119}$"
 CEREMONY_COUNCIL_SIZE = 9
@@ -302,7 +303,7 @@ class ProviderProbeReceiptV1(_SignedObservationV1):
     catalog_sha256: str = Field(pattern=SHA256_PATTERN)
     response_sha256: str = Field(pattern=SHA256_PATTERN)
     balance_known: Literal[True] = True
-    available_balance_microusd: int = Field(ge=0)
+    available_balance_microusd: int = Field(ge=0, strict=True)
     route_available: Literal[True] = True
     probe_status: Literal["passed"] = "passed"
     probed_at: datetime
@@ -334,7 +335,7 @@ class ProviderProbeReceiptV1(_SignedObservationV1):
         if (
             self.provider != seat.served_provider
             or self.requested_route != seat.requested_route
-            or self.served_route not in seat.possible_underlying_routes
+            or seat.possible_underlying_routes != (self.served_route,)
             or self.requested_model != seat.requested_model
             or self.served_model != seat.served_model
             or self.requested_lineage != seat.model_family
@@ -432,7 +433,7 @@ class BenchSeatCostV1(StrictCanonicalModel):
     seat_id: str = Field(pattern=ID_PATTERN)
     provider_probe_sha256: str = Field(pattern=SHA256_PATTERN)
     pricing_catalog_sha256: str = Field(pattern=SHA256_PATTERN)
-    maximum_cost_microusd: int = Field(ge=0)
+    maximum_cost_microusd: int = Field(ge=0, strict=True)
 
 
 class BenchCostEnvelopeV1(StrictCanonicalModel):
@@ -446,8 +447,8 @@ class BenchCostEnvelopeV1(StrictCanonicalModel):
     seat_costs: tuple[BenchSeatCostV1, ...] = Field(
         min_length=CEREMONY_COUNCIL_SIZE, max_length=CEREMONY_COUNCIL_SIZE
     )
-    total_maximum_cost_microusd: int = Field(ge=0)
-    spend_cap_microusd: int = Field(ge=0)
+    total_maximum_cost_microusd: int = Field(ge=0, strict=True)
+    spend_cap_microusd: int = Field(ge=0, strict=True)
     costs_known: Literal[True] = True
     unpriced_items: tuple[str, ...] = Field(default=(), max_length=0)
     automatic_top_up: Literal[False] = False
@@ -591,6 +592,13 @@ class AttendedCeremonyManifestV1(StrictCanonicalModel):
     def aware_times(cls, value: datetime) -> datetime:
         return _utc(value)
 
+    @field_validator("expected_code_commit")
+    @classmethod
+    def nonzero_expected_commit(cls, value: str) -> str:
+        if value == ZERO_GIT_SHA:
+            raise ValueError("expected code commit must not be the all-zero Git object")
+        return value
+
     @model_validator(mode="after")
     def coherent_non_authorizing_manifest(self) -> "AttendedCeremonyManifestV1":
         if (
@@ -645,7 +653,7 @@ class MaintenanceRuntimeAttestationV1(_SignedObservationV1):
     database_sha256: str = Field(pattern=SHA256_PATTERN)
     lifecycle_fingerprint: str = Field(pattern=SHA256_PATTERN)
     bind_host: str = Field(min_length=2, max_length=64)
-    bind_port: int = Field(ge=1, le=65535)
+    bind_port: int = Field(ge=1, le=65535, strict=True)
     process_evidence_sha256: str = Field(pattern=SHA256_PATTERN)
     maintenance_only: Literal[True] = True
     legacy_mutations_exposed: Literal[False] = False
@@ -658,6 +666,13 @@ class MaintenanceRuntimeAttestationV1(_SignedObservationV1):
     @classmethod
     def exact_writers(cls, value: Sequence[str]) -> tuple[str, ...]:
         return _exact_strings(value, field="active_writer_ids")
+
+    @field_validator("code_commit")
+    @classmethod
+    def nonzero_code_commit(cls, value: str) -> str:
+        if value == ZERO_GIT_SHA:
+            raise ValueError("runtime code commit must not be the all-zero Git object")
+        return value
 
     @field_validator("started_at", "attested_at", "expires_at")
     @classmethod
@@ -1416,6 +1431,41 @@ def verify_frozen_execution_facts(
                     "cost_approval_signature_invalid",
                     "cost_envelope",
                     "operator cost approval signature failed verification",
+                )
+            )
+
+    # The bench commits to exact provider probes, and the signed cost envelope
+    # in turn approves that exact bench digest.  Enforce that dependency order;
+    # manifest.frozen_at is a planning boundary, not the assembly time for the
+    # later live-state receipts which the manifest also hashes.
+    if isinstance(parsed_bench, FrozenBenchManifestV1):
+        if any(probe.probed_at > parsed_bench.frozen_at for probe in probes):
+            issues.append(
+                _issue(
+                    "provider_probe_after_bench_freeze",
+                    "provider_probe",
+                    "a provider probe postdates the bench which commits to it",
+                )
+            )
+        if (
+            isinstance(parsed_cost, BenchCostEnvelopeV1)
+            and parsed_cost.approved_at < parsed_bench.frozen_at
+        ):
+            issues.append(
+                _issue(
+                    "cost_approval_before_bench_freeze",
+                    "cost_envelope",
+                    "cost approval predates the bench whose digest it approves",
+                )
+            )
+        if isinstance(parsed_cost, BenchCostEnvelopeV1) and any(
+            parsed_cost.approved_at >= probe.expires_at for probe in probes
+        ):
+            issues.append(
+                _issue(
+                    "provider_probe_expired_before_cost_approval",
+                    "cost_envelope",
+                    "cost approval used provider facts at or after their expiry",
                 )
             )
 

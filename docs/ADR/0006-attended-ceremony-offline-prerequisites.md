@@ -55,6 +55,15 @@ delete, exact replay is idempotent, and an injected failure rolls the whole
 three-stage write back. Storage accepts only an in-memory fixture or a
 connection already attested by Build A as a copy.
 
+Every commitment is signed by the exact frozen seat over the full canonical
+context: case, roster, authority, rule, stage input, predecessor reveal set,
+final deliberation subject, seat position, execution facts, and committed
+preimage. Rewrapping a valid preimage under a different context therefore
+fails. The schema rejects recursive zero-digest placeholders and scalar
+coercion at stage and seat indices. The offline transcript proves structural
+commit-before-reveal ordering; it does not claim an externally witnessed
+wall-clock publication time, which remains an attended-controller concern.
+
 The frozen bench contains exactly nine ordered `FrozenSeatV1` records. The
 same roster root and terminality-rule digest are required by provider
 preflight, all three transcript stages, the compiler, and the approval
@@ -62,6 +71,12 @@ derivation. Every ballot signature is verified over the canonical ballot
 bytes against that seat's exact signer and execution key. A reordered seat,
 substituted route, changed cluster, changed key, or invalid signature is a
 typed non-positive result.
+
+Each frozen seat has exactly one probed served route; a broader list containing
+the observed route is insufficient. Probe observations must predate the bench
+freeze, and the signed cost approval must not predate the exact bench digest it
+approves. Money, port, threshold, count, stage, and seat-position integers are
+strictly typed rather than repaired from strings, floats, or booleans.
 
 Founder, provider, maintenance, control, and prepared-lease records carry
 Ed25519 attestations and are checked against role-specific out-of-band trust
@@ -79,6 +94,15 @@ It does not accept a caller-authored JSON envelope. Its short checksum is a
 display aid only. An operator must inspect and sign the full 64-character
 canonical digest during the attended window; this offline slice deliberately
 contains no signature-ingest or live-effect path.
+
+The persisted packet view is integrity-only and never a signing surface. It
+records the shortest source-evidence validity boundary, renders every full
+SHA-256 evidence root, and always reports that freshness was not reverified and
+operator signing is ineligible. Only a future attended controller may rederive
+fresh evidence in memory and present a full digest under a separately approved
+human custody rail. The offline manifest records that rail as
+`approval_required`, and service/tick authority must equal—not merely enclose—
+the narrow ceremony windows.
 
 The Build A closeout parser accepts the exact merged/green/non-live receipt
 schema and records its merge commit and tree separately from the later Build B
@@ -103,7 +127,8 @@ or container entrypoint. Adding it to a deployed image would be a separate
 reviewed packaging decision.
 
 Successful persisted verification reports canonical packet integrity only,
-with `evidence_reverified=false`, `live_authority_created=false`, and
+with `evidence_reverified=false`, `evidence_freshness_reverified=false`,
+`operator_signing_eligible=false`, `live_authority_created=false`, and
 `effect_executable=false`.
 
 ## Authorities Still Required

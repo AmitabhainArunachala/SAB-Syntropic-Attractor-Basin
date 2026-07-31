@@ -5,7 +5,7 @@ import hashlib
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -279,6 +279,21 @@ def test_payload_tampering_and_extra_fields_fail_closed(
     assert raised.value.code == "packet_shape_invalid"
 
 
+def test_rehashed_zero_runtime_commit_fails_closed(
+    complete_fixture: dict[str, Any],
+) -> None:
+    packet = copy.deepcopy(complete_fixture["packet"])
+    packet["approval_payload"]["code"]["runtime_commit_sha"] = "0" * 40
+    packet["approval_payload_sha256"] = canonical_sha256(packet["approval_payload"])
+    packet["short_display_checksum"] = short_display_checksum(
+        packet["approval_payload_sha256"]
+    )
+
+    with pytest.raises(ApprovalPacketError) as raised:
+        verify_operator_approval_packet(packet)
+    assert raised.value.code == "approval_payload_invalid"
+
+
 def test_rehashed_cross_field_contradiction_fails_closed(
     complete_fixture: dict[str, Any],
 ) -> None:
@@ -410,6 +425,25 @@ def test_compiler_authority_must_be_local_and_rederived(
     with pytest.raises(ApprovalPacketError) as raised:
         bind_operator_approval_evidence(**arguments)
     assert raised.value.code == "compiled_outcome_reverification_failed"
+
+
+@pytest.mark.parametrize("offset", [timedelta(seconds=-1), timedelta(seconds=1)])
+def test_compiled_outcome_must_be_inside_the_preparation_interval(
+    complete_fixture: dict[str, Any],
+    offset: timedelta,
+) -> None:
+    arguments = dict(complete_fixture["binding_arguments"])
+    boundary = (
+        arguments["frozen_readiness"].checked_at
+        if offset < timedelta(0)
+        else arguments["prepared_at"]
+    )
+    arguments["compiled_outcome"] = arguments["compiled_outcome"].model_copy(
+        update={"compiled_at": boundary + offset}
+    )
+    with pytest.raises(ApprovalPacketError) as raised:
+        bind_operator_approval_evidence(**arguments)
+    assert raised.value.code == "compiled_outcome_time_invalid"
 
 
 @pytest.mark.parametrize(

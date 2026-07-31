@@ -389,6 +389,25 @@ def test_commitment_and_reveal_are_stable_strict_canonical_contracts(
         commitment.case_id = "mutated"  # type: ignore[misc]
 
 
+@pytest.mark.parametrize("malformed", ["0", 0.0, False])
+def test_transcript_indices_reject_scalar_type_coercion(
+    ceremony: tuple[CeremonyStageEnvelopeV1, ...],
+    malformed: object,
+) -> None:
+    first = ceremony[0]
+    for model, value, field in (
+        (BallotCommitmentV1, first.commitments[0], "stage_index"),
+        (BallotCommitmentV1, first.commitments[0], "seat_position"),
+        (BallotRevealV1, first.reveals[0], "stage_index"),
+        (BallotRevealV1, first.reveals[0], "seat_position"),
+        (CeremonyStageEnvelopeV1, first, "stage_index"),
+    ):
+        payload = value.canonical_payload()
+        payload[field] = malformed
+        with pytest.raises(ValidationError):
+            model.model_validate(payload)
+
+
 def test_fully_rehashed_and_resigned_zero_context_roots_are_rejected(
     ceremony: tuple[CeremonyStageEnvelopeV1, ...],
 ) -> None:
@@ -851,6 +870,25 @@ def test_envelope_rejects_open_reveal_set_or_route_fact_substitution(
             EMPTY_REVEAL_SET_SHA256,
             roster=_roster(),
             served_route_override="unfrozen/substituted-route",
+        )
+
+    multi_route_roster = list(_roster())
+    multi_route_roster[0] = multi_route_roster[0].model_copy(
+        update={
+            "possible_underlying_routes": (
+                multi_route_roster[0].possible_underlying_routes[0],
+                "unprobed/listed-substitute",
+            )
+        }
+    )
+    with pytest.raises(
+        ValidationError, match="execution facts differ from frozen bench"
+    ):
+        _stage(
+            "sealed_first_pass",
+            EMPTY_REVEAL_SET_SHA256,
+            roster=tuple(multi_route_roster),
+            served_route_override="unprobed/listed-substitute",
         )
 
 

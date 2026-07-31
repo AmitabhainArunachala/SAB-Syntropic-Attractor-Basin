@@ -109,13 +109,20 @@ class CouncilTerminalityRuleV1(StrictCanonicalModel):
     )
     rule_id: str = Field(min_length=1, max_length=200)
     council_size: Literal[9] = 9
-    minimum_raw_votes: int = Field(ge=1, le=9)
-    minimum_clean_clusters: int = Field(ge=1, le=9)
+    minimum_raw_votes: int = Field(ge=1, le=9, strict=True)
+    minimum_clean_clusters: int = Field(ge=1, le=9, strict=True)
     terminal_decisions: tuple[TerminalDecision, ...] = Field(min_length=1)
     effects_by_decision: dict[TerminalDecision, tuple[str, ...]]
     correlation_policy: Literal["remove_smeared_and_appeal_on_change"]
     tie_policy: Literal["no_terminal_verdict"]
     rule_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @field_validator("council_size", mode="before")
+    @classmethod
+    def exact_council_size_type(cls, value: Any) -> int:
+        if type(value) is not int:
+            raise ValueError("council_size must be an exact integer")
+        return value
 
     @field_validator("terminal_decisions", mode="before")
     @classmethod
@@ -206,13 +213,13 @@ class PreUnsealFeasibilityV1(StrictCanonicalModel):
     )
     result: Literal["feasible", "infeasible"]
     rule_sha256: str = Field(pattern=SHA256_PATTERN)
-    expected_seat_count: int = Field(ge=0)
-    committed_seat_count: int = Field(ge=0)
-    distinct_committed_seat_count: int = Field(ge=0)
-    maximum_terminal_votes: int = Field(ge=0)
-    maximum_clean_clusters: int = Field(ge=0)
-    required_terminal_votes: int = Field(ge=1)
-    required_clean_clusters: int = Field(ge=1)
+    expected_seat_count: int = Field(ge=0, strict=True)
+    committed_seat_count: int = Field(ge=0, strict=True)
+    distinct_committed_seat_count: int = Field(ge=0, strict=True)
+    maximum_terminal_votes: int = Field(ge=0, strict=True)
+    maximum_clean_clusters: int = Field(ge=0, strict=True)
+    required_terminal_votes: int = Field(ge=1, strict=True)
+    required_clean_clusters: int = Field(ge=1, strict=True)
     missing_seats: tuple[str, ...]
     duplicate_seats: tuple[str, ...]
     unknown_seats: tuple[str, ...]
@@ -704,7 +711,7 @@ def _ballot_matches_frozen_seat(
         and ballot.requested_route == seat.requested_route
         and ballot.served_provider == seat.served_provider
         and ballot.served_model == seat.served_model
-        and ballot.served_route in seat.possible_underlying_routes
+        and seat.possible_underlying_routes == (ballot.served_route,)
         and ballot.credited_cluster == seat.credited_cluster
         and ballot.cluster_basis == seat.cluster_basis
         and ballot.model_lineage_evidence_refs == seat.model_lineage_evidence_refs
