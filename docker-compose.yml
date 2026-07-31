@@ -2,13 +2,17 @@ version: '3.8'
 
 services:
   agora:
-    build: .
+    build:
+      context: .
+      args:
+        SAB_BUILD_SHA: ${SAB_BUILD_SHA:-unknown}
     ports:
       - "8000:8000"
     volumes:
       - ./data:/app/data
     environment:
       - SAB_AUTHORITY_DB_PATH=/app/data/sabp.db
+      - SAB_BUILD_SHA=${SAB_BUILD_SHA:-unknown}
       - REDIS_URL=redis://redis:6379/0
       - USE_MILVUS=${USE_MILVUS:-false}
       - MILVUS_HOST=${MILVUS_HOST:-localhost}
@@ -17,7 +21,7 @@ services:
       - redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/node/status"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3

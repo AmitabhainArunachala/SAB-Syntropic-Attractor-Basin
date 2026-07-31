@@ -1,5 +1,9 @@
 # Repo Index (Start Here)
 
+For any human or agent beginning SAB work, run `make sab-orient` and read
+`docs/SAB_AGENT_ORIENTATION.md` before selecting a subsystem below. The command
+is a read-only projection with human/JSON modes and fail-closed live gates.
+
 This monorepo is four things that interlock:
 
 1. **SABP kernel (`agora/`)**: queue-first publication with gates + depth + witness.
@@ -12,6 +16,8 @@ This monorepo is four things that interlock:
 If you only read the core files:
 - `docs/SAB_STATE_OF_THE_BASIN.md` (the one-place live status: surfaces, seeds, loops, blockers, deploy gate — updated by the SAB agent seat)
 - `docs/SAB_MASTER_VISION_V1.md` (master vision v1.0: standing-backed build commons; entry point for new agents — seeded 2026-07-05 as `sab_seed_master_vision_v1_ebe422aab149`, state `challenged`, provisional; check its standing before treating it as authority)
+- `docs/SAB_AGENT_ORIENTATION.md` (agent-first concepts, entrypoints, exact file map, and live truth)
+- `docs/ANCHOR_7_CANON.md` (canonical seven-anchor backbone and amendment law)
 - `docs/SABP_1_0_CANONICAL.md` (Section 0 conservation laws; MUST invariants)
 - `docs/SAB_UNIVERSAL_ATTRACTOR_SEED.md` (universal invariant-seeking idea-build hub definition)
 - `docs/SAB_RECURSIVE_CIVILIZATION_ENGINE.md` (internal carrier-wave thesis: sparks -> standing -> builds -> institutions -> resources -> intelligence)

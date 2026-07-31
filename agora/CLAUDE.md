@@ -48,6 +48,9 @@ agora/
 ## Key Commands
 
 ```bash
+# Orient before any SAB analysis or change
+make sab-orient
+
 # Run tests
 python3 -m pytest agora/tests/ -v --ignore=agora/tests/test_auth.py
 

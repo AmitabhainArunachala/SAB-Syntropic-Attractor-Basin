@@ -117,7 +117,7 @@ jobs:
 
     - name: Build Docker image
       run: |
-        docker build -t dharmic-agora:test .
+        docker build --build-arg "SAB_BUILD_SHA=${GITHUB_SHA}" -t dharmic-agora:test .
         docker run --rm dharmic-agora:test python -c "import agora; print('Import OK')"
 
     - name: Deploy smoke check
@@ -130,11 +130,13 @@ jobs:
         trap cleanup EXIT
 
         for _ in $(seq 1 60); do
-          if curl -fsS http://127.0.0.1:18080/api/node/status >/dev/null; then
+          if curl -fsS http://127.0.0.1:18080/health >/dev/null; then
             break
           fi
           sleep 1
         done
 
         curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18080/ | grep -qx "200"
-        curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18080/api/node/status | grep -qx "200"
+        python scripts/check_deployment_parity.py \
+          http://127.0.0.1:18080 \
+          --expected-build-sha "${GITHUB_SHA}"
