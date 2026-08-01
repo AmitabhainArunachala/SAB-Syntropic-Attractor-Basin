@@ -27,7 +27,7 @@ import json
 import re
 import weakref
 from datetime import datetime, timezone
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, NoReturn, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -1400,6 +1400,43 @@ def verify_operator_approval_packet(
     }
 
 
+def require_attended_controller_one_effect_intent(
+    packet: Mapping[str, Any],
+) -> NoReturn:
+    """Reject historical v2 evidence at the one-effect controller boundary.
+
+    A valid v2 packet deliberately contains two separately keyed, non-executable
+    primitive proposals.  It is not an exact one-effect intent, and no positive
+    controller-admission schema exists in this module.  The guard first performs
+    the complete persisted-integrity verification so malformed attempts fail at
+    their original boundary, then emits one stable blocker for genuine v2
+    packets.  A future positive path requires a separately approved versioned
+    contract; it must not reinterpret or repair v2 evidence.
+    """
+
+    verification = verify_operator_approval_packet(packet)
+    payload = _CeremonyApprovalPayloadV2.model_validate(packet["approval_payload"])
+    proposals = payload.proposed_effects
+    primitive_effects = tuple(item.proposal.effect_type for item in proposals)
+    idempotency_keys = tuple(item.idempotency_key for item in proposals)
+    _require(
+        primitive_effects == ("challenge:resolve", "seed:supersede")
+        and len(proposals) == 2
+        and len(set(idempotency_keys)) == 2
+        and all(item.proposal.effect_executable is False for item in proposals)
+        and verification["effect_executable"] is False
+        and verification["live_authority_created"] is False,
+        "approval_payload_invalid",
+        "historical v2 packet lost its closed non-executable proposal shape",
+    )
+    raise ApprovalPacketError(
+        "one_effect_intent_contract_absent",
+        "operator approval packet v2 contains two separately keyed, "
+        "non-executable primitive proposals; attended-controller admission "
+        "requires a separately approved versioned one-effect intent contract",
+    )
+
+
 def _format_microusd(value: int) -> str:
     dollars, micros = divmod(value, 1_000_000)
     return f"{dollars}.{micros:06d}"
@@ -1525,6 +1562,7 @@ __all__ = [
     "build_operator_approval_packet",
     "canonical_packet_json",
     "render_operator_approval_markdown",
+    "require_attended_controller_one_effect_intent",
     "short_display_checksum",
     "verify_operator_approval_packet",
 ]
