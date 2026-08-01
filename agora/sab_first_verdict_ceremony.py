@@ -828,6 +828,13 @@ class TickExclusionReceiptV1(_SignedObservationV1):
 
 
 class RestorationPlanV1(_SignedObservationV1):
+    """Historical rollback-only plan which restores the pre-ceremony state.
+
+    Version 1 can never describe a successful closeout: its database and
+    lifecycle roots are checked against the captured pre-ceremony snapshot.
+    The wire shape remains unchanged for historical receipt verification.
+    """
+
     schema_: Literal["sab.restoration_plan.v1"] = Field(
         "sab.restoration_plan.v1", alias="schema"
     )
@@ -870,6 +877,105 @@ class RestorationPlanV1(_SignedObservationV1):
         elif self.restore_service_instance_id is not None or self.restore_writer_ids:
             raise ValueError("stopped restoration target cannot name live writers")
         return self
+
+    @property
+    def closeout_mode(self) -> Literal["rollback_to_pre_ceremony_state"]:
+        """Expose the fixed historical semantics without changing v1 bytes."""
+
+        return "rollback_to_pre_ceremony_state"
+
+    @property
+    def effect_executable(self) -> Literal[False]:
+        return False
+
+
+class SuccessfulCloseoutPlanV2(_SignedObservationV1):
+    """Prospective, non-executable plan for a successful closeout.
+
+    The plan is constructible before any effect occurs.  It declares which
+    future evidence a separate closeout evaluator must verify, but deliberately
+    contains no claimed effect receipt, post-effect root, or completion time.
+    Service and tick controls still return to the exact pre-ceremony snapshot;
+    database and lifecycle state must remain at the separately verified
+    post-effect roots.
+    """
+
+    schema_: Literal["sab.successful_closeout_plan.v2"] = Field(
+        "sab.successful_closeout_plan.v2", alias="schema"
+    )
+    plan_id: str = Field(pattern=ID_PATTERN)
+    ceremony_id: str = Field(pattern=ID_PATTERN)
+    service_state_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
+    maintenance_runtime_id: str = Field(pattern=ID_PATTERN)
+    closeout_mode: Literal["preserve_verified_post_effect_state"]
+    database_disposition: Literal["preserve_separately_verified_post_effect_root"]
+    lifecycle_disposition: Literal[
+        "preserve_separately_verified_post_effect_fingerprint"
+    ]
+    successful_effect_receipt_requirement: Literal["required"]
+    post_effect_state_verification_requirement: Literal[
+        "database_sha256_and_lifecycle_fingerprint_required"
+    ]
+    success_branch_control_restore_precondition: Literal[
+        "success_branch_successful_effect_receipt_and_post_effect_state_verification"
+    ]
+    success_branch_apply_precondition: Literal[
+        "success_branch_only_after_successful_effect_receipt_and_post_effect_state_verification"
+    ]
+    failure_trigger: Literal["effect_failure_or_post_effect_state_verification_failure"]
+    failure_disposition: Literal[
+        "rollback_to_captured_pre_ceremony_database_and_lifecycle_roots"
+    ]
+    failure_database_sha256: str = Field(pattern=SHA256_PATTERN)
+    failure_lifecycle_fingerprint: str = Field(pattern=SHA256_PATTERN)
+    failure_rollback_verification_requirement: Literal[
+        "database_sha256_and_lifecycle_fingerprint_required_before_control_restore"
+    ]
+    failure_branch_apply_precondition: Literal[
+        "failure_branch_effect_failure_or_post_effect_state_verification_failure_then_verified_snapshot_rollback_before_control_restore"
+    ]
+    control_and_runtime_completion_requirement: Literal[
+        "restore_exact_prior_controls_and_stop_maintenance_runtime_on_success_or_failure"
+    ]
+    stop_maintenance_runtime: Literal[True]
+    restore_service_name: str = Field(pattern=ID_PATTERN)
+    restore_service_state: Literal["running", "stopped"]
+    restore_service_instance_id: str | None = Field(default=None, pattern=ID_PATTERN)
+    restore_service_definition_sha256: str = Field(pattern=SHA256_PATTERN)
+    restore_writer_ids: tuple[str, ...]
+    restore_tick_id: str = Field(pattern=ID_PATTERN)
+    restore_tick_state: Literal["enabled", "disabled"]
+    restore_tick_definition_sha256: str = Field(pattern=SHA256_PATTERN)
+    service_control_authority_sha256: str = Field(pattern=SHA256_PATTERN)
+    tick_control_authority_sha256: str = Field(pattern=SHA256_PATTERN)
+    generated_at: datetime
+    effect_executable: Literal[False]
+    live_authority_created: Literal[False]
+    permits_live_effect: Literal[False]
+    standing_effect: Literal["none"]
+
+    @field_validator("restore_writer_ids", mode="before")
+    @classmethod
+    def exact_writers(cls, value: Sequence[str]) -> tuple[str, ...]:
+        return _exact_strings(value, field="restore_writer_ids", allow_empty=True)
+
+    @field_validator("generated_at")
+    @classmethod
+    def aware_time(cls, value: datetime) -> datetime:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def coherent_successful_closeout(self) -> "SuccessfulCloseoutPlanV2":
+        if self.restore_service_state == "running":
+            if not self.restore_service_instance_id or not self.restore_writer_ids:
+                raise ValueError("running closeout target is incomplete")
+        elif self.restore_service_instance_id is not None or self.restore_writer_ids:
+            raise ValueError("stopped closeout target cannot name live writers")
+        return self
+
+
+CeremonyCloseoutPlan = RestorationPlanV1 | SuccessfulCloseoutPlanV2
+_CLOSEOUT_PLAN_TYPES = (RestorationPlanV1, SuccessfulCloseoutPlanV2)
 
 
 class MaintenanceControlAuthorityReceiptV1(_SignedObservationV1):
@@ -1127,6 +1233,43 @@ def _parse_receipt(
         return None, [
             _issue(code, receipt, "receipt failed strict canonical validation")
         ]
+
+
+def _parse_closeout_plan(
+    value: Any,
+) -> tuple[CeremonyCloseoutPlan | None, list[PreflightIssueV1]]:
+    """Select the exact versioned closeout contract without union coercion."""
+
+    payload = (
+        value.canonical_payload() if isinstance(value, StrictCanonicalModel) else value
+    )
+    if not isinstance(payload, Mapping):
+        return None, [
+            _issue(
+                "restoration_plan_invalid",
+                "restoration_plan",
+                "closeout plan failed strict canonical validation",
+            )
+        ]
+    model = {
+        "sab.restoration_plan.v1": RestorationPlanV1,
+        "sab.successful_closeout_plan.v2": SuccessfulCloseoutPlanV2,
+    }.get(payload.get("schema"))
+    if model is None:
+        return None, [
+            _issue(
+                "restoration_plan_invalid",
+                "restoration_plan",
+                "closeout plan schema is missing or unsupported",
+            )
+        ]
+    parsed, issues = _parse_receipt(
+        model,
+        payload,
+        code="restoration_plan_invalid",
+        receipt="restoration_plan",
+    )
+    return cast(CeremonyCloseoutPlan | None, parsed), issues
 
 
 def _freshness_issues(
@@ -1780,7 +1923,7 @@ def validate_live_preflight_receipts(
     runtime_attestation: MaintenanceRuntimeAttestationV1 | Mapping[str, Any],
     service_state_snapshot: ServiceStateSnapshotV1 | Mapping[str, Any],
     tick_exclusion_receipt: TickExclusionReceiptV1 | Mapping[str, Any],
-    restoration_plan: RestorationPlanV1 | Mapping[str, Any],
+    restoration_plan: CeremonyCloseoutPlan | Mapping[str, Any],
     service_control_authority_receipt: MaintenanceControlAuthorityReceiptV1
     | Mapping[str, Any],
     tick_control_authority_receipt: MaintenanceControlAuthorityReceiptV1
@@ -1844,12 +1987,7 @@ def validate_live_preflight_receipts(
         receipt="tick_exclusion",
     )
     issues.extend(new)
-    parsed_restoration, new = _parse_receipt(
-        RestorationPlanV1,
-        restoration_plan,
-        code="restoration_plan_invalid",
-        receipt="restoration_plan",
-    )
+    parsed_restoration, new = _parse_closeout_plan(restoration_plan)
     issues.extend(new)
     parsed_service_control, new = _parse_receipt(
         MaintenanceControlAuthorityReceiptV1,
@@ -2084,26 +2222,28 @@ def validate_live_preflight_receipts(
                 )
             )
 
-        if (
-            isinstance(parsed_restoration, RestorationPlanV1)
-            and isinstance(parsed_service_control, MaintenanceControlAuthorityReceiptV1)
-            and isinstance(parsed_tick_control, MaintenanceControlAuthorityReceiptV1)
-            and not (
-                parsed_service_control.authorized_from
-                <= parsed_restoration.generated_at
-                < parsed_service_control.authorized_until
-                and parsed_tick_control.authorized_from
-                <= parsed_restoration.generated_at
-                < parsed_tick_control.authorized_until
-            )
-        ):
-            issues.append(
-                _issue(
-                    "restoration_plan_outside_control_window",
-                    "restoration_plan",
-                    "restoration plan was not generated inside both control windows",
+        if isinstance(parsed_restoration, _CLOSEOUT_PLAN_TYPES):
+            if (
+                isinstance(parsed_service_control, MaintenanceControlAuthorityReceiptV1)
+                and isinstance(
+                    parsed_tick_control, MaintenanceControlAuthorityReceiptV1
                 )
-            )
+                and not (
+                    parsed_service_control.authorized_from
+                    <= parsed_restoration.generated_at
+                    < parsed_service_control.authorized_until
+                    and parsed_tick_control.authorized_from
+                    <= parsed_restoration.generated_at
+                    < parsed_tick_control.authorized_until
+                )
+            ):
+                issues.append(
+                    _issue(
+                        "restoration_plan_outside_control_window",
+                        "restoration_plan",
+                        "closeout plan was not generated inside both control windows",
+                    )
+                )
 
     if isinstance(parsed_runtime, MaintenanceRuntimeAttestationV1):
         issues.extend(
@@ -2159,7 +2299,7 @@ def validate_live_preflight_receipts(
                 prefix="tick_exclusion",
             )
         )
-    if isinstance(parsed_restoration, RestorationPlanV1):
+    if isinstance(parsed_restoration, _CLOSEOUT_PLAN_TYPES):
         if (
             parsed_restoration.generated_at > checked_at + MAX_FUTURE_CLOCK_SKEW
             or checked_at - parsed_restoration.generated_at
@@ -2342,7 +2482,7 @@ def validate_live_preflight_receipts(
     if (
         isinstance(parsed_manifest, AttendedCeremonyManifestV1)
         and isinstance(parsed_snapshot, ServiceStateSnapshotV1)
-        and isinstance(parsed_restoration, RestorationPlanV1)
+        and isinstance(parsed_restoration, _CLOSEOUT_PLAN_TYPES)
     ):
         if (
             parsed_restoration.canonical_sha256()
@@ -2355,7 +2495,7 @@ def validate_live_preflight_receipts(
                     "restoration plan differs from the frozen manifest",
                 )
             )
-        expected_restore = (
+        expected_control_restore = (
             parsed_restoration.ceremony_id == parsed_manifest.ceremony_id,
             parsed_restoration.service_state_snapshot_sha256
             == parsed_snapshot.canonical_sha256(),
@@ -2373,23 +2513,55 @@ def validate_live_preflight_receipts(
             parsed_restoration.restore_tick_state == parsed_snapshot.prior_tick_state,
             parsed_restoration.restore_tick_definition_sha256
             == parsed_snapshot.prior_tick_definition_sha256,
-            parsed_restoration.restore_database_sha256
-            == parsed_snapshot.database_sha256,
-            parsed_restoration.restore_lifecycle_fingerprint
-            == parsed_snapshot.lifecycle_fingerprint,
             parsed_restoration.service_control_authority_sha256
             == parsed_snapshot.service_control_authority_sha256,
             parsed_restoration.tick_control_authority_sha256
             == parsed_snapshot.tick_control_authority_sha256,
         )
-        if not all(expected_restore):
+        disposition_roots_match = (
+            parsed_restoration.restore_database_sha256
+            == parsed_snapshot.database_sha256
+            and parsed_restoration.restore_lifecycle_fingerprint
+            == parsed_snapshot.lifecycle_fingerprint
+            if isinstance(parsed_restoration, RestorationPlanV1)
+            else parsed_restoration.failure_database_sha256
+            == parsed_snapshot.database_sha256
+            and parsed_restoration.failure_lifecycle_fingerprint
+            == parsed_snapshot.lifecycle_fingerprint
+        )
+        if not all(expected_control_restore) or not disposition_roots_match:
             issues.append(
                 _issue(
                     "restoration_drift",
                     "restoration_plan",
-                    "restoration target differs from the exact captured prior state",
+                    "closeout target differs from its exact captured prior controls",
                 )
             )
+
+    if (
+        isinstance(parsed_restoration, SuccessfulCloseoutPlanV2)
+        and isinstance(parsed_snapshot, ServiceStateSnapshotV1)
+        and isinstance(parsed_tick, TickExclusionReceiptV1)
+        and isinstance(parsed_lease, LiveWriteLeaseEnvelopeV1)
+        and not (
+            parsed_snapshot.captured_at
+            <= parsed_tick.observed_at
+            <= parsed_restoration.generated_at
+            and parsed_tick.excluded_from
+            <= parsed_restoration.generated_at
+            < parsed_tick.excluded_until
+            and parsed_lease.issued_at
+            <= parsed_restoration.generated_at
+            < parsed_lease.expires_at
+        )
+    ):
+        issues.append(
+            _issue(
+                "successful_closeout_plan_chronology_invalid",
+                "restoration_plan",
+                "successful closeout plan does not follow snapshot, exclusion, and lease chronology",
+            )
+        )
 
     if issues:
         return _blocked(
@@ -2403,7 +2575,7 @@ def validate_live_preflight_receipts(
     parsed_runtime = cast(MaintenanceRuntimeAttestationV1, parsed_runtime)
     parsed_snapshot = cast(ServiceStateSnapshotV1, parsed_snapshot)
     parsed_tick = cast(TickExclusionReceiptV1, parsed_tick)
-    parsed_restoration = cast(RestorationPlanV1, parsed_restoration)
+    parsed_restoration = cast(CeremonyCloseoutPlan, parsed_restoration)
     parsed_service_control = cast(
         MaintenanceControlAuthorityReceiptV1, parsed_service_control
     )
@@ -2492,6 +2664,7 @@ __all__ = [
     "BenchSeatCostV1",
     "Blocked",
     "CEREMONY_READINESS_ADAPTER",
+    "CeremonyCloseoutPlan",
     "CeremonyReadinessV1",
     "FROZEN_MAINTENANCE_OPERATIONS_SHA256",
     "FounderDecisionReceiptV1",
@@ -2508,6 +2681,7 @@ __all__ = [
     "ServiceStateSnapshotV1",
     "SignedAuthorityEvaluationEnvelopeV1",
     "StructurallyCompleteAwaitingAuthority",
+    "SuccessfulCloseoutPlanV2",
     "TickExclusionReceiptV1",
     "validate_live_preflight_receipts",
     "readiness_is_locally_verified",
