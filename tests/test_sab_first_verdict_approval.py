@@ -25,6 +25,7 @@ from agora.sab_first_verdict_approval import (
     build_operator_approval_packet,
     canonical_packet_json,
     render_operator_approval_markdown,
+    require_attended_controller_one_effect_intent,
     short_display_checksum,
     verify_operator_approval_packet,
 )
@@ -80,6 +81,88 @@ def test_packet_is_deterministic_unsigned_and_non_authorizing(
     assert verified["operator_signing_eligible"] is False
     assert verified["live_authority_created"] is False
     assert verified["effect_executable"] is False
+
+
+def test_v2_packet_cannot_cross_the_one_effect_controller_boundary(
+    complete_fixture: dict[str, Any],
+) -> None:
+    packet = complete_fixture["packet"]
+    proposals = packet["approval_payload"]["proposed_effects"]
+
+    assert [item["proposal"]["effect_type"] for item in proposals] == [
+        "challenge:resolve",
+        "seed:supersede",
+    ]
+    assert len({item["idempotency_key"] for item in proposals}) == 2
+    assert all(item["proposal"]["effect_executable"] is False for item in proposals)
+
+    with pytest.raises(ApprovalPacketError) as raised:
+        require_attended_controller_one_effect_intent(packet)
+    assert raised.value.code == "one_effect_intent_contract_absent"
+    assert "separately approved versioned one-effect intent contract" in str(
+        raised.value
+    )
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        "single_primitive",
+        "unapproved_composite",
+        "reordered_primitives",
+        "reused_idempotency_key",
+        "extra_top_level_proposal",
+    ],
+)
+def test_rehashed_v2_rewrites_cannot_manufacture_a_one_effect_intent(
+    complete_fixture: dict[str, Any], rewrite: str
+) -> None:
+    packet = copy.deepcopy(complete_fixture["packet"])
+    payload = packet["approval_payload"]
+    proposals = payload["proposed_effects"]
+
+    if rewrite == "single_primitive":
+        payload["proposed_effects"] = proposals[:1]
+        payload["authority_evidence"]["requested_effects"] = ["challenge:resolve"]
+    elif rewrite == "unapproved_composite":
+        proposal = proposals[0]
+        proposal["proposal"]["effect_type"] = "unapproved:composite"
+        proposal["proposal_sha256"] = canonical_sha256(proposal["proposal"])
+        proposal["idempotency_key"] = (
+            "sab-"
+            + canonical_sha256(
+                {
+                    "ceremony_id": payload["ceremony_id"],
+                    "effect_type": proposal["proposal"]["effect_type"],
+                    "proposal_sha256": proposal["proposal_sha256"],
+                    "write_lease_sha256": payload["maintenance"]["write_lease_sha256"],
+                }
+            )[:32]
+        )
+        payload["proposed_effects"] = [proposal]
+        payload["authority_evidence"]["requested_effects"] = ["unapproved:composite"]
+    elif rewrite == "reordered_primitives":
+        payload["proposed_effects"] = list(reversed(proposals))
+        payload["authority_evidence"]["requested_effects"] = [
+            "seed:supersede",
+            "challenge:resolve",
+        ]
+    elif rewrite == "reused_idempotency_key":
+        proposals[1]["idempotency_key"] = proposals[0]["idempotency_key"]
+    elif rewrite == "extra_top_level_proposal":
+        payload["proposed_effects"].append(copy.deepcopy(proposals[0]))
+        payload["authority_evidence"]["requested_effects"].append("challenge:resolve")
+    else:  # pragma: no cover - the parameter set is closed above
+        raise AssertionError(f"unknown rewrite {rewrite}")
+
+    packet["approval_payload_sha256"] = canonical_sha256(payload)
+    packet["short_display_checksum"] = short_display_checksum(
+        packet["approval_payload_sha256"]
+    )
+
+    with pytest.raises(ApprovalPacketError) as raised:
+        require_attended_controller_one_effect_intent(packet)
+    assert raised.value.code == "approval_payload_invalid"
 
 
 def test_payload_exposes_distinct_code_roots_closed_proposals_and_trust_sets(

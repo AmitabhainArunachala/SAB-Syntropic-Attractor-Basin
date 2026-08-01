@@ -36,6 +36,7 @@ from agora.sab_first_verdict_ceremony import (
     ServiceStateSnapshotV1,
     SignedAuthorityEvaluationEnvelopeV1,
     StructurallyCompleteAwaitingAuthority,
+    SuccessfulCloseoutPlanV2,
     TickExclusionReceiptV1,
     readiness_is_locally_verified,
     validate_live_preflight_receipts,
@@ -523,6 +524,75 @@ def _packet(
         "restoration": restoration,
         "manifest": manifest,
     }
+
+
+def _successful_closeout_plan(
+    packet: dict[str, Any], **overrides: Any
+) -> dict[str, Any]:
+    snapshot = packet["snapshot"]
+    payload = {
+        "plan_id": "successful-closeout-1",
+        "ceremony_id": "ceremony-1",
+        "service_state_snapshot_sha256": snapshot.canonical_sha256(),
+        "maintenance_runtime_id": packet["runtime"].runtime_id,
+        "closeout_mode": "preserve_verified_post_effect_state",
+        "database_disposition": "preserve_separately_verified_post_effect_root",
+        "lifecycle_disposition": (
+            "preserve_separately_verified_post_effect_fingerprint"
+        ),
+        "successful_effect_receipt_requirement": "required",
+        "post_effect_state_verification_requirement": (
+            "database_sha256_and_lifecycle_fingerprint_required"
+        ),
+        "success_branch_control_restore_precondition": (
+            "success_branch_successful_effect_receipt_and_post_effect_state_verification"
+        ),
+        "success_branch_apply_precondition": (
+            "success_branch_only_after_successful_effect_receipt_and_post_effect_state_verification"
+        ),
+        "failure_trigger": ("effect_failure_or_post_effect_state_verification_failure"),
+        "failure_disposition": (
+            "rollback_to_captured_pre_ceremony_database_and_lifecycle_roots"
+        ),
+        "failure_database_sha256": snapshot.database_sha256,
+        "failure_lifecycle_fingerprint": snapshot.lifecycle_fingerprint,
+        "failure_rollback_verification_requirement": (
+            "database_sha256_and_lifecycle_fingerprint_required_before_control_restore"
+        ),
+        "failure_branch_apply_precondition": (
+            "failure_branch_effect_failure_or_post_effect_state_verification_failure_then_verified_snapshot_rollback_before_control_restore"
+        ),
+        "control_and_runtime_completion_requirement": (
+            "restore_exact_prior_controls_and_stop_maintenance_runtime_on_success_or_failure"
+        ),
+        "stop_maintenance_runtime": True,
+        "restore_service_name": snapshot.service_name,
+        "restore_service_state": snapshot.prior_service_state,
+        "restore_service_instance_id": snapshot.prior_service_instance_id,
+        "restore_service_definition_sha256": (snapshot.prior_service_definition_sha256),
+        "restore_writer_ids": snapshot.prior_writer_ids,
+        "restore_tick_id": snapshot.tick_id,
+        "restore_tick_state": snapshot.prior_tick_state,
+        "restore_tick_definition_sha256": snapshot.prior_tick_definition_sha256,
+        "service_control_authority_sha256": (snapshot.service_control_authority_sha256),
+        "tick_control_authority_sha256": snapshot.tick_control_authority_sha256,
+        "generated_at": NOW - timedelta(seconds=5),
+        "effect_executable": False,
+        "live_authority_created": False,
+        "permits_live_effect": False,
+        "standing_effect": "none",
+    }
+    payload.update(overrides)
+    plan = _signed_observation(
+        SuccessfulCloseoutPlanV2,
+        packet["keys"]["maintenance"],
+        "maintenance.attestor",
+        **payload,
+    )
+    manifest_payload = packet["manifest"].canonical_payload()
+    manifest_payload["restoration_plan_sha256"] = plan.canonical_sha256()
+    manifest = AttendedCeremonyManifestV1.model_validate(manifest_payload)
+    return {**packet, "restoration": plan, "manifest": manifest}
 
 
 def _frozen(packet: dict[str, Any], **overrides: Any):
@@ -1028,6 +1098,302 @@ def test_restoration_plan_generation_must_be_inside_both_control_windows() -> No
     assert "restoration_plan_outside_control_window" in _codes(result)
 
 
+def test_v1_restoration_is_historical_rollback_only() -> None:
+    packet = _packet()
+    plan = packet["restoration"]
+
+    assert plan.closeout_mode == "rollback_to_pre_ceremony_state"
+    assert plan.effect_executable is False
+    assert plan.restore_database_sha256 == packet["snapshot"].database_sha256
+    assert (
+        plan.restore_lifecycle_fingerprint == packet["snapshot"].lifecycle_fingerprint
+    )
+    assert "closeout_mode" not in plan.canonical_payload()
+
+    false_success = plan.canonical_payload()
+    false_success["closeout_mode"] = "preserve_verified_post_effect_state"
+    with pytest.raises(ValidationError):
+        RestorationPlanV1.model_validate(false_success)
+
+
+def test_v1_zero_lifecycle_root_remains_wire_compatible_but_drift_is_blocked() -> None:
+    packet = _packet()
+    payload = packet["restoration"].canonical_payload(
+        exclude={
+            "attestation_signature",
+            "attestor_identity",
+            "attestor_public_key",
+            "attestor_fingerprint",
+        }
+    )
+    payload["restore_lifecycle_fingerprint"] = "0" * 64
+    historical = _signed_observation(
+        RestorationPlanV1,
+        packet["keys"]["maintenance"],
+        "maintenance.attestor",
+        **payload,
+    )
+    wire = historical.canonical_bytes()
+
+    reparsed = RestorationPlanV1.model_validate_json(wire)
+
+    assert reparsed.canonical_bytes() == wire
+    manifest_payload = packet["manifest"].canonical_payload()
+    manifest_payload["restoration_plan_sha256"] = historical.canonical_sha256()
+    historical_packet = {
+        **packet,
+        "restoration": historical,
+        "manifest": AttendedCeremonyManifestV1.model_validate(manifest_payload),
+    }
+    result = _live(historical_packet)
+    assert isinstance(result, Blocked)
+    assert "restoration_drift" in _codes(result)
+
+
+@pytest.mark.parametrize(
+    "field", ["restore_database_sha256", "restore_lifecycle_fingerprint"]
+)
+def test_v1_rollback_roots_must_match_the_pre_ceremony_snapshot(field: str) -> None:
+    packet = _packet()
+    drifted = packet["restoration"].canonical_payload()
+    drifted[field] = _sha(f"drifted-{field}")
+
+    result = _live(packet, restoration_plan=drifted)
+
+    assert isinstance(result, Blocked)
+    assert "restoration_drift" in _codes(result)
+
+
+def test_successful_closeout_plan_binds_both_branches_without_authority() -> None:
+    packet = _successful_closeout_plan(_packet())
+    plan = packet["restoration"]
+    payload = plan.canonical_payload()
+
+    assert plan.closeout_mode == "preserve_verified_post_effect_state"
+    assert plan.database_disposition == "preserve_separately_verified_post_effect_root"
+    assert (
+        plan.lifecycle_disposition
+        == "preserve_separately_verified_post_effect_fingerprint"
+    )
+    assert plan.successful_effect_receipt_requirement == "required"
+    assert (
+        plan.post_effect_state_verification_requirement
+        == "database_sha256_and_lifecycle_fingerprint_required"
+    )
+    assert (
+        plan.success_branch_control_restore_precondition
+        == "success_branch_successful_effect_receipt_and_post_effect_state_verification"
+    )
+    assert (
+        plan.success_branch_apply_precondition
+        == "success_branch_only_after_successful_effect_receipt_and_post_effect_state_verification"
+    )
+    assert (
+        plan.failure_trigger
+        == "effect_failure_or_post_effect_state_verification_failure"
+    )
+    assert (
+        plan.failure_disposition
+        == "rollback_to_captured_pre_ceremony_database_and_lifecycle_roots"
+    )
+    assert plan.failure_database_sha256 == packet["snapshot"].database_sha256
+    assert (
+        plan.failure_lifecycle_fingerprint == packet["snapshot"].lifecycle_fingerprint
+    )
+    assert (
+        plan.failure_rollback_verification_requirement
+        == "database_sha256_and_lifecycle_fingerprint_required_before_control_restore"
+    )
+    assert (
+        plan.failure_branch_apply_precondition
+        == "failure_branch_effect_failure_or_post_effect_state_verification_failure_then_verified_snapshot_rollback_before_control_restore"
+    )
+    assert (
+        plan.success_branch_apply_precondition != plan.failure_branch_apply_precondition
+    )
+    assert (
+        plan.control_and_runtime_completion_requirement
+        == "restore_exact_prior_controls_and_stop_maintenance_runtime_on_success_or_failure"
+    )
+    assert plan.stop_maintenance_runtime is True
+    for future_fact in (
+        "successful_effect_receipt_sha256",
+        "post_effect_state_verification_sha256",
+        "post_effect_database_sha256",
+        "post_effect_lifecycle_fingerprint",
+        "effect_completed_at",
+        "post_effect_state_verified_at",
+    ):
+        assert future_fact not in payload
+    assert "restore_database_sha256" not in payload
+    assert "restore_lifecycle_fingerprint" not in payload
+    assert plan.effect_executable is False
+    assert plan.live_authority_created is False
+    assert plan.permits_live_effect is False
+
+    result = _live(packet)
+
+    assert isinstance(result, StructurallyCompleteAwaitingAuthority)
+    assert readiness_is_locally_verified(result, phase="live_maintenance_preflight")
+    assert result.live_authority_state == "absent"
+    assert result.permits_live_effect is False
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        ("remove:closeout_mode", None),
+        ("closeout_mode", "rollback_to_pre_ceremony_state"),
+        ("remove:successful_effect_receipt_requirement", None),
+        ("successful_effect_receipt_requirement", "optional"),
+        ("remove:post_effect_state_verification_requirement", None),
+        ("post_effect_state_verification_requirement", "database_only"),
+        ("remove:success_branch_control_restore_precondition", None),
+        ("success_branch_control_restore_precondition", "failure_rollback"),
+        (
+            "success_branch_control_restore_precondition",
+            "successful_effect_receipt_and_post_effect_state_verification",
+        ),
+        ("remove:success_branch_apply_precondition", None),
+        ("success_branch_apply_precondition", "effect_attempted"),
+        ("success_branch_apply_precondition", True),
+        ("database_disposition", "restore_pre_effect_root"),
+        ("remove:failure_trigger", None),
+        ("failure_trigger", "effect_failure_only"),
+        ("remove:failure_disposition", None),
+        ("failure_disposition", "leave_maintenance_running"),
+        ("remove:failure_database_sha256", None),
+        ("remove:failure_lifecycle_fingerprint", None),
+        ("remove:failure_rollback_verification_requirement", None),
+        ("failure_rollback_verification_requirement", "optional"),
+        ("remove:failure_branch_apply_precondition", None),
+        ("failure_branch_apply_precondition", "effect_failure_only"),
+        ("remove:control_and_runtime_completion_requirement", None),
+        ("control_and_runtime_completion_requirement", "success_only"),
+        ("effect_executable", True),
+        ("restore_database_sha256", SHA_A),
+    ],
+)
+def test_successful_closeout_plan_rejects_missing_or_contradictory_requirements(
+    mutation: str, value: Any
+) -> None:
+    packet = _successful_closeout_plan(_packet())
+    raw = packet["restoration"].canonical_payload()
+    if mutation.startswith("remove:"):
+        raw.pop(mutation.removeprefix("remove:"))
+    else:
+        raw[mutation] = value
+
+    with pytest.raises(ValidationError):
+        SuccessfulCloseoutPlanV2.model_validate(raw)
+    result = _live(packet, restoration_plan=raw)
+    assert isinstance(result, Blocked)
+    assert "restoration_plan_invalid" in _codes(result)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "successful_effect_receipt_sha256",
+        "post_effect_state_verification_sha256",
+        "post_effect_database_sha256",
+        "post_effect_lifecycle_fingerprint",
+        "effect_completed_at",
+        "post_effect_state_verified_at",
+    ],
+)
+def test_successful_closeout_plan_rejects_claimed_future_evidence(field: str) -> None:
+    packet = _successful_closeout_plan(_packet())
+    raw = packet["restoration"].canonical_payload()
+    raw[field] = NOW.isoformat() if field.endswith("_at") else SHA_A
+
+    with pytest.raises(ValidationError):
+        SuccessfulCloseoutPlanV2.model_validate(raw)
+    result = _live(packet, restoration_plan=raw)
+    assert isinstance(result, Blocked)
+    assert "restoration_plan_invalid" in _codes(result)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "control_restore_precondition",
+        "apply_only_after_successful_effect_verification",
+    ],
+)
+def test_successful_closeout_plan_rejects_old_unscoped_preconditions(
+    field: str,
+) -> None:
+    packet = _successful_closeout_plan(_packet())
+    raw = packet["restoration"].canonical_payload()
+    raw[field] = (
+        "successful_effect_receipt_and_post_effect_state_verification"
+        if field == "control_restore_precondition"
+        else True
+    )
+
+    with pytest.raises(ValidationError):
+        SuccessfulCloseoutPlanV2.model_validate(raw)
+    result = _live(packet, restoration_plan=raw)
+    assert isinstance(result, Blocked)
+    assert "restoration_plan_invalid" in _codes(result)
+
+
+def test_successful_closeout_plan_follows_snapshot_tick_and_lease() -> None:
+    packet = _successful_closeout_plan(
+        _packet(), generated_at=NOW - timedelta(seconds=12)
+    )
+
+    result = _live(packet)
+
+    assert isinstance(result, Blocked)
+    assert "successful_closeout_plan_chronology_invalid" in _codes(result)
+
+
+@pytest.mark.parametrize(
+    "field", ["failure_database_sha256", "failure_lifecycle_fingerprint"]
+)
+def test_successful_closeout_failure_roots_bind_the_snapshot(field: str) -> None:
+    packet = _successful_closeout_plan(_packet(), **{field: _sha(f"drifted-{field}")})
+
+    result = _live(packet)
+
+    assert isinstance(result, Blocked)
+    assert "restoration_drift" in _codes(result)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "restore_service_definition_sha256",
+        "restore_tick_definition_sha256",
+        "service_control_authority_sha256",
+        "tick_control_authority_sha256",
+    ],
+)
+def test_successful_closeout_restores_exact_prior_service_and_tick_controls(
+    field: str,
+) -> None:
+    packet = _successful_closeout_plan(_packet(), **{field: _sha(f"drifted-{field}")})
+
+    result = _live(packet)
+
+    assert isinstance(result, Blocked)
+    assert "restoration_drift" in _codes(result)
+
+
+def test_successful_closeout_signature_is_evidence_not_execution_authority() -> None:
+    packet = _successful_closeout_plan(_packet())
+    tampered = _tampered_signature(packet["restoration"])
+
+    result = _live(packet, restoration_plan=tampered)
+
+    assert isinstance(result, Blocked)
+    assert "restoration_plan_signature_invalid" in _codes(result)
+    assert result.live_authority_state == "absent"
+    assert result.permits_live_effect is False
+
+
 def test_write_lease_is_mandatory_trusted_and_signed() -> None:
     packet = _packet()
 
@@ -1193,6 +1559,7 @@ def test_module_has_no_live_io_or_private_key_surface() -> None:
         ServiceStateSnapshotV1,
         TickExclusionReceiptV1,
         RestorationPlanV1,
+        SuccessfulCloseoutPlanV2,
         MaintenanceControlAuthorityReceiptV1,
         LiveWriteLeaseEnvelopeV1,
     ):
