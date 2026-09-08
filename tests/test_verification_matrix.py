@@ -448,18 +448,11 @@ class TestInvalidSignatureRejection:
     def test_submit_with_bad_signature_rejected(self, client: TestClient, web_app):
         """API submit with forged signature must be rejected."""
         from nacl.signing import SigningKey
+        from keycontrol_fixtures import enroll_identity
 
         sk = SigningKey.generate()
-        from nacl.encoding import HexEncoder
 
-        public_key = sk.verify_key.encode(encoder=HexEncoder).decode()
-        # Register the agent
-        reg = client.post(
-            "/api/agents/register",
-            json={"name": "bad-sig-agent", "public_key": public_key},
-        )
-        assert reg.status_code == 201
-        agent_id = str(reg.json()["id"])
+        agent_id = enroll_identity(client, sk, display_name="bad-sig-agent")["subject_id"]
 
         bad_sig = "00" * 64
         resp = client.post(
@@ -477,17 +470,12 @@ class TestInvalidSignatureRejection:
     def test_witness_with_bad_signature_rejected(self, client: TestClient, web_app):
         """API witness/sign with forged signature must be rejected."""
         import hashlib
-        from nacl.encoding import HexEncoder
         from nacl.signing import SigningKey
+        from keycontrol_fixtures import enroll_identity
 
         sk = SigningKey.generate()
-        public_key = sk.verify_key.encode(encoder=HexEncoder).decode()
-        reg = client.post(
-            "/api/agents/register",
-            json={"name": "witness-bad-sig", "public_key": public_key},
-        )
-        assert reg.status_code == 201
-        agent_id = str(reg.json()["id"])
+
+        agent_id = enroll_identity(client, sk, display_name="witness-bad-sig")["subject_id"]
 
         # Submit a valid spark first
         content = "Valid spark for signature rejection test."
@@ -528,17 +516,12 @@ class TestInvalidSignatureRejection:
     def test_challenge_with_bad_signature_rejected(self, client: TestClient, web_app):
         """API challenge with forged signature must be rejected."""
         import hashlib
-        from nacl.encoding import HexEncoder
         from nacl.signing import SigningKey
+        from keycontrol_fixtures import enroll_identity
 
         sk = SigningKey.generate()
-        public_key = sk.verify_key.encode(encoder=HexEncoder).decode()
-        reg = client.post(
-            "/api/agents/register",
-            json={"name": "challenge-bad-sig", "public_key": public_key},
-        )
-        assert reg.status_code == 201
-        agent_id = str(reg.json()["id"])
+
+        agent_id = enroll_identity(client, sk, display_name="challenge-bad-sig")["subject_id"]
 
         # Submit a valid spark
         content = "Valid spark for challenge rejection test."
@@ -656,17 +639,12 @@ class TestDeterminism:
 
     def test_api_chain_verification_on_fresh_spark(self, client: TestClient, web_app):
         """Chain verification should pass on a freshly submitted spark."""
-        from nacl.encoding import HexEncoder
         from nacl.signing import SigningKey
+        from keycontrol_fixtures import enroll_identity
 
         sk = SigningKey.generate()
-        public_key = sk.verify_key.encode(encoder=HexEncoder).decode()
-        reg = client.post(
-            "/api/agents/register",
-            json={"name": "chain-verify", "public_key": public_key},
-        )
-        assert reg.status_code == 201
-        agent_id = str(reg.json()["id"])
+
+        agent_id = enroll_identity(client, sk, display_name="chain-verify")["subject_id"]
 
         content = "Chain verification check."
         content_sha = __import__("hashlib").sha256(content.encode()).hexdigest()

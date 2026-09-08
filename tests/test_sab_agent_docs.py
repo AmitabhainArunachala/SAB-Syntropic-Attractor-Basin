@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -28,34 +28,34 @@ def _read(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
 
 
-def test_public_agent_docs_exist_and_keep_standing_boundary() -> None:
-    for name in PUBLIC_DOCS:
-        text = _read(f"site/{name}")
-        lower = text.lower()
-        assert "private keys" in lower, name
-        assert "secret" in lower, name
-        assert "standing" in lower, name
-        assert "reputation" in lower, name
+def test_served_enrollment_examples_execute_without_authority_effect(client):
+    from nacl.signing import SigningKey
+    from agora.sab_identity import canonical_json_bytes
 
-    combined = "\n".join(_read(f"site/{name}") for name in PUBLIC_DOCS).lower()
-    assert "posting" in combined
-    assert "posting, feed visibility, engagement, karma" in combined
-    assert "never equals standing" in combined
-    assert "identity proves control" in combined
-
-
-def test_public_agent_docs_include_required_examples() -> None:
-    combined = "\n".join(_read(f"site/{name}") for name in PUBLIC_DOCS).lower()
-    for phrase in (
-        "identity registration example",
-        "seed submit example",
-        "challenge submit example",
-        "witness event example",
-        "standing fetch example",
-        "chain verify example",
-        "get /api/v1/agents/me/home",
-    ):
-        assert phrase in combined
+    guide = client.get("/auth.md")
+    assert guide.status_code == 200
+    examples = [
+        json.loads(body) for body in re.findall(r"```json\s*\n(.*?)\n```", guide.text, re.S)
+    ]
+    registration = next(example for example in examples if example.get("action") == "register")
+    verification = next(
+        example for example in examples if "challenge_id" in example and "signature" in example
+    )
+    key = SigningKey.generate()
+    registration["registration"]["public_key"] = key.verify_key.encode().hex()
+    challenge = client.post("/api/v1/agents/challenge", json=registration)
+    assert challenge.status_code == 201, challenge.text
+    message = challenge.json()["message"]
+    verification["challenge_id"] = message["challenge_id"]
+    verification["signature"] = key.sign(canonical_json_bytes(message)).signature.hex()
+    verified = client.post("/api/v1/agents/verify", json=verification)
+    assert verified.status_code == 200, verified.text
+    result = verified.json()
+    assert result["identity"]["public_key"] == registration["registration"]["public_key"]
+    assert result["binding"]["status"] == "active"
+    assert result["binding"]["scope"] == "key_control_only"
+    assert result["authority_effect"] == result["standing_effect"] == "none"
+    assert client.post("/api/v1/agents/verify", json=verification).status_code == 409
 
 
 def test_public_seed_packet_schema_shape() -> None:
@@ -101,6 +101,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     db_path = tmp_path / "sab_agent_docs.db"
     key_path = tmp_path / ".sab_agent_docs_system_ed25519.key"
+    monkeypatch.setenv("SAB_PUBLIC_MODE", "local")
+    monkeypatch.setenv("SAB_IDENTITY_ORIGIN", "http://127.0.0.1:8000")
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(db_path))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(key_path))
 
@@ -124,7 +126,7 @@ def test_public_agent_docs_routes_are_served(client: TestClient) -> None:
         res = client.get(path)
         assert res.status_code == 200, path
         assert res.headers["content-type"].startswith("text/markdown"), path
-        assert "private keys" in res.text.lower(), path
+        assert res.content == (REPO_ROOT / "site" / path.lstrip("/")).read_bytes(), path
 
     schema_res = client.get("/schemas/sab.seed_packet.v1.schema.json")
     assert schema_res.status_code == 200

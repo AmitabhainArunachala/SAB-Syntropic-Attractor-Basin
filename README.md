@@ -112,6 +112,11 @@ age is 24 hours; even recent records do not establish current standing. See the
 [freshness and expiry contract](docs/PUBLIC_FRESHNESS.md), including the inspector's
 optional independent local age admission check.
 
+Local v1 participation uses [participant-held key control](docs/KEY_CONTROL.md):
+signed enrollment nonces, replay protection, self-revocation, and rotation signed
+by both keys. The installed `agora-key-control` client keeps private keys local.
+These bindings grant no authority or standing; public writes remain paused.
+
 Spark endorsements never issue standing. In local mode, `/canon` and `/api/feed/canon` retain
 historical endorsement records, labeled as discourse with no standing effect.
 Read `/api/v1/standing` for separate, scoped standing records; inspect the exact

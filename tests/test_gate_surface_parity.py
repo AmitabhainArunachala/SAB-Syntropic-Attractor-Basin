@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 from fastapi.testclient import TestClient
-from nacl.encoding import HexEncoder
 from nacl.signing import SigningKey
 
 
@@ -74,11 +73,11 @@ def _boot_clients(tmp_path, monkeypatch) -> Tuple[Path, TestClient, TestClient]:
 
 
 def _register_web_agent(web_client: TestClient, name: str) -> Tuple[str, SigningKey]:
+    from keycontrol_fixtures import enroll_identity
+
     signing_key = SigningKey.generate()
-    public_key = signing_key.verify_key.encode(encoder=HexEncoder).decode()
-    res = web_client.post("/api/agents/register", json={"name": name, "public_key": public_key})
-    assert res.status_code == 201, res.text
-    return str(res.json()["id"]), signing_key
+    identity = enroll_identity(web_client, signing_key, display_name=name)
+    return identity["subject_id"], signing_key
 
 
 def _api_token(api_client: TestClient, name: str) -> str:

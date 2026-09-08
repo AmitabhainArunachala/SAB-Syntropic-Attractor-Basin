@@ -52,11 +52,17 @@ class EndpointContract:
 
 
 API_CONTRACTS: dict[str, EndpointContract] = {
-    "register_agent": EndpointContract(
+    "challenge_key": EndpointContract(
         "POST",
-        "/api/v1/agents/register",
+        "/api/v1/agents/challenge",
         201,
-        frozenset({"schema", "subject_id", "identity_ref", "public_key"}),
+        frozenset({"schema", "message", "canonicalization", "signature_algorithm"}),
+    ),
+    "verify_key": EndpointContract(
+        "POST",
+        "/api/v1/agents/verify",
+        200,
+        frozenset({"schema", "identity", "binding", "proof_id"}),
     ),
     "submit_seed": EndpointContract(
         "POST",
@@ -102,7 +108,7 @@ API_CONTRACTS: dict[str, EndpointContract] = {
         "POST",
         "/api/v1/standing/review",
         201,
-        frozenset({"state", "witness_head"}),
+        frozenset({"standing_id", "status", "witness_head"}),
     ),
 }
 
@@ -497,11 +503,12 @@ def _xfail_if_endpoint_missing(response, contract: EndpointContract) -> None:
 
 
 def _v1_register_or_xfail(client: TestClient, agent: AgentFixture) -> dict[str, Any]:
-    contract = API_CONTRACTS["register_agent"]
-    response = client.post(
-        contract.path,
-        json={
-            "schema": "sab.agent_identity.v1",
+    from keycontrol_fixtures import enroll_identity
+
+    return enroll_identity(
+        client,
+        agent.signing_key,
+        {
             "display_name": agent.label,
             "identity_rail": "ed25519",
             "public_key": agent.public_key,
@@ -515,11 +522,6 @@ def _v1_register_or_xfail(client: TestClient, agent: AgentFixture) -> dict[str, 
             "external_attestations": [],
         },
     )
-    _xfail_if_endpoint_missing(response, contract)
-    assert response.status_code == contract.success_status, response.text
-    body = response.json()
-    assert contract.required_response_keys <= set(body)
-    return body
 
 
 def _post_or_xfail(client: TestClient, contract: EndpointContract, path: str, payload: dict[str, Any]):
@@ -530,7 +532,8 @@ def _post_or_xfail(client: TestClient, contract: EndpointContract, path: str, pa
 
 def test_contract_matrix_names_all_lane6_endpoints_and_response_keys() -> None:
     assert {contract.path for contract in API_CONTRACTS.values()} == {
-        "/api/v1/agents/register",
+        "/api/v1/agents/challenge",
+        "/api/v1/agents/verify",
         "/api/v1/seeds",
         "/api/v1/seeds/{seed_id}",
         "/api/v1/seeds/{seed_id}/chain",
@@ -798,23 +801,81 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
     assert response.status_code == API_CONTRACTS["respond_challenge"].success_status
     assert API_CONTRACTS["respond_challenge"].required_response_keys <= set(response.json())
 
-    review_payload = {
-        "subject_seed_id": seed_id,
-        "requested_state": "provisional",
-        "scope": seed["claim"]["scope"],
-        "challenge_summary": [{"challenge_id": challenge_body["challenge_id"], "resolution": "corrected"}],
-        "witness_refs": [response.json()["witness_head"]],
-    }
+    from test_sab_seeding_api import (
+        _sign_challenge_action,
+        _sign_standing_review,
+        _sign_witness,
+        _standing_lease,
+    )
+
+    reviewer = _agent("agent-reviewer")
+    _v1_register_or_xfail(client, reviewer)
+    reviewed_at = _iso(_utc_now())
+    reason = "The recorded correction addresses the local scope objection."
+    resolution = client.post(
+        f"/api/v1/challenges/{challenge_body['challenge_id']}/reject",
+        json={
+            "actor_identity": reviewer.subject_id,
+            "created_at": reviewed_at,
+            "reason": reason,
+            "signature": _sign_challenge_action(
+                reviewer.signing_key,
+                action="reject",
+                challenge_id=challenge_body["challenge_id"],
+                actor_identity=reviewer.subject_id,
+                payload={"value": reason},
+                created_at=reviewed_at,
+            ),
+        },
+    )
+    assert resolution.status_code == 201, resolution.text
+    prev_hash = client.get(f"/api/v1/seeds/{seed_id}/chain").json()["head"]
+    witness_payload = {"reason": "The explicit correction and resolution were inspected."}
+    witnessed_at = _iso(_utc_now())
+    witnessed = client.post(
+        "/api/v1/witness-events",
+        json={
+            "event_type": "affirm",
+            "actor_identity": reviewer.subject_id,
+            "subject_type": "seed",
+            "subject_id": seed_id,
+            "created_at": witnessed_at,
+            "prev_hash": prev_hash,
+            "payload": witness_payload,
+            "signature": _sign_witness(
+                reviewer.signing_key,
+                event_type="affirm",
+                subject_type="seed",
+                subject_id=seed_id,
+                payload=witness_payload,
+                prev_hash=prev_hash,
+                created_at=witnessed_at,
+            ),
+        },
+    )
+    assert witnessed.status_code == 201, witnessed.text
+    lease = _standing_lease(
+        standing_id="sab_standing_lane6_signed_review",
+        seed_id=seed_id,
+        claim_id=seed["claim"]["claim_id"],
+        reviewer_id=reviewer.subject_id,
+    )
+    lease["scope"] = seed["claim"]["scope"]
+    lease["challenge_summary"] = [
+        {"challenge_id": challenge_body["challenge_id"], "resolution": "rejected_after_correction"}
+    ]
+    lease["witness_quorum"]["witnesses"] = [witnessed.json()["event_id"]]
     standing = _post_or_xfail(
         client,
         API_CONTRACTS["standing_review"],
         "/api/v1/standing/review",
-        review_payload,
+        _sign_standing_review(reviewer.signing_key, lease, reviewer.subject_id),
     )
-    assert standing.status_code == API_CONTRACTS["standing_review"].success_status
+    assert standing.status_code == API_CONTRACTS["standing_review"].success_status, standing.text
     standing_body = standing.json()
     assert API_CONTRACTS["standing_review"].required_response_keys <= set(standing_body)
-    assert standing_body["state"] in {"standing_active", "compost"}
+    assert standing_body["status"] == "provisional"
+    assert client.get(f"/api/v1/seeds/{seed_id}").json()["state"] == "standing_active"
 
 
 @pytest.mark.parametrize(

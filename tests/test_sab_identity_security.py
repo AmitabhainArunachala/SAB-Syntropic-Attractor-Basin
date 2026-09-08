@@ -101,7 +101,9 @@ def _jwt_for_claims(claims: Dict[str, Any], header: Dict[str, Any] | None = None
     return f"{encode(header)}.{encode(claims)}.devsig"
 
 
-def test_register_route_returns_canonical_agent_identity(tmp_path, monkeypatch) -> None:
+def test_proved_identity_round_trips_through_legacy_compatibility_route(tmp_path, monkeypatch) -> None:
+    from keycontrol_fixtures import enroll_identity
+
     shared_db = tmp_path / "sab_authority.db"
     system_key = tmp_path / ".sab_system_ed25519.key"
     monkeypatch.setenv("SAB_AUTHORITY_DB_PATH", str(shared_db))
@@ -114,6 +116,8 @@ def test_register_route_returns_canonical_agent_identity(tmp_path, monkeypatch) 
 
     sk = SigningKey.generate()
     public_key = _public_key(sk)
+
+    proved = enroll_identity(client, sk, display_name="lane-four-agent")
     res = client.post("/api/agents/register", json={"name": "lane-four-agent", "public_key": public_key})
 
     assert res.status_code == 201, res.text
@@ -125,6 +129,10 @@ def test_register_route_returns_canonical_agent_identity(tmp_path, monkeypatch) 
     assert body["identity"]["identity_rail"] == "ed25519"
     assert body["identity"]["external_attestations"] == []
     assert body["identity"]["evidence_refs"] == [f"web_agents:{body['id']}"]
+    assert body["identity_status"] == "rehearsal_metadata"
+    assert body["key_control"]["status"] == "active"
+    assert body["identity"] == proved
+    assert body["authority_effect"] == body["standing_effect"] == "none"
 
 
 def test_canonical_signed_payload_verifies_and_rejects_tampering() -> None:

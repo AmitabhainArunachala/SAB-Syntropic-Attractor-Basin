@@ -73,10 +73,12 @@ def client(sab_app):
 
 
 def _register(client: TestClient, agent: _Agent, label: str) -> dict[str, Any]:
-    response = client.post(
-        "/api/v1/agents/register",
-        json={
-            "schema": "sab.agent_identity.v1",
+    from keycontrol_fixtures import enroll_identity
+
+    body = enroll_identity(
+        client,
+        agent.key,
+        {
             "display_name": label,
             "identity_rail": "ed25519",
             "public_key": agent.public_key,
@@ -90,8 +92,6 @@ def _register(client: TestClient, agent: _Agent, label: str) -> dict[str, Any]:
             "external_attestations": [],
         },
     )
-    assert response.status_code == 201, response.text
-    body = response.json()
     agent.subject_id = body["subject_id"]
     return body
 
@@ -302,34 +302,32 @@ def test_register_response_round_trips_through_canonical_identity_model(client: 
     assert identity.identity_ref == f"sab_identity_{identity.subject_id}"
 
 
-def test_register_preserves_explicit_named_legacy_subject(client: TestClient) -> None:
+def test_register_preserves_existing_named_legacy_subject(client: TestClient, sab_app) -> None:
     from agora.sab_identity import AgentIdentityV1
+    from keycontrol_fixtures import enroll_identity, historical_identity
 
     agent = _Agent()
     legacy_subject = "agent_claude_fable_5"
     legacy_ref = f"sab_identity_{legacy_subject}"
-    response = client.post(
-        "/api/v1/agents/register",
-        json={
-            "schema": "sab.agent_identity.v1",
-            "subject_id": legacy_subject,
-            "identity_ref": legacy_ref,
-            "display_name": "Fable legacy identity",
-            "identity_rail": "ed25519",
-            "public_key": agent.public_key,
-            "controller": "operator",
-            "operator_backing": {
-                "operator_id": "operator_dogfood_regression",
-                "operator_kind": "human",
-                "disclosure": "explicit legacy subject compatibility fixture",
-                "backing_count_attestation": "self_attested",
-            },
-            "external_attestations": [],
+    registration = {
+        "subject_id": legacy_subject,
+        "identity_ref": legacy_ref,
+        "display_name": "Fable legacy identity",
+        "identity_rail": "ed25519",
+        "public_key": agent.public_key,
+        "controller": "operator",
+        "operator_backing": {
+            "operator_id": "operator_dogfood_regression",
+            "operator_kind": "human",
+            "disclosure": "explicit legacy subject compatibility fixture",
+            "backing_count_attestation": "self_attested",
         },
-    )
-
-    assert response.status_code == 201, response.text
-    identity = AgentIdentityV1.model_validate(response.json())
+        "external_attestations": [],
+    }
+    before = historical_identity(sab_app, registration)
+    proved = enroll_identity(client, agent.key, registration)
+    assert proved == before
+    identity = AgentIdentityV1.model_validate(proved)
     assert identity.subject_id == legacy_subject
     assert identity.identity_ref == legacy_ref
 
@@ -338,21 +336,23 @@ def test_register_rejects_noncanonical_ed25519_subject_alias(client: TestClient)
     agent = _Agent()
     obsolete_subject = f"agent_ed25519_{hashlib.sha256(agent.public_key.encode()).hexdigest()[:16]}"
     response = client.post(
-        "/api/v1/agents/register",
+        "/api/v1/agents/challenge",
         json={
-            "schema": "sab.agent_identity.v1",
-            "subject_id": obsolete_subject,
-            "display_name": "obsolete sixteen character identity",
-            "identity_rail": "ed25519",
-            "public_key": agent.public_key,
-            "controller": "operator",
-            "operator_backing": {
-                "operator_id": "operator_dogfood_regression",
-                "operator_kind": "human",
-                "disclosure": "negative canonical namespace fixture",
-                "backing_count_attestation": "self_attested",
+            "action": "register",
+            "registration": {
+                "subject_id": obsolete_subject,
+                "display_name": "obsolete sixteen character identity",
+                "identity_rail": "ed25519",
+                "public_key": agent.public_key,
+                "controller": "operator",
+                "operator_backing": {
+                    "operator_id": "operator_dogfood_regression",
+                    "operator_kind": "human",
+                    "disclosure": "negative canonical namespace fixture",
+                    "backing_count_attestation": "self_attested",
+                },
+                "external_attestations": [],
             },
-            "external_attestations": [],
         },
     )
 

@@ -224,6 +224,7 @@ def main() -> None:
     for command, target in {
         "agora-public-snapshot": "agora.public_snapshot_cli:main",
         "agora-public-inspect": "agora.public_inspection:main",
+        "agora-key-control": "agora.key_control_client:main",
     }.items():
         if entrypoints.get(command) != target:
             raise RuntimeError(f"missing installed command: {command}")

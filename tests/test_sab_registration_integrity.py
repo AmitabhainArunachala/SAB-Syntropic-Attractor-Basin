@@ -1,8 +1,9 @@
-"""Registration must never replace another agent's key or authority history."""
+"""Registration cannot replace another key or bypass signed enrollment."""
+
 from __future__ import annotations
 
-import importlib
 import hashlib
+import importlib
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -12,6 +13,14 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
+
+from keycontrol_fixtures import (
+    enroll_identity,
+    historical_identity,
+    historical_web_identity,
+    issue_control,
+    proof_for,
+)
 
 
 @pytest.fixture
@@ -45,28 +54,42 @@ def _registration(key: SigningKey, **overrides) -> dict:
     }
 
 
+def _identity_rows(module):
+    with module._db() as conn:
+        return (
+            [dict(row) for row in conn.execute("SELECT * FROM web_agents ORDER BY id")],
+            [
+                dict(row)
+                for row in conn.execute("SELECT * FROM sab_agent_identities_v1 ORDER BY subject_id")
+            ],
+        )
+
+
 def test_unsigned_named_identity_takeover_preserves_original_signer(client, registration_app):
     owner, attacker = SigningKey.generate(), SigningKey.generate()
     request = _registration(owner, subject_id="agent_existing_named_subject")
-    registered = client.post("/api/v1/agents/register", json=request)
-    assert registered.status_code == 201, registered.text
+    historical = historical_identity(registration_app, request)
+    registered = enroll_identity(client, owner, request)
+    assert registered == historical
+    before = _identity_rows(registration_app)
 
     attack = client.post(
         "/api/v1/agents/register",
         json={**request, "public_key": attacker.verify_key.encode().hex()},
     )
-    assert attack.status_code == 409, attack.text
-    subject_id = registered.json()["subject_id"]
+    assert attack.status_code == 428, attack.text
+    assert _identity_rows(registration_app) == before
+    subject_id = registered["subject_id"]
     message = b"original owner still controls this subject"
     with registration_app._db() as conn:
-        registration_app._verify_agent_signature(conn, subject_id, message, owner.sign(message).signature.hex())
+        registration_app._verify_sab_agent_signature(
+            conn, subject_id, message, owner.sign(message).signature.hex()
+        )
         with pytest.raises(HTTPException) as rejected:
-            registration_app._verify_agent_signature(conn, subject_id, message, attacker.sign(message).signature.hex())
+            registration_app._verify_sab_agent_signature(
+                conn, subject_id, message, attacker.sign(message).signature.hex()
+            )
         assert rejected.value.status_code == 400
-        identity = conn.execute(
-            "SELECT public_key FROM sab_agent_identities_v1 WHERE subject_id = ?", (subject_id,)
-        ).fetchone()
-        assert identity["public_key"] == request["public_key"]
 
 
 @pytest.mark.parametrize(
@@ -75,106 +98,136 @@ def test_unsigned_named_identity_takeover_preserves_original_signer(client, regi
         {"display_name": "impersonated-name"},
         {"controller": "self"},
         {"identity_ref": "sab_identity_agent_someone_else"},
-        {"operator_backing": {"operator_id": "operator-forged", "backing_count_attestation": "verified"}},
+        {
+            "operator_backing": {
+                "operator_id": "operator-forged",
+                "backing_count_attestation": "verified",
+            }
+        },
     ],
 )
 def test_public_key_knowledge_cannot_rewrite_identity_metadata(client, registration_app, changed):
-    request = _registration(SigningKey.generate())
-    registered = client.post("/api/v1/agents/register", json=request)
-    assert registered.status_code == 201, registered.text
-    subject_id = registered.json()["subject_id"]
-    with registration_app._db() as conn:
-        before = dict(conn.execute(
-            "SELECT * FROM sab_agent_identities_v1 WHERE subject_id = ?", (subject_id,)
-        ).fetchone())
-
+    key = SigningKey.generate()
+    request = _registration(key)
+    enroll_identity(client, key, request)
+    before = _identity_rows(registration_app)
     attack = client.post("/api/v1/agents/register", json={**request, **changed})
-    assert attack.status_code == 409, attack.text
-    with registration_app._db() as conn:
-        after = dict(conn.execute(
-            "SELECT * FROM sab_agent_identities_v1 WHERE subject_id = ?", (subject_id,)
-        ).fetchone())
-    assert after == before
+    assert attack.status_code == 428, attack.text
+    challenged = client.post(
+        "/api/v1/agents/challenge",
+        json={"action": "register", "registration": {**request, **changed}},
+    )
+    assert challenged.status_code == 409, challenged.text
+    assert _identity_rows(registration_app) == before
 
 
-def test_same_key_cannot_delete_original_subject_through_new_alias(client):
-    request = _registration(SigningKey.generate())
-    registered = client.post("/api/v1/agents/register", json=request)
-    assert registered.status_code == 201, registered.text
-    subject_id = registered.json()["subject_id"]
-
+def test_same_key_cannot_delete_original_subject_through_new_alias(client, registration_app):
+    key = SigningKey.generate()
+    request = _registration(key)
+    registered = enroll_identity(client, key, request)
+    before = _identity_rows(registration_app)
     duplicate = client.post(
-        "/api/v1/agents/register", json={**request, "subject_id": "agent_new_alias"}
+        "/api/v1/agents/challenge",
+        json={"action": "register", "registration": {**request, "subject_id": "agent_new_alias"}},
     )
     assert duplicate.status_code == 409, duplicate.text
-    home = client.get("/api/v1/agents/me/home", params={"subject_id": subject_id})
+    home = client.get("/api/v1/agents/me/home", params={"subject_id": registered["subject_id"]})
     assert home.status_code == 200, home.text
     assert home.json()["agent"]["public_key"] == request["public_key"]
-    assert client.get("/api/v1/agents/me/home", params={"subject_id": "agent_new_alias"}).status_code == 404
+    assert (
+        client.get("/api/v1/agents/me/home", params={"subject_id": "agent_new_alias"}).status_code
+        == 404
+    )
+    assert _identity_rows(registration_app) == before
 
 
-def test_identical_retry_preserves_identity_document_and_witness_history(client, registration_app):
-    request = _registration(SigningKey.generate())
-    registered = client.post("/api/v1/agents/register", json=request)
-    assert registered.status_code == 201, registered.text
-    subject_id = registered.json()["subject_id"]
+def test_new_proof_for_identical_identity_preserves_document_and_witness_history(
+    client, registration_app
+):
+    key = SigningKey.generate()
+    request = _registration(key)
+    registered = enroll_identity(client, key, request)
     with registration_app._db() as conn:
         conn.execute(
-            "UPDATE web_agents SET witness_count = 7, witness_accuracy = 0.75 WHERE id = ?", (subject_id,)
+            "UPDATE web_agents SET witness_count = 7, witness_accuracy = 0.75 WHERE id = ?",
+            (registered["subject_id"],),
         )
-        before = dict(conn.execute("SELECT * FROM web_agents WHERE id = ?", (subject_id,)).fetchone())
-
-    retried = client.post("/api/v1/agents/register", json=request)
-    assert retried.status_code == 201, retried.text
-    assert retried.json() == registered.json()
+    before = _identity_rows(registration_app)
+    retried = enroll_identity(client, key, request)
+    assert retried == registered
+    assert _identity_rows(registration_app) == before
     with registration_app._db() as conn:
-        after = dict(conn.execute("SELECT * FROM web_agents WHERE id = ?", (subject_id,)).fetchone())
-    assert after == before
+        assert conn.execute("SELECT count(*) FROM sab_key_control_proofs_v1").fetchone()[0] == 2
+        assert conn.execute("SELECT count(*) FROM sab_key_control_bindings_v1").fetchone()[0] == 1
 
 
 def test_hex_case_cannot_create_second_identity_for_same_key(client):
-    request = _registration(SigningKey.generate())
-    registered = client.post("/api/v1/agents/register", json=request)
-    assert registered.status_code == 201, registered.text
-    retried = client.post(
-        "/api/v1/agents/register", json={**request, "public_key": request["public_key"].upper()}
-    )
-    assert retried.status_code == 201, retried.text
-    assert retried.json() == registered.json()
+    key = SigningKey.generate()
+    request = _registration(key)
+    registered = enroll_identity(client, key, request)
+    retried = enroll_identity(client, key, {**request, "public_key": request["public_key"].upper()})
+    assert retried == registered
 
 
 @pytest.mark.parametrize("public_key", ["not-a-key", "00" * 31, "00" * 33])
 @pytest.mark.parametrize("subject", [{}, {"subject_id": "agent_invalid_key"}])
-def test_invalid_public_key_is_rejected_without_server_error(client, public_key, subject):
+def test_invalid_public_key_challenge_is_rejected_without_server_error(client, public_key, subject):
     response = client.post(
-        "/api/v1/agents/register",
-        json={"display_name": "invalid-key", "public_key": public_key, **subject},
+        "/api/v1/agents/challenge",
+        json={
+            "action": "register",
+            "registration": {"display_name": "invalid-key", "public_key": public_key, **subject},
+        },
     )
     assert response.status_code == 400, response.text
 
 
 @pytest.mark.parametrize("legacy_uppercase", [False, True])
 @pytest.mark.parametrize("v1_uppercase", [False, True])
-def test_v1_registration_cannot_replace_legacy_web_identity(client, registration_app, legacy_uppercase, v1_uppercase):
+def test_v1_registration_cannot_replace_legacy_web_identity(
+    client, registration_app, legacy_uppercase, v1_uppercase
+):
     request = _registration(SigningKey.generate())
+    historical_web_identity(
+        registration_app,
+        request["public_key"].upper() if legacy_uppercase else request["public_key"],
+        request["display_name"],
+    )
     legacy = client.post(
         "/api/agents/register",
         json={
             "name": request["display_name"],
-            "public_key": request["public_key"].upper() if legacy_uppercase else request["public_key"],
+            "public_key": (
+                request["public_key"].upper() if legacy_uppercase else request["public_key"]
+            ),
         },
     )
     assert legacy.status_code == 201, legacy.text
     with registration_app._db() as conn:
-        before = dict(conn.execute("SELECT * FROM web_agents WHERE id = ?", (legacy.json()["id"],)).fetchone())
-    attempted_migration = client.post(
+        before = [dict(row) for row in conn.execute("SELECT * FROM web_agents")]
+    attempted = client.post(
         "/api/v1/agents/register",
-        json={**request, "public_key": request["public_key"].upper() if v1_uppercase else request["public_key"]},
+        json={
+            **request,
+            "public_key": request["public_key"].upper() if v1_uppercase else request["public_key"],
+        },
     )
-    assert attempted_migration.status_code == 409, attempted_migration.text
+    assert attempted.status_code == 428, attempted.text
+    challenged = client.post(
+        "/api/v1/agents/challenge",
+        json={
+            "action": "register",
+            "registration": {
+                **request,
+                "public_key": (
+                    request["public_key"].upper() if v1_uppercase else request["public_key"]
+                ),
+            },
+        },
+    )
+    assert challenged.status_code == 409, challenged.text
     with registration_app._db() as conn:
-        after = dict(conn.execute("SELECT * FROM web_agents WHERE id = ?", (legacy.json()["id"],)).fetchone())
-    assert after == before
+        assert [dict(row) for row in conn.execute("SELECT * FROM web_agents")] == before
 
 
 @pytest.mark.parametrize("v1_uppercase", [False, True])
@@ -183,60 +236,73 @@ def test_v1_registration_cannot_replace_legacy_web_identity(client, registration
 def test_legacy_registration_returns_existing_v1_subject_without_alias(
     client, registration_app, v1_uppercase, legacy_uppercase, subject
 ):
-    request = _registration(SigningKey.generate(), **subject)
-    registered = client.post(
-        "/api/v1/agents/register",
-        json={**request, "public_key": request["public_key"].upper() if v1_uppercase else request["public_key"]},
+    key = SigningKey.generate()
+    request = _registration(key, **subject)
+    if subject:
+        historical_identity(registration_app, request)
+    registered = enroll_identity(
+        client,
+        key,
+        {
+            **request,
+            "public_key": request["public_key"].upper() if v1_uppercase else request["public_key"],
+        },
     )
-    assert registered.status_code == 201, registered.text
     with registration_app._db() as conn:
         conn.execute(
             "UPDATE web_agents SET witness_count = 9, witness_accuracy = 0.875 WHERE id = ?",
-            (registered.json()["subject_id"],),
+            (registered["subject_id"],),
         )
-        before_web = [dict(row) for row in conn.execute("SELECT * FROM web_agents")]
-        before_identities = [dict(row) for row in conn.execute("SELECT * FROM sab_agent_identities_v1")]
-
+    before = _identity_rows(registration_app)
     legacy = client.post(
         "/api/agents/register",
         json={
             "name": request["display_name"],
-            "public_key": request["public_key"].upper() if legacy_uppercase else request["public_key"],
+            "public_key": (
+                request["public_key"].upper() if legacy_uppercase else request["public_key"]
+            ),
         },
     )
     assert legacy.status_code == 201, legacy.text
-    assert legacy.json()["id"] == registered.json()["subject_id"]
-    assert legacy.json()["identity"] == registered.json()
-    with registration_app._db() as conn:
-        after_web = [dict(row) for row in conn.execute("SELECT * FROM web_agents")]
-        after_identities = [dict(row) for row in conn.execute("SELECT * FROM sab_agent_identities_v1")]
-    assert after_web == before_web
-    assert after_identities == before_identities
+    assert legacy.json()["id"] == registered["subject_id"]
+    assert legacy.json()["identity"] == registered
+    assert _identity_rows(registration_app) == before
 
 
 @pytest.mark.parametrize("source", ["legacy", "v1"])
 @pytest.mark.parametrize("uppercase", [False, True])
-def test_legacy_registration_cannot_rewrite_existing_name(client, registration_app, source, uppercase):
-    request = _registration(SigningKey.generate())
-    registered = client.post(
-        "/api/v1/agents/register" if source == "v1" else "/api/agents/register",
-        json=request if source == "v1" else {"name": request["display_name"], "public_key": request["public_key"]},
-    )
-    assert registered.status_code == 201, registered.text
+def test_legacy_registration_cannot_rewrite_existing_name(
+    client, registration_app, source, uppercase
+):
+    key = SigningKey.generate()
+    request = _registration(key)
+    if source == "v1":
+        enroll_identity(client, key, request)
+    else:
+        historical_web_identity(registration_app, request["public_key"], request["display_name"])
+        registered = client.post(
+            "/api/agents/register",
+            json={"name": request["display_name"], "public_key": request["public_key"]},
+        )
+        assert registered.status_code == 201, registered.text
     with registration_app._db() as conn:
         before = [dict(row) for row in conn.execute("SELECT * FROM web_agents")]
     attack = client.post(
         "/api/agents/register",
-        json={"name": "rewritten-name", "public_key": request["public_key"].upper() if uppercase else request["public_key"]},
+        json={
+            "name": "rewritten-name",
+            "public_key": request["public_key"].upper() if uppercase else request["public_key"],
+        },
     )
     assert attack.status_code == 409, attack.text
     with registration_app._db() as conn:
-        after = [dict(row) for row in conn.execute("SELECT * FROM web_agents")]
-    assert after == before
+        assert [dict(row) for row in conn.execute("SELECT * FROM web_agents")] == before
 
 
 @pytest.mark.parametrize("uppercase", [False, True])
-def test_legacy_registration_preserves_historical_uppercase_key_and_subject(client, registration_app, uppercase):
+def test_legacy_registration_preserves_historical_uppercase_key_and_subject(
+    client, registration_app, uppercase
+):
     public_key = SigningKey.generate().verify_key.encode().hex().upper()
     historical_id = hashlib.sha256(public_key.encode()).hexdigest()[:16]
     created_at = "2026-07-05T00:00:00+00:00"
@@ -250,7 +316,10 @@ def test_legacy_registration_preserves_historical_uppercase_key_and_subject(clie
 
     retried = client.post(
         "/api/agents/register",
-        json={"name": "historical-agent", "public_key": public_key if uppercase else public_key.lower()},
+        json={
+            "name": "historical-agent",
+            "public_key": public_key if uppercase else public_key.lower(),
+        },
     )
     assert retried.status_code == 201, retried.text
     assert retried.json()["id"] == historical_id
@@ -261,49 +330,63 @@ def test_legacy_registration_preserves_historical_uppercase_key_and_subject(clie
     assert after == before
 
 
-def test_new_legacy_registration_normalizes_key_before_deriving_subject(client):
+def test_fresh_unsigned_legacy_registration_rejects_both_key_encodings(client, registration_app):
     public_key = SigningKey.generate().verify_key.encode().hex()
-    upper = client.post("/api/agents/register", json={"name": "legacy-agent", "public_key": public_key.upper()})
-    assert upper.status_code == 201, upper.text
-    assert upper.json()["id"] == hashlib.sha256(public_key.encode()).hexdigest()[:16]
-    assert upper.json()["public_key"] == public_key
-    lower = client.post("/api/agents/register", json={"name": "legacy-agent", "public_key": public_key})
-    assert lower.status_code == 201, lower.text
-    assert lower.json() == upper.json()
+    with registration_app._db() as conn:
+        before = tuple(conn.iterdump())
+    for encoded in (public_key.upper(), public_key):
+        response = client.post(
+            "/api/agents/register", json={"name": "legacy-agent", "public_key": encoded}
+        )
+        assert response.status_code == 428, response.text
+        assert response.json()["code"] == "key_control_required"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json()["authority_effect"] == response.json()["standing_effect"] == "none"
+        with registration_app._db() as conn:
+            assert tuple(conn.iterdump()) == before
 
 
-def test_racing_v1_and_legacy_registrations_leave_one_key_binding(registration_app):
+def test_racing_proof_and_legacy_registration_leave_one_key_binding(registration_app):
     barrier = Barrier(2)
-    request = _registration(SigningKey.generate())
-    registration_app.init_db()
+    key = SigningKey.generate()
+    request = _registration(key)
+    with TestClient(registration_app.app) as client:
+        challenge = issue_control(client, {"action": "register", "registration": request})
     requests = [
-        ("/api/v1/agents/register", request),
-        ("/api/agents/register", {"name": request["display_name"], "public_key": request["public_key"].upper()}),
+        ("/api/v1/agents/verify", proof_for(key, challenge)),
+        (
+            "/api/agents/register",
+            {"name": request["display_name"], "public_key": request["public_key"].upper()},
+        ),
     ]
 
     def register(item):
         path, payload = item
-        with TestClient(registration_app.app) as test_client:
+        with TestClient(registration_app.app) as client:
             barrier.wait(timeout=10)
-            return path, test_client.post(path, json=payload)
+            return path, client.post(path, json=payload)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = dict(pool.map(register, requests))
     legacy = outcomes["/api/agents/register"]
-    v1 = outcomes["/api/v1/agents/register"]
-    assert legacy.status_code == 201, legacy.text
-    assert v1.status_code in {201, 409}, v1.text
-    if v1.status_code == 201:
-        assert legacy.json()["id"] == v1.json()["subject_id"]
-        assert legacy.json()["identity"] == v1.json()
+    verified = outcomes["/api/v1/agents/verify"]
+    assert verified.status_code == 200, verified.text
+    assert legacy.status_code in {201, 428}, legacy.text
+    if legacy.status_code == 201:
+        assert legacy.json()["id"] == verified.json()["identity"]["subject_id"]
+        assert legacy.json()["identity"] == verified.json()["identity"]
+    else:
+        assert legacy.json()["code"] == "key_control_required"
     with registration_app._db() as conn:
         rows = conn.execute("SELECT id, public_key FROM web_agents").fetchall()
+        bindings = conn.execute("SELECT * FROM sab_key_control_bindings_v1").fetchall()
     assert len(rows) == 1
-    assert rows[0]["id"] == legacy.json()["id"]
+    assert rows[0]["id"] == verified.json()["identity"]["subject_id"]
     assert rows[0]["public_key"] == request["public_key"]
+    assert len(bindings) == 1
 
 
-def test_racing_named_registrations_have_one_immutable_winner(registration_app):
+def test_racing_new_named_registrations_cannot_squat_a_subject(registration_app):
     barrier = Barrier(2)
     requests = [
         _registration(SigningKey.generate(), subject_id="agent_contested_subject"),
@@ -312,17 +395,16 @@ def test_racing_named_registrations_have_one_immutable_winner(registration_app):
     registration_app.init_db()
 
     def register(request):
-        with TestClient(registration_app.app) as test_client:
+        with TestClient(registration_app.app) as client:
             barrier.wait(timeout=10)
-            return request, test_client.post("/api/v1/agents/register", json=request)
+            return client.post(
+                "/api/v1/agents/challenge", json={"action": "register", "registration": request}
+            )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(register, requests))
-    assert sorted(response.status_code for _, response in outcomes) == [201, 409]
-    winner = next(request for request, response in outcomes if response.status_code == 201)
+    assert [response.status_code for response in outcomes] == [400, 400]
+    assert {response.json()["code"] for response in outcomes} == {"canonical_identity_required"}
     with registration_app._db() as conn:
-        web = conn.execute("SELECT public_key FROM web_agents WHERE id = 'agent_contested_subject'").fetchone()
-        identity = conn.execute(
-            "SELECT public_key FROM sab_agent_identities_v1 WHERE subject_id = 'agent_contested_subject'"
-        ).fetchone()
-    assert web["public_key"] == identity["public_key"] == winner["public_key"]
+        assert conn.execute("SELECT count(*) FROM web_agents").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM sab_agent_identities_v1").fetchone()[0] == 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import sqlite3
 from contextlib import AbstractContextManager, contextmanager
@@ -9,11 +10,12 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query, status
+from fastapi import APIRouter, Body, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from .public_freshness import PublicationObservation, current_publication_observation
+from .key_control import KeyControlError, KeyControlService
 from .sab_identity import (
     AgentIdentityV1,
     HIGH_IMPACT_LEVELS,
@@ -119,6 +121,7 @@ class SabSeedingDeps:
     read_only: bool = False
     publication_configured: bool = True
     read_observation: Optional[Callable[[], Optional[PublicationObservation]]] = None
+    key_control: Optional[KeyControlService] = None
 
 
 def _read_observation(deps: SabSeedingDeps) -> Optional[PublicationObservation]:
@@ -155,114 +158,213 @@ def _read_v1_db(deps: SabSeedingDeps) -> Iterator[sqlite3.Connection]:
         yield conn
 
 
+async def _key_control_body(request: Request) -> Dict[str, Any]:
+    """Bound and strictly decode identity commands without reflecting their input."""
+    if (
+        request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        != "application/json"
+    ):
+        raise KeyControlError(
+            "invalid_content_type", 415, "Identity commands require application/json."
+        )
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > 16384:
+            raise KeyControlError(
+                "identity_command_too_large",
+                413,
+                "Identity commands may contain at most 16384 bytes.",
+            )
+        content.extend(chunk)
+
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate member")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("non-JSON number")
+
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite number")
+        return number
+
+    try:
+        payload = json.loads(
+            content,
+            object_pairs_hook=pairs,
+            parse_constant=invalid_constant,
+            parse_float=finite_float,
+        )
+    except (ValueError, UnicodeError, RecursionError):
+        raise KeyControlError(
+            "invalid_json", 400, "Identity commands require a valid JSON object."
+        ) from None
+    if not isinstance(payload, dict):
+        raise KeyControlError("invalid_json", 400, "Identity commands require a valid JSON object.")
+    return payload
+
+
 def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
     if deps.read_only and deps.read_observation is None:
         raise ValueError("Public read-only routes require an explicit read_observation dependency")
     router = APIRouter(prefix="/api/v1", tags=["sab-seeding-v1"])
 
-    @router.post("/agents/register", status_code=status.HTTP_201_CREATED)
-    async def register_agent_identity(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        deps.init_db()
-        public_key = _required_str(payload, "public_key").lower()
-        display_name = str(payload.get("display_name") or payload.get("name") or "sab-agent").strip()
-        if not display_name:
-            raise HTTPException(status_code=400, detail="display_name is required")
-        try:
-            canonical_subject_id = subject_id_from_public_key(public_key)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid Ed25519 public key (hex)") from exc
-        subject_id = str(payload.get("subject_id") or canonical_subject_id).strip()
-        if not subject_id.startswith("agent_"):
-            raise HTTPException(status_code=400, detail="subject_id must be an agent identity")
-        identity_ref = str(payload.get("identity_ref") or f"sab_identity_{subject_id}").strip()
-        raw_backing = payload.get("operator_backing")
-        if raw_backing is not None and not isinstance(raw_backing, dict):
-            raise HTTPException(status_code=400, detail="operator_backing must be an object")
-        try:
-            operator_backing = OperatorBacking.model_validate(raw_backing or {})
-        except ValidationError as exc:
-            raise HTTPException(status_code=400, detail=f"invalid operator_backing: {exc}") from exc
-        controller = str(payload.get("controller") or "unknown")
-        created_at = deps.utc_now()
-        identity = {
-            "schema": "sab.agent_identity.v1",
-            "subject_id": subject_id,
-            "identity_ref": identity_ref,
-            "display_name": display_name,
-            "identity_rail": str(payload.get("identity_rail") or "ed25519"),
-            "public_key": public_key,
-            "controller": controller,
-            "operator_backing": operator_backing.model_dump(),
-            "external_attestations": payload.get("external_attestations")
-            if isinstance(payload.get("external_attestations"), list)
-            else [],
-            "created_at": created_at,
-            "revocation_status": "active",
-            "evidence_refs": [f"web_agents:{subject_id}"],
-        }
-        try:
-            identity = AgentIdentityV1.model_validate(identity).model_dump(mode="json", by_alias=True)
-        except ValidationError as exc:
-            raise HTTPException(status_code=400, detail=f"invalid agent identity: {exc}") from exc
-        with deps.db() as conn:
-            # Registration has no proof of control. Keep existing bindings and
-            # operator disclosures immutable, including when the caller knows
-            # the public key. Serialize the checks and inserts across workers.
-            conn.execute("BEGIN IMMEDIATE")
-            _init_v1_tables(conn)
-            web_rows = conn.execute(
-                "SELECT * FROM web_agents WHERE id = ? OR lower(public_key) = ?",
-                (subject_id, public_key),
-            ).fetchall()
-            identity_rows = conn.execute(
-                "SELECT * FROM sab_agent_identities_v1 WHERE subject_id = ? OR lower(public_key) = ?",
-                (subject_id, public_key),
-            ).fetchall()
-            for row in web_rows:
-                if str(row["id"]) != subject_id or str(row["public_key"]).lower() != public_key:
-                    raise HTTPException(status_code=409, detail="agent subject or public key already registered")
-            for row in identity_rows:
-                if str(row["subject_id"]) != subject_id or str(row["public_key"]).lower() != public_key:
-                    raise HTTPException(status_code=409, detail="agent subject or public key already registered")
-            if web_rows or identity_rows:
-                if len(web_rows) != 1 or len(identity_rows) != 1:
-                    raise HTTPException(status_code=409, detail="existing identity requires authenticated migration")
-                registered_identity = json.loads(str(identity_rows[0]["identity_json"]))
-                # Timestamps and evidence are server-owned. An identical retry
-                # returns the original document and preserves witness history.
-                fields = set(identity) - {"created_at", "evidence_refs"}
-                if any(registered_identity.get(field) != identity[field] for field in fields):
-                    raise HTTPException(status_code=409, detail="registration cannot update an existing identity")
-                return registered_identity
-            conn.execute(
-                """
-                INSERT INTO web_agents
-                    (id, name, public_key, created_at, witness_count, witness_accuracy)
-                VALUES (?, ?, ?, ?, 0, 0.0)
-                """,
-                (subject_id, display_name, public_key, created_at),
+    def key_control_problem(code: str, detail: str, status_code: int) -> JSONResponse:
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "code": code,
+                "detail": detail,
+                "authority_effect": "none",
+                "standing_effect": "none",
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+    @router.post(
+        "/agents/register",
+        status_code=428,
+        summary="Unsigned enrollment is unavailable",
+        description="Use a scoped nonce from /api/v1/agents/challenge and sign it locally. Public inspection rejects all identity commands.",
+    )
+    async def register_agent_identity() -> JSONResponse:
+        return key_control_problem(
+            "key_control_required",
+            "Request /api/v1/agents/challenge, sign its scoped message locally, then submit to /api/v1/agents/verify.",
+            403 if deps.read_only else 428,
+        )
+
+
+    async def key_control_command(request: Request, operation: str) -> JSONResponse:
+        if deps.read_only:
+            return key_control_problem(
+                "public_readonly", "Public inspection does not accept identity commands.", 403
             )
-            conn.execute(
-                """
-                INSERT INTO sab_agent_identities_v1
-                    (subject_id, display_name, public_key, controller, operator_id,
-                     operator_backing_json, identity_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    subject_id,
-                    display_name,
-                    public_key,
-                    controller,
-                    operator_backing.operator_id,
-                    _json_dumps(operator_backing.model_dump()),
-                    _json_dumps(identity),
-                    created_at,
-                    created_at,
-                ),
+        if deps.key_control is None:
+            return key_control_problem(
+                "key_control_unavailable", "Key-control enrollment is not configured.", 503
             )
-            deps.invalidate_web_cache()
-        return identity
+        try:
+            payload = await _key_control_body(request)
+            deps.init_db()
+            with deps.db() as conn:
+                _init_v1_tables(conn)
+                result = getattr(deps.key_control, operation)(conn, payload)
+            if operation == "verify":
+                deps.invalidate_web_cache()
+            return JSONResponse(
+                result,
+                status_code=201 if operation == "issue" else 200,
+                headers={"Cache-Control": "no-store"},
+            )
+        except KeyControlError as exc:
+            return key_control_problem(exc.code, exc.detail, exc.status)
+
+
+    @router.post(
+        "/agents/challenge",
+        status_code=201,
+        summary="Request a scoped key-control nonce",
+        description="Local mode only. Request register, revoke, or dual-key rotate. Sign the returned message only after checking audience, action, key, metadata, and expiry. Key control grants no authority or standing. See /auth.md.",
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "required": ["action", "registration"],
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "action": {"const": "register"},
+                                        "registration": {
+                                            "type": "object",
+                                            "description": "Public identity metadata with public_key and display_name; no private seed, status, timestamps, or evidence_refs.",
+                                        },
+                                    },
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["action", "subject_id"],
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "action": {"const": "revoke"},
+                                        "subject_id": {"type": "string"},
+                                    },
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["action", "subject_id", "registration"],
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "action": {"const": "rotate"},
+                                        "subject_id": {"type": "string"},
+                                        "registration": {
+                                            "type": "object",
+                                            "description": "Public successor identity metadata; requires a fresh key and signatures from both keys.",
+                                        },
+                                    },
+                                },
+                            ]
+                        },
+                        "example": {
+                            "action": "register",
+                            "registration": {
+                                "display_name": "Example participant",
+                                "public_key": "<64 hexadecimal characters>",
+                            },
+                        },
+                    }
+                },
+            }
+        },
+    )
+    async def agent_key_challenge(request: Request) -> JSONResponse:
+        return await key_control_command(request, "issue")
+
+
+    @router.post(
+        "/agents/verify",
+        summary="Consume a nonce and apply a signed key-control transition",
+        description="Local mode only. Submit signatures over the stored canonical message. The nonce is single-use and expires within 120 seconds. Rotation requires both signatures. Successful enrollment does not grant authority or standing.",
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["challenge_id", "signature"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "challenge_id": {
+                                    "type": "string",
+                                    "pattern": "^sab_kc_challenge_[0-9a-f]{32}$",
+                                },
+                                "signature": {"type": "string", "pattern": "^[0-9a-fA-F]{128}$"},
+                                "successor_signature": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-fA-F]{128}$",
+                                    "description": "Required only for rotation; the successor signs the exact same message.",
+                                },
+                            },
+                        },
+                    }
+                },
+            }
+        },
+    )
+    async def agent_key_verify(request: Request) -> JSONResponse:
+        return await key_control_command(request, "verify")
 
     @router.get("/agents/me/home")
     async def agent_home(subject_id: str = Query(...)) -> Dict[str, Any]:
@@ -295,10 +397,21 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 """,
                 (subject_id, subject_id),
             ).fetchall()
+            key_control = (
+                deps.key_control.binding_status(conn, subject_id)
+                if deps.key_control is not None else {"status": "unproven", "scope": "key_control_only"}
+            )
+            recorded_identity = conn.execute(
+                "SELECT identity_json FROM sab_agent_identities_v1 WHERE subject_id = ?", (subject_id,)
+            ).fetchone()
             return {
                 "schema": "sab.agent_home.v1",
                 "subject_id": subject_id,
-                "identity_status": "active",
+                "identity_status": key_control["status"],
+                "identity": json.loads(recorded_identity["identity_json"]) if recorded_identity else None,
+                "key_control": key_control,
+                "authority_effect": "none",
+                "standing_effect": "none",
                 "agent": dict(agent),
                 "active_authority_leases": [],
                 "pending_seeds": [
@@ -321,7 +434,11 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 ],
                 "witness_requests": [],
                 "expiries": [],
-                "recommended_next_action": "submit_seed_or_review_challenges",
+                "recommended_next_action": (
+                    "submit_seed_or_review_challenges" if key_control["status"] == "active"
+                    else "prove_key_control" if key_control["status"] == "unproven"
+                    else "resolve_key_control"
+                ),
             }
 
     @router.post("/seeds", status_code=status.HTTP_201_CREATED)
@@ -837,11 +954,15 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.post("/standing/review", status_code=status.HTTP_201_CREATED)
     async def review_standing(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        if "standing_lease" not in payload and "lease" not in payload and "standing_id" not in payload:
+            return key_control_problem(
+                "signed_standing_review_required",
+                "Standing review requires a signed standing lease and an active reviewer key binding.",
+                428,
+            )
         deps.init_db()
         with deps.db() as conn:
             _init_v1_tables(conn)
-            if "standing_lease" not in payload and "lease" not in payload and "standing_id" not in payload:
-                return _review_standing_request(deps, conn, payload)
             standing_lease = _extract_object(payload, "standing_lease", "lease")
             lease_for_hash = _without_signature(standing_lease)
             standing_id = _required_str(lease_for_hash, "standing_id")
@@ -2510,64 +2631,6 @@ def _resolve_challenge_action(
             "seed_state": seed_state,
             "witness_head": witness["hash"],
         }
-
-
-def _review_standing_request(
-    deps: SabSeedingDeps,
-    conn: sqlite3.Connection,
-    payload: Dict[str, Any],
-) -> Dict[str, Any]:
-    subject_seed_id = _required_str(payload, "subject_seed_id")
-    _seed_row(conn, subject_seed_id)
-    _sweep_challenge_deadlines(deps, conn, subject_seed_id)
-    seed = _seed_row(conn, subject_seed_id)
-    if _pending_challenge_count(conn, subject_seed_id) > 0:
-        raise HTTPException(status_code=409, detail="standing review requires resolved challenge path")
-    if _challenge_count(conn, subject_seed_id) < 1:
-        raise HTTPException(status_code=409, detail="standing review requires a challenge")
-    witness_refs = payload.get("witness_refs") if isinstance(payload.get("witness_refs"), list) else []
-    if not witness_refs:
-        raise HTTPException(status_code=409, detail="standing review requires witness refs")
-
-    requested = str(payload.get("requested_state") or "provisional").strip()
-    if requested in {"compost", "rejected"}:
-        event_type = "compost"
-        state = "compost"
-        system_payload = {"standing_review": "compost", "reason": payload.get("reason") or "review rejected"}
-    else:
-        event_type = "standing_issued"
-        state = "standing_active"
-        system_payload = {
-            "standing_review": "provisional",
-            "scope": str(payload.get("scope") or seed["claim_id"]),
-            "challenge_summary": payload.get("challenge_summary") if isinstance(payload.get("challenge_summary"), list) else [],
-            "witness_refs": witness_refs,
-        }
-    signature = deps.system_sign(
-        {
-            "kind": "sab_standing_review",
-            "subject_seed_id": subject_seed_id,
-            "state": state,
-            "payload": system_payload,
-        }
-    )
-    witness = _record_seed_transition(
-        deps,
-        conn,
-        seed_id=subject_seed_id,
-        actor_identity="system",
-        event_type=event_type,
-        to_state=state,
-        payload=system_payload,
-        signature_hex=signature,
-    )
-    deps.invalidate_web_cache()
-    return {
-        "state": state,
-        "seed_id": subject_seed_id,
-        "subject_seed_id": subject_seed_id,
-        "witness_head": witness["hash"],
-    }
 
 
 def _challenge_count(conn: sqlite3.Connection, seed_id: str) -> int:

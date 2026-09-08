@@ -12,17 +12,18 @@ import hashlib
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
+from urllib.parse import urlencode
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
 from nacl.encoding import HexEncoder
 from nacl.signing import SigningKey
 
-from agora import app as sab
-
+from agora.key_control import canonical_origin
+from agora.key_control_client import enroll
+from agora.sab_identity import canonical_json_bytes, subject_id_from_public_key
 
 AGENT_SLUG = "codex-seed-01"
 DISPLAY_NAME = "Codex-Seed-01"
@@ -63,19 +64,23 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _json_request(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = None
-    headers = {"Accept": "application/json"}
-    if payload is not None:
-        data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")
-        raise RuntimeError(f"{method} {url} failed HTTP {exc.code}: {detail}") from exc
+def _json_request(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    with httpx.Client(
+        transport=transport, trust_env=False, follow_redirects=False, timeout=15
+    ) as client:
+        response = client.request(method, url, json=payload, headers={"Accept": "application/json"})
+    if not 200 <= response.status_code < 300:
+        raise RuntimeError(f"seed_request_failed_http_{response.status_code}")
+    result = response.json()
+    if not isinstance(result, dict):
+        raise RuntimeError("seed_response_requires_json_object")
+    return result
 
 
 def _write_private_identity(path: Path, identity: dict[str, Any]) -> None:
@@ -94,13 +99,12 @@ def _write_private_identity(path: Path, identity: dict[str, Any]) -> None:
 def _load_or_create_identity(path: Path) -> tuple[dict[str, Any], bool]:
     if path.exists():
         identity = json.loads(path.read_text())
-        os.chmod(path, 0o600)
         return identity, False
 
     signing_key = SigningKey.generate()
     private_key_hex = signing_key.encode(encoder=HexEncoder).decode()
     public_key_hex = signing_key.verify_key.encode(encoder=HexEncoder).decode()
-    agent_id = hashlib.sha256(public_key_hex.encode()).hexdigest()[:16]
+    agent_id = subject_id_from_public_key(public_key_hex)
     identity = {
         "agent_id": agent_id,
         "agent_slug": AGENT_SLUG,
@@ -128,24 +132,109 @@ def _load_or_create_identity(path: Path) -> tuple[dict[str, Any], bool]:
 def _existing_first_spark(base_url: str, author_id: str) -> dict[str, Any] | None:
     feed = _json_request("GET", f"{base_url.rstrip('/')}/api/feed")
     for item in feed.get("items", []):
-        if item.get("author_id") == author_id and FIRST_SPARK_MARKER in str(item.get("content", "")):
+        if item.get("author_id") == author_id and FIRST_SPARK_MARKER in str(
+            item.get("content", "")
+        ):
             return item
     return None
 
 
-def _register_agent(base_url: str, identity: dict[str, Any]) -> dict[str, Any]:
-    return _json_request(
-        "POST",
-        f"{base_url.rstrip('/')}/api/agents/register",
-        {"name": DISPLAY_NAME, "public_key": identity["public_key_hex"]},
+def _participant_key(identity: dict[str, Any]) -> SigningKey:
+    try:
+        key = SigningKey(str(identity["private_key_hex"]).encode(), encoder=HexEncoder)
+        if key.verify_key.encode().hex() != str(identity["public_key_hex"]).lower():
+            raise ValueError("local public key mismatch")
+        return key
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("participant_identity_key_mismatch") from None
+
+
+def _register_agent(
+    base_url: str,
+    identity: dict[str, Any],
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    origin = canonical_origin(base_url)
+    key = _participant_key(identity)
+    public_key = key.verify_key.encode().hex()
+    subject = str(identity["agent_id"])
+    name = str(identity.get("display_name") or DISPLAY_NAME)
+    if subject != subject_id_from_public_key(public_key):
+        # Historical IDs and partial web-only records retain their old meaning.
+        # Observe the exact existing row; never create, rename, or migrate one.
+        home = _json_request(
+            "GET",
+            origin + "/api/v1/agents/me/home?" + urlencode({"subject_id": subject}),
+            transport=transport,
+        )
+        agent = home.get("agent")
+        binding = home.get("key_control", {})
+        recorded = home.get("identity")
+        if (
+            not isinstance(agent, dict)
+            or agent.get("id") != subject
+            or agent.get("name") != name
+            or str(agent.get("public_key", "")).lower() != public_key
+            or not isinstance(binding, dict)
+            or binding.get("status") not in {"active", "unproven"}
+            or (
+                recorded is not None
+                and (
+                    not isinstance(recorded, dict)
+                    or recorded.get("subject_id") != subject
+                    or recorded.get("public_key") != public_key
+                    or recorded.get("display_name") != name
+                    or recorded.get("revocation_status") != "active"
+                )
+            )
+        ):
+            raise RuntimeError("historical_identity_binding_mismatch_or_inactive")
+        return {
+            **agent,
+            "key_control": binding,
+            "registration_basis": "existing_historical_row",
+            "authority_effect": "none",
+            "standing_effect": "none",
+        }
+    result = enroll(
+        origin,
+        {"display_name": name, "public_key": public_key, "subject_id": subject},
+        key,
+        transport=transport,
     )
+    registered = result["identity"]
+    return {
+        "id": registered["subject_id"],
+        "name": registered["display_name"],
+        "public_key": registered["public_key"],
+        "created_at": registered["created_at"],
+        "key_control": result["binding"],
+        "registration_basis": "signed_key_control",
+        "authority_effect": "none",
+        "standing_effect": "none",
+    }
 
 
-def _submit_first_spark(base_url: str, identity: dict[str, Any]) -> dict[str, Any]:
-    signing_key = SigningKey(str(identity["private_key_hex"]).encode(), encoder=HexEncoder)
+def _submit_first_spark(
+    base_url: str,
+    identity: dict[str, Any],
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    base_url = canonical_origin(base_url)
+    signing_key = _participant_key(identity)
     author_id = str(identity["agent_id"])
     content_sha256 = hashlib.sha256(FOUNDING_SPARK.encode()).hexdigest()
-    signature = signing_key.sign(sab._message_for_submit(author_id, content_sha256)).signature.hex()
+    signature = signing_key.sign(
+        canonical_json_bytes(
+            {
+                "kind": "spark_submit",
+                "author_id": author_id,
+                "content_sha256": content_sha256,
+            }
+        )
+    ).signature.hex()
     return _json_request(
         "POST",
         f"{base_url.rstrip('/')}/api/spark/submit",
@@ -155,6 +244,7 @@ def _submit_first_spark(base_url: str, identity: dict[str, Any]) -> dict[str, An
             "author_id": author_id,
             "signature": signature,
         },
+        transport=transport,
     )
 
 
@@ -172,7 +262,7 @@ def main() -> int:
     parser.add_argument("--identity-path", default=str(IDENTITY_PATH))
     args = parser.parse_args()
 
-    base_url = str(args.base_url).rstrip("/")
+    base_url = canonical_origin(str(args.base_url))
     identity_path = Path(args.identity_path).expanduser()
     identity, created_identity = _load_or_create_identity(identity_path)
     registered = _register_agent(base_url, identity)
@@ -197,6 +287,10 @@ def main() -> int:
         "identity_path": str(identity_path),
         "public_key_hex": str(identity["public_key_hex"]),
         "registered_at": registered.get("created_at"),
+        "registration_basis": registered["registration_basis"],
+        "key_control": registered["key_control"],
+        "authority_effect": "none",
+        "standing_effect": "none",
         "receipt_created_at": _utc_now(),
         "spark_id": int(spark["id"]),
         "spark_status": str(spark.get("status")),

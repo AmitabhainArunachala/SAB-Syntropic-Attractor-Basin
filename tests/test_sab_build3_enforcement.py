@@ -75,10 +75,12 @@ def client(sab_app):
 
 
 def _register(client: TestClient, agent: _Agent, label: str, operator_id: str) -> dict[str, Any]:
-    response = client.post(
-        "/api/v1/agents/register",
-        json={
-            "schema": "sab.agent_identity.v1",
+    from keycontrol_fixtures import enroll_identity
+
+    body = enroll_identity(
+        client,
+        agent.key,
+        {
             "display_name": label,
             "identity_rail": "ed25519",
             "public_key": agent.public_key,
@@ -92,8 +94,6 @@ def _register(client: TestClient, agent: _Agent, label: str, operator_id: str) -
             "external_attestations": [],
         },
     )
-    assert response.status_code == 201, response.text
-    body = response.json()
     agent.subject_id = body["subject_id"]
     return body
 

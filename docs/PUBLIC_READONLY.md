@@ -146,17 +146,18 @@ The promotion rule is explicit: `LegacyEndorsement` cannot be converted into a
 `StandingLease`. A stored standing record remains separate evidence; a valid
 hash chain does not establish truth, independence, or permission to rely.
 
-## Registration compatibility
+## Identity control and rehearsal compatibility
 
-Both registration routes compare public-key bytes independently of hex casing
-under a serialized transaction. Repeating the same enrollment preserves its
-identity and history. A request to change a key, subject, display name, or
-operator metadata returns 409 instead of overwriting the record. The legacy
-route can return an existing v1 identity; upgrading a legacy-only identity
-through the v1 route remains an explicit migration boundary (409).
+Public identity commands remain blocked before body parsing. In local mode,
+v1 enrollment now requires a signed, expiring challenge; unsigned
+`/api/v1/agents/register` returns 428. Exact existing complete records can prove
+control without metadata replacement. Conflicting bindings and partial legacy
+migrations remain closed. Key rotation and self-revocation preserve history.
+See [the key-control contract](KEY_CONTROL.md).
 
-This prevents record takeover and alias eviction; initial enrollment still
-does not prove control of a signing key or independence of the stated operator.
-Public mutation remains paused. Witness-reference validation, complete reliance
-verification, browser key custody, and an independently operated continuation
-workflow remain separate work before public participation is enabled.
+Unsigned legacy registration cannot reserve new public keys; it returns 428.
+Existing discussion/browser accounts stay explicitly rehearsal metadata and
+cannot satisfy the mandatory v1 binding check. Known revoked or superseded keys
+are also rejected on legacy signed writes. Public participation still requires
+complete authority/issuer and witness validation, browser participant custody,
+independent operator evidence, and the remaining acceptance work.

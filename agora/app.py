@@ -35,6 +35,7 @@ from .sab_seeding_storage import init_sab_seeding_storage
 from .sab_identity import AgentIdentityV1
 from .public_runtime import PublicMode, install_public_runtime, public_read_request, read_public_mode
 from .public_snapshot import load_public_snapshot
+from .key_control import KeyControlError, KeyControlService
 from .public_freshness import (
     PublicationFreshnessObserver,
     current_publication_observation,
@@ -62,6 +63,10 @@ except ImportError as exc:  # pragma: no cover - runtime safety
 
 
 PUBLIC_MODE = read_public_mode()
+KEY_CONTROL = (
+    KeyControlService(os.environ.get("SAB_IDENTITY_ORIGIN", "http://127.0.0.1:8000"))
+    if PUBLIC_MODE == PublicMode.LOCAL else None
+)
 PUBLIC_FRESHNESS_POLICY = read_freshness_policy() if PUBLIC_MODE == PublicMode.PUBLIC_READONLY else None
 PUBLIC_SNAPSHOT = (
     load_public_snapshot(os.getenv("SAB_PUBLIC_SNAPSHOT"), os.getenv("SAB_PUBLIC_SNAPSHOT_SHA256"))
@@ -779,6 +784,13 @@ def _message_for_witness(spark_id: int, witness_id: str, action: str, payload_sh
 
 
 def _verify_agent_signature(conn: sqlite3.Connection, agent_id: str, message: bytes, signature_hex: str) -> None:
+    # Serialize key-state checks with the mutation that follows on this connection.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    if KEY_CONTROL is not None:
+        binding = KEY_CONTROL.binding_status(conn, agent_id)
+        if binding["status"] in {"revoked", "superseded", "inconsistent"}:
+            raise HTTPException(status_code=403, detail="Signing key is inactive or its binding is inconsistent")
     row = conn.execute("SELECT public_key FROM web_agents WHERE id = ?", (agent_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_id}")
@@ -789,6 +801,18 @@ def _verify_agent_signature(conn: sqlite3.Connection, agent_id: str, message: by
         verify_key.verify(message, bytes.fromhex(signature_hex))
     except (BadSignatureError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid Ed25519 signature")
+
+
+def _verify_sab_agent_signature(conn: sqlite3.Connection, agent_id: str, message: bytes, signature_hex: str) -> None:
+    if KEY_CONTROL is None:
+        raise HTTPException(status_code=503, detail="Key-control verification is unavailable")
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        KEY_CONTROL.require_active_binding(conn, agent_id)
+    except KeyControlError as exc:
+        raise HTTPException(status_code=exc.status, detail={"code": exc.code, "detail": exc.detail}) from None
+    _verify_agent_signature(conn, agent_id, message, signature_hex)
 
 
 def _append_witness(
@@ -1428,13 +1452,14 @@ app.include_router(
         SabSeedingDeps(
             init_db=init_db,
             db=_db,
-            verify_agent_signature=_verify_agent_signature,
+            verify_agent_signature=_verify_sab_agent_signature,
             system_sign=_system_sign,
             utc_now=_utc_now,
             invalidate_web_cache=_invalidate_web_cache,
             read_only=PUBLIC_MODE == PublicMode.PUBLIC_READONLY,
             publication_configured=PUBLIC_SNAPSHOT.configured if PUBLIC_SNAPSHOT is not None else True,
             read_observation=_public_read_observation if PUBLIC_FRESHNESS is not None else None,
+            key_control=KEY_CONTROL,
         )
     )
 )
@@ -1444,7 +1469,6 @@ app.include_router(
 async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
     init_db()
     agent_id = hashlib.sha256(req.public_key.encode()).hexdigest()[:16]
-    created_at = _utc_now()
     with _db() as conn:
         # Both registration routes share one key binding. Hex casing, a legacy
         # request, or knowledge of a public key cannot create a second subject
@@ -1457,10 +1481,20 @@ async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
         if len(rows) > 1:
             raise HTTPException(status_code=409, detail="public key has conflicting existing identities")
         row = rows[0] if rows else None
-        if row is not None:
-            if str(row["public_key"]).lower() != req.public_key or str(row["name"]) != req.name:
-                raise HTTPException(status_code=409, detail="registration cannot update an existing identity")
-            agent_id = str(row["id"])
+        if row is None:
+            return JSONResponse(
+                status_code=428,
+                content={
+                    "code": "key_control_required",
+                    "detail": "New identities require a locally signed /api/v1/agents/challenge and /api/v1/agents/verify flow.",
+                    "authority_effect": "none",
+                    "standing_effect": "none",
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+        if str(row["public_key"]).lower() != req.public_key or str(row["name"]) != req.name:
+            raise HTTPException(status_code=409, detail="registration cannot update an existing identity")
+        agent_id = str(row["id"])
         identities = []
         if _table_exists(conn, "sab_agent_identities_v1"):
             identities = conn.execute(
@@ -1478,27 +1512,23 @@ async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
                 raise HTTPException(status_code=409, detail="public key has conflicting existing identities")
             identity = json.loads(str(identities[0]["identity_json"]))
         else:
-            if row is None:
-                conn.execute(
-                    """
-                    INSERT INTO web_agents (id, name, public_key, created_at, witness_count, witness_accuracy)
-                    VALUES (?, ?, ?, ?, 0, 0.0)
-                    """,
-                    (agent_id, req.name, req.public_key, created_at),
-                )
-                row = conn.execute("SELECT * FROM web_agents WHERE id = ?", (agent_id,)).fetchone()
             identity = AgentIdentityV1.from_public_key(
                 display_name=str(row["name"]),
                 public_key=str(row["public_key"]),
                 created_at=datetime.fromisoformat(str(row["created_at"])),
                 evidence_refs=[f"web_agents:{row['id']}"],
             ).model_dump(mode="json", by_alias=True)
+        key_control = KEY_CONTROL.binding_status(conn, str(row["id"])) if KEY_CONTROL is not None else {"status": "unproven"}
     return {
         "id": str(row["id"]),
         "name": str(row["name"]),
         "public_key": str(row["public_key"]),
         "created_at": str(row["created_at"]),
         "identity": identity,
+        "identity_status": "rehearsal_metadata",
+        "key_control": key_control,
+        "authority_effect": "none",
+        "standing_effect": "none",
     }
 
 

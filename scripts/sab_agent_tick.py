@@ -77,28 +77,76 @@ def find_key(agent_id: str):
 
 
 def signing_key(path: Path):
-    from nacl.signing import SigningKey
+    from agora.key_control_client import load_signing_key
 
-    return SigningKey(bytes.fromhex(path.read_text().strip()))
+    return load_signing_key(path)
 
 
 def ensure_registered(agent_id: str, sk) -> bool:
-    status, _ = api(f"/api/v1/agents/me/home?subject_id={agent_id}")
-    if status == 200:
-        return True
-    status, resp = api("/api/v1/agents/register", {
+    from agora.key_control_client import (
+        KeyControlClientError,
+        active_binding_matches,
+        enroll,
+        read_home,
+    )
+
+    registration = {
         "public_key": sk.verify_key.encode().hex(),
         "display_name": agent_id.removeprefix("agent_").replace("_", "-"),
         "subject_id": agent_id,
-        "controller": "sab_agent_tick",
+        "controller": "operator",
         "operator_backing": {
-            "operator_ref": OPERATOR,
+            "operator_id": OPERATOR,
+            "operator_kind": "human",
             "disclosure": "Founding operator's fleet; not independent of other fleet identities.",
-            "concentration_attestation": "self_attested",
+            "backing_count_attestation": "self_attested",
         },
-    })
-    log_event({"kind": "register", "agent_id": agent_id, "status": status})
-    return status == 201
+    }
+    try:
+        home = read_home(BASE, agent_id)
+    except KeyControlClientError as exc:
+        if exc.status_code != 404:
+            log_event(
+                {
+                    "kind": "register",
+                    "agent_id": agent_id,
+                    "result": exc.reason,
+                    "status": exc.status_code,
+                }
+            )
+            return False
+        home = {}
+    if active_binding_matches(home, registration, sk):
+        return True
+    binding = home.get("key_control")
+    if isinstance(binding, dict) and binding.get("status") in {
+        "revoked",
+        "superseded",
+        "inconsistent",
+    }:
+        log_event({"kind": "register", "agent_id": agent_id, "result": "binding_not_active"})
+        return False
+    try:
+        receipt = enroll(BASE, registration, sk)
+    except KeyControlClientError as exc:
+        log_event(
+            {
+                "kind": "register",
+                "agent_id": agent_id,
+                "result": exc.reason,
+                "status": exc.status_code,
+            }
+        )
+        return False
+    log_event(
+        {
+            "kind": "register",
+            "agent_id": agent_id,
+            "result": "key_control_proved",
+            "proof_id": receipt["proof_id"],
+        }
+    )
+    return True
 
 
 def reconcile_packet(path: Path):

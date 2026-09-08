@@ -10,7 +10,6 @@ from typing import Any, Dict
 
 import pytest
 from fastapi.testclient import TestClient
-from nacl.encoding import HexEncoder
 from nacl.signing import SigningKey
 
 
@@ -79,10 +78,9 @@ def _sign_witness(sk: SigningKey, spark_id: int, witness_id: str, action: str, p
 
 
 def _register(client: TestClient, sk: SigningKey, name: str) -> str:
-    public_key = sk.verify_key.encode(encoder=HexEncoder).decode()
-    res = client.post("/api/agents/register", json={"name": name, "public_key": public_key})
-    assert res.status_code == 201, res.text
-    return str(res.json()["id"])
+    from keycontrol_fixtures import enroll_identity
+
+    return enroll_identity(client, sk, display_name=name)["subject_id"]
 
 
 def _submit_spark(client: TestClient, sk: SigningKey, author_id: str, content: str) -> int:
