@@ -955,7 +955,10 @@ def _read_bundle(bundle_dir: Path | str, expected: str) -> tuple[dict[str, Any],
         content = {}
         for name in (MANIFEST_FILENAME, SNAPSHOT_FILENAME):
             try:
-                descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+                # Reject FIFOs/devices by fstat before any potentially blocking read.
+                descriptor = os.open(
+                    name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd
+                )
             except OSError as exc:
                 raise PublicSnapshotError(
                     "bundle_file", "A required bundle member cannot be opened safely."

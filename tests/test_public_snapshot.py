@@ -755,3 +755,33 @@ def test_public_manifest_matches_published_schema(source, tmp_path):
     jsonschema.Draft202012Validator(schema).validate(
         json.loads((bundle / "manifest.json").read_bytes())
     )
+
+
+@pytest.mark.parametrize("member", ["manifest.json", "snapshot.sqlite3"])
+def test_nonregular_bundle_member_is_rejected_without_blocking(tmp_path, member):
+    bundle = tmp_path.resolve() / "fifo-bundle"
+    ps.export_empty_public_snapshot(bundle, observed_at=STAMP)
+    pin = _pin(bundle)
+    (bundle / member).unlink()
+    os.mkfifo(bundle / member)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "from agora.public_snapshot import load_public_snapshot, PublicSnapshotError\n"
+            "try:\n"
+            "    load_public_snapshot(sys.argv[1], sys.argv[2])\n"
+            "except PublicSnapshotError as exc:\n"
+            "    print(exc.code)\n"
+            "    sys.exit(2)\n",
+            str(bundle),
+            pin,
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 2, result.stderr
+    assert result.stdout.strip() == "bundle_file"
