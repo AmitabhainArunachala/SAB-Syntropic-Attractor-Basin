@@ -35,7 +35,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/health || exit 1
 
 FROM runtime AS public
-ENV SAB_PUBLIC_MODE=public_readonly
+ENV SAB_PUBLIC_MODE=public_readonly PYTHONDONTWRITEBYTECODE=1
 CMD ["uvicorn", "agora.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # Keep the existing protocol/admin image as the default target. Public website

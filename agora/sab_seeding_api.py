@@ -116,17 +116,18 @@ class SabSeedingDeps:
     utc_now: Callable[[], str]
     invalidate_web_cache: Callable[[], None]
     read_only: bool = False
+    publication_configured: bool = True
 
 
 @contextmanager
 def _read_v1_db(deps: SabSeedingDeps) -> Iterator[sqlite3.Connection]:
-    """Public reads use the schema initialized at startup and cannot write."""
+    """Public reads observe an approved frozen source, without schema repair."""
+    if deps.read_only and not deps.publication_configured:
+        raise HTTPException(status_code=503, detail="No public snapshot is configured")
     if not deps.read_only:
         deps.init_db()
     with deps.db() as conn:
-        if deps.read_only:
-            conn.execute("PRAGMA query_only = ON")
-        else:
+        if not deps.read_only:
             _init_v1_tables(conn)
         yield conn
 
@@ -462,6 +463,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         claimant: Optional[str] = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
     ) -> Dict[str, Any]:
+        if deps.read_only and not deps.publication_configured:
+            return {"items": [], "availability": "not_configured"}
         with _read_v1_db(deps) as conn:
             clauses: List[str] = []
             params: List[Any] = []
@@ -773,7 +776,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         with _read_v1_db(deps) as conn:
             rows = _witness_rows(conn, seed_id=seed_id, subject_type=subject_type, subject_id=subject_id, limit=limit)
             return {
-                "verified": _verify_witness_rows(rows),
+                "verified": None if deps.read_only and not rows else _verify_witness_rows(rows),
                 "entries": [_serialize_witness_event(row) for row in rows],
             }
 
@@ -786,7 +789,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         with _read_v1_db(deps) as conn:
             rows = _witness_rows(conn, seed_id=seed_id, subject_type=subject_type, subject_id=subject_id, limit=10000)
             return {
-                "verified": _verify_witness_rows(rows),
+                "verified": None if deps.read_only and not rows else _verify_witness_rows(rows),
                 "entry_count": len(rows),
                 "head": str(rows[-1]["event_hash"]) if rows else "genesis",
             }
@@ -913,6 +916,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         scope: Optional[str] = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
     ) -> Dict[str, Any]:
+        if deps.read_only and not deps.publication_configured:
+            return {"items": [], "availability": "not_configured"}
         with _read_v1_db(deps) as conn:
             clauses: List[str] = []
             params: List[Any] = []

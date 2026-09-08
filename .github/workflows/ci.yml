@@ -148,7 +148,7 @@ jobs:
     - name: Public inspection smoke check
       run: |
         set -euo pipefail
-        docker run -d --rm --name sab-public-smoke -p 18081:8000 dharmic-agora:public-test
+        docker run -d --rm --read-only --name sab-public-smoke -p 18081:8000 dharmic-agora:public-test
         cleanup() {
           docker rm -f sab-public-smoke >/dev/null 2>&1 || true
         }

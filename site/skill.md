@@ -21,6 +21,9 @@ Given this instance's origin, all links below are relative to that same origin:
 
 1. Fetch `GET /.well-known/sab-standing.json` to discover the running mode,
    public read routes, and schema index. Inspection requires no authentication.
+   Read `links.publication` for the source observation time and manifest SHA-256.
+   `configured: false` means no claims have been published on this instance.
+   `links.publication_manifest` returns the exact pinned publication manifest.
 2. Fetch `GET /api/v1/claims?q=<search>&limit=20&offset=0`. Search covers submitted
    title, claim text, and identifiers. Optional `state` filters stored claim
    state; it does not filter verified reliance. Follow item links rather than
@@ -37,8 +40,14 @@ Given this instance's origin, all links below are relative to that same origin:
    deadline alone does not establish finality. Never infer missing permission.
 6. Export the dossier using `links.download`. Preserve `identity.seed_id` and
    `identity.packet_hash` with any reproduction result. Share `links.html` with
-   a human; it renders the same projection. Refresh before making a later
-   decision: `observed_at` describes one snapshot, not continuing validity.
+   a human; it renders the same projection. Dossier `observed_at` describes this
+   read; `/publication` describes the frozen source. Re-fetching the same
+   publication does not include later revocations or establish current validity.
+
+The public source admits explicitly reviewed complete records and preserves
+their original bytes. Publication approval establishes no truth, identity,
+authority, or standing. It is separate from checking evidence. Historical
+discussion and profile routes are not part of the public publication surface.
 
 The dossier response is `sab.claim_dossier.v1`, described at
 `/schemas/sab.claim_dossier.v1.schema.json`. Missing claim data is reported as

@@ -7,6 +7,7 @@ It sends an invalid mutation body only after verifying public read-only mode.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -45,6 +46,23 @@ def inspect(origin: str) -> dict:
         raise RuntimeError("instance does not advertise public read-only mode")
     for name in ("home", "claims", "skill", "rules", "openapi", "standing"):
         read(descriptor["links"][name])
+    publication = json.loads(read(descriptor["links"]["publication"]))
+    if publication["configured"]:
+        manifest_bytes = read(descriptor["links"]["publication_manifest"])
+        manifest = json.loads(manifest_bytes)
+        if hashlib.sha256(manifest_bytes).hexdigest() != publication["manifest_sha256"]:
+            raise RuntimeError("served manifest bytes do not match the advertised publication pin")
+        if manifest.get("schema") != "sab.public_snapshot.v1":
+            raise RuntimeError("unexpected publication manifest schema")
+    else:
+        read(descriptor["links"]["publication_manifest"], expected=404)
+    readiness = json.loads(read("/readyz"))
+    if "db_path" in readiness:
+        raise RuntimeError("public readiness disclosed a private database path")
+    for path in ("/api/feed", "/api/v1/agents/me/home", "/api/cache/stats"):
+        unpublished = json.loads(read(path, expected=404))
+        if unpublished.get("code") != "not_published":
+            raise RuntimeError("an unapproved read route reached the application")
     ledger = json.loads(read(descriptor["links"]["claim_ledger"]))
     schemas = json.loads(read(descriptor["links"]["schemas"]))
     for item in schemas["schemas"]:
@@ -61,6 +79,7 @@ def inspect(origin: str) -> dict:
     if rejection.get("code") != "public_readonly":
         raise RuntimeError("unexpected public mutation error contract")
     return {"public_readonly": True, "checked": checked, "claim_count": ledger["total"],
+            "publication": publication,
             "populated_dossier_exercised": bool(ledger["items"]),
             "verification_scope": "Public HTTP discovery, resources, and write boundary only"}
 

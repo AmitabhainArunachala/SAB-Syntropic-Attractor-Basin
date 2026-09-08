@@ -8,14 +8,16 @@ request headers, cookies, and later environment changes cannot enable writes.
 
 ```sh
 # Public observation surface (also the default).
-SAB_PUBLIC_MODE=public_readonly uvicorn agora.app:app --host 127.0.0.1 --port 8000
+PYTHONDONTWRITEBYTECODE=1 SAB_PUBLIC_MODE=public_readonly uvicorn agora.app:app --host 127.0.0.1 --port 8000
 
 # Explicitly writable local development.
 SAB_PUBLIC_MODE=local uvicorn agora.app:app --host 127.0.0.1 --port 8000
 ```
 
-The pure ASGI middleware allows `GET`, `HEAD`, and `OPTIONS` through to the
-application. Every other HTTP method receives HTTP 403 before routing, request
+The pure ASGI middleware allows `GET`, `HEAD`, and `OPTIONS` only on the
+explicit public inspection route allowlist. Unpublished routes return 404
+before their handlers run; new public path patterns require explicit admission.
+Every other HTTP method receives HTTP 403 before routing, request
 body parsing, dependencies, or handlers run. This covers legacy APIs, `/api/v1`,
 browser forms, mounted applications, unknown paths, redirects, and future
 routes. Public WebSocket connections are rejected before the handshake.
@@ -31,13 +33,23 @@ The rejection body is stable and has `Cache-Control: no-store`:
 ```
 
 Public browser reads ignore local session cookies and neither mint browser
-signing keys or cookies nor change existing session or CSRF state. During public
-HTTP reads, the application's database helper opens an existing database with
-SQLite `mode=ro` and `query_only` enabled. Schema initialization runs at startup;
-a public GET cannot repair a missing table or insert rows through that helper.
-The read-only file connection still rejects writes if code clears `query_only`.
-Reading seeds and witness chains does not adjudicate overdue challenges. Reading
-standing does not append expiry events, sign anything, or change stored status.
+signing keys or cookies nor change existing session or CSRF state. The public
+process has **no signing key** and performs **no database or authority-schema
+initialization**, during import, startup, requests, or direct helper calls.
+
+Data comes only from a separately reviewed, pinned [public snapshot](PUBLIC_SNAPSHOT.md).
+The app never falls back to `SAB_SPARK_DB_PATH`, `SAB_AUTHORITY_DB_PATH`, or
+`SAB_DB_PATH`. An absent snapshot produces a schema-free empty reader; a
+configured invalid or unpinned snapshot fails startup. The approved data is
+frozen in memory, with SQLite query-only mode and an authorizer that denies
+mutation, attachments, and unsafe pragmas. Public reads do not scan repository
+packet/receipt directories or `SAB_SEED_CLAIMS_PATH`.
+
+Reading seeds and witness chains does not adjudicate overdue challenges.
+Reading standing does not append expiry events, sign anything, or change stored
+status. A snapshot reflects its recorded observation time, including only the
+revocations and corrections present then. A later HTTP fetch does not refresh
+that source; replacing a publication requires a reviewed bundle and restart.
 
 Standing responses distinguish stored history from current observation:
 
@@ -69,19 +81,21 @@ middleware so the policy is the outermost user layer.
 schema helpers. It is true while an allowed public HTTP read executes, including
 mounted apps and threadpool handlers. The context resets after completion,
 failure, or cancellation and does not leak into concurrent local requests.
-Startup and maintenance operations outside a request remain writable.
+The application's source remains frozen outside that request context too.
 
-`SabSeedingDeps(read_only=True)` enables observational v1 reads. Initialize both
-the public schema and `_init_v1_tables` during lifespan startup before accepting
-reads. `observe_standing_status(stored_status, expiry, observed_at=...)` is the
-shared side-effect-free projection for APIs and browser summaries.
+`SabSeedingDeps(read_only=True)` enables observational v1 reads from the frozen
+source. With `publication_configured=False`, list endpoints return empty data
+with `availability: "not_configured"`; raw record and witness verification
+endpoints return 503 instead of inventing history. Dossier lookup returns a
+recoverable 404. No convenience schema is created to make empty reads succeed.
+`observe_standing_status(stored_status, expiry, observed_at=...)` is the shared
+side-effect-free projection for APIs and browser summaries.
 
-This is an application transport policy, not an operating-system read-only
-filesystem. Startup still performs schema initialization and manages the system
-witness key. Separate server entry points such as `agora.api_server:app` need
-their own deployment boundary; installing middleware on the public app does
-not protect an independently exposed process. Local mode enables existing
-writes and must be selected only for the intended writable environment.
+The public container runs with `PYTHONDONTWRITEBYTECODE=1` and is smoke-tested
+with Docker's `--read-only` filesystem. Separate server entry points such as
+`agora.api_server:app` need their own deployment boundary; the public app's
+policy does not protect an independently exposed process. Local mode enables
+existing writes and must be selected only for the intended writable environment.
 
 ## Verification
 
@@ -95,8 +109,9 @@ python -m pytest tests/test_public_readonly.py -q
 
 The suite checks startup rejection, every registered route and method variants,
 mounted and unknown routes, body-reader isolation, database and session
-snapshots, external table removal, attempted GET inserts in async and threadpool
-handlers, context isolation, expired challenge and standing records, invalid
+snapshots, private-file exclusion, invalid publication pins, frozen data after
+external replacement, unpublished async and threadpool handlers, direct-helper
+write rejection, context isolation, expired challenge and standing records, invalid
 expiry, effective status filtering, and a successful explicitly local browser
 submission.
 
@@ -105,7 +120,7 @@ submission.
 Legacy spark records are discourse. A quorum of `affirm` or `canon_affirm`
 observations never creates a standing lease or a `canon_promoted` event.
 Historical `sparks.status='canon'` rows and their signed history stay intact;
-public spark responses project them as `status: "spark"`, disclose
+local spark responses project them as `status: "spark"`, disclose
 `legacy_status: "canon"`, and include this boundary:
 
 ```json
@@ -119,7 +134,8 @@ public spark responses project them as `status: "spark"`, disclose
 }
 ```
 
-`/canon` remains an endorsement archive. `/api/feed/canon` returns
+In explicit local mode, `/canon` remains an endorsement archive. Legacy
+discussion, spark, and profile routes are excluded from public publication. `/api/feed/canon` returns
 `status: "legacy_endorsements"`; its records carry the same discourse boundary.
 Historical endorsements also remain visible in the ordinary spark feed. Node
 status reports zero spark-derived canon grants and a separate

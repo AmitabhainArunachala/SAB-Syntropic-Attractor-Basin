@@ -30,8 +30,10 @@ explicitly outside this reader's verification scope.
 
 No external evidence is fetched. HTTP(S) references may be opened deliberately
 by the reader; other references remain text. Raw documents are preserved in the
-export even when their decoded data is malformed. Private publication/custody
-review of any production snapshot remains an operator responsibility.
+local export even when their decoded data is malformed. The public process
+serves only records admitted through the [whole-record publication review](PUBLIC_SNAPSHOT.md).
+Unreviewed or local-only evidence cannot enter that bundle. Publication approval
+is a privacy/licensing decision, with no identity, authority, or standing effect.
 
 ## Routes
 
@@ -50,18 +52,19 @@ review of any production snapshot remains an operator responsibility.
 
 Always follow returned links. Historical identifiers can contain slash, query,
 fragment, Unicode, or dot segments; clients must not invent path mappings.
-The legacy discussion feed lives at `/feed`. Bookmarked `/?mode=...` URLs
-redirect to the equivalent feed filter. Frontier cards link to live dossiers
+The legacy discussion feed lives at `/feed` in local mode. Public bookmarked
+`/?mode=...` URLs redirect to `/claims`; unapproved discussion is not published. Frontier cards link to live dossiers
 only when backed by a v1 store record.
 
 Dossier and ledger responses use `Cache-Control: no-store`. `observed_at` is
-a snapshot time, not a promise of future freshness; fetch again before a later
-decision. No browser session is created by public inspection.
+a dossier-read time, not a promise that the source is current. Check `/publication`
+for the immutable source observation time and exact manifest digest. Fetching
+again does not import later revocations; a newly reviewed deployment is required. No browser session is created by public inspection.
 
 ## Run and package
 
 ```sh
-SAB_PUBLIC_MODE=public_readonly uvicorn agora.app:app --host 127.0.0.1 --port 8000
+PYTHONDONTWRITEBYTECODE=1 SAB_PUBLIC_MODE=public_readonly uvicorn agora.app:app --host 127.0.0.1 --port 8000
 python scripts/check_public_inspection.py http://127.0.0.1:8000
 ```
 
@@ -72,13 +75,15 @@ of a populated evidence/reliance workflow.
 
 ```sh
 docker build --target public -t sab-public .
-docker run --rm -p 127.0.0.1:8000:8000 sab-public
+docker run --rm --read-only -p 127.0.0.1:8000:8000 sab-public
 ```
 
 The public image includes the templates, static assets, public Markdown, seed
 data, and schemas. The existing protocol/admin image remains the Dockerfile's
 default target. Select `--target public` for the public website. A clean public
-container starts with no claim database; production data is not baked into it.
+container starts with no claim database and creates no database or key. Production
+data is not baked into it. Configure an explicitly approved bundle and manifest
+pin to publish records; see the snapshot procedure.
 
 ## Evidence needed for the broader product goal
 

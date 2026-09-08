@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.public_snapshot.v1.schema.json",
+  "title": "SAB Public Snapshot v1",
+  "description": "Deployment-pinned publication inventory for intact, explicitly approved seed dossier closures. Publication is not truth, identity verification, authority or standing. Private review content and source paths are excluded.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "policy", "observed_at", "snapshot_kind", "database", "selected_seed_ids", "source_observation", "inventory", "publication_approvals", "publication_effect", "truth_effect", "identity_effect", "authority_effect", "standing_effect"],
+  "properties": {
+    "schema": {"const": "sab.public_snapshot.v1"},
+    "policy": {"const": "whole-record-publication-v1"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "snapshot_kind": {"enum": ["explicit_empty", "approved_dossier_closures"]},
+    "database": {
+      "type": "object", "additionalProperties": false, "required": ["filename", "sha256"],
+      "properties": {"filename": {"const": "snapshot.sqlite3"}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "selected_seed_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "source_observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "time_basis", "observed_at", "closure_sha256", "record_count"],
+      "properties": {
+        "kind": {"enum": ["sqlite_read_transaction", "offline_empty"]},
+        "time_basis": {"const": "operator_supplied"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "closure_sha256": {"$ref": "#/$defs/sha256"},
+        "record_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "inventory": {
+      "type": "array", "minItems": 7, "maxItems": 7,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["table", "row_count", "records"],
+        "properties": {
+          "table": {"$ref": "#/$defs/table"},
+          "row_count": {"type": "integer", "minimum": 0},
+          "records": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["record_id", "row_sha256"], "properties": {"record_id": {"type": "string", "minLength": 1}, "row_sha256": {"$ref": "#/$defs/sha256"}}}}
+        }
+      }
+    },
+    "publication_approvals": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["table", "record_id", "row_sha256", "publication_basis", "license", "takedown_route"],
+        "properties": {
+          "table": {"$ref": "#/$defs/table"},
+          "record_id": {"type": "string", "minLength": 1},
+          "row_sha256": {"$ref": "#/$defs/sha256"},
+          "publication_basis": {"enum": ["own_work", "explicit_permission", "public_domain", "compatible_license"]},
+          "license": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+-]{0,99}$"},
+          "takedown_route": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "publication_effect": {"const": "publication_only"},
+    "truth_effect": {"const": "none"},
+    "identity_effect": {"const": "none"},
+    "authority_effect": {"const": "none"},
+    "standing_effect": {"const": "none"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "table": {"enum": ["sab_agent_identities_v1", "sab_challenge_packets_v1", "sab_seed_events_v1", "sab_seed_packets_v1", "sab_standing_events_v1", "sab_standing_leases_v1", "sab_witness_events_v1"]}
+  }
+}

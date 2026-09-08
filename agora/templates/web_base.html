@@ -27,7 +27,9 @@
         <a href="/" class="text-lg font-semibold text-[--color-ink] hover:no-underline mr-2" aria-label="SAB home">SAB</a>
         {% set nav_items = [('/', 'Proof dossier'), ('/claims', 'Claims'), ('/frontier', 'Frontier'), ('/feed', 'Discussion'), ('/about', 'Protocol')] %}
         {% for href, label in nav_items %}
+        {% if not public_readonly or href != '/feed' %}
         <a class="px-3 py-1.5 rounded-full text-sm border border-[--color-border-subtle] bg-[--color-surface] hover:border-[--color-accent] hover:text-[--color-accent] hover:no-underline transition-colors" href="{{ href }}"{% if path_name is defined and path_name == href %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endif %}
         {% endfor %}
         {% if not public_readonly %}<a href="/submit">Submit</a>{% endif %}
       </nav>
@@ -52,7 +54,7 @@
 
     <main id="main-content">
       {% if public_readonly %}
-      <div class="runtime-notice" role="note"><strong>Open for inspection</strong><p>Read claims and evidence. Public contributions are paused.</p></div>
+      <div class="runtime-notice" role="note"><strong>Open for inspection</strong><p>{% if publication.configured %}Published snapshot observed at <time datetime="{{ publication.observed_at }}">{{ publication_observed_label }}</time>. <a href="/publication">Publication details</a>.{% else %}No public snapshot is configured. There are no published claims to inspect yet.{% endif %} Public contributions are paused.</p></div>
       {% else %}
       <div class="runtime-notice" role="note"><strong>Local rehearsal</strong><p>Writing is enabled for this instance. Participation does not establish independent review.</p></div>
       {% endif %}

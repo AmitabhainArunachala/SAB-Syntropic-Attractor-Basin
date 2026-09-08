@@ -31,6 +31,8 @@ def _load_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None 
         monkeypatch.delenv("SAB_PUBLIC_MODE", raising=False)
     else:
         monkeypatch.setenv("SAB_PUBLIC_MODE", mode)
+    monkeypatch.delenv("SAB_PUBLIC_SNAPSHOT", raising=False)
+    monkeypatch.delenv("SAB_PUBLIC_SNAPSHOT_SHA256", raising=False)
     for name in ("SAB_SPARK_DB_PATH", "SAB_AUTHORITY_DB_PATH", "SAB_DB_PATH"):
         monkeypatch.setenv(name, str(tmp_path / "readonly.db"))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / "system.key"))
@@ -47,9 +49,10 @@ def public_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return _load_app(tmp_path, monkeypatch)
 
 
-def _database_snapshot(path: Path) -> tuple[str, ...]:
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as conn:
-        return tuple(conn.iterdump())
+def _database_snapshot(module) -> tuple[str, ...]:
+    from publication_fixtures import database_observation
+
+    return database_observation(module)
 
 
 def _assert_readonly(response) -> None:
@@ -209,9 +212,9 @@ def test_all_registered_paths_mounts_and_unknown_paths_reject_writes(public_app)
         paths = _registered_paths(public_app.app.routes)
         assert {"/api/v1/agents/register", "/api/agents/register", "/register", "/submit"} <= paths
         paths.update({"/never-registered", "/api/v1/never-registered", "/static/missing.css"})
-        before = _database_snapshot(public_app.SPARK_DB)
+        before = _database_snapshot(public_app)
         sessions = copy.deepcopy(public_app._WEB_SESSIONS)
-        key_bytes = public_app.SYSTEM_KEY_PATH.read_bytes()
+        assert not public_app.SYSTEM_KEY_PATH.exists()
         for path in sorted(paths):
             for method in WRITE_METHODS:
                 # Invalid JSON and a spoofed method must not reach parsing or dependencies.
@@ -224,9 +227,10 @@ def test_all_registered_paths_mounts_and_unknown_paths_reject_writes(public_app)
                 )
                 _assert_readonly(response)
         assert not reached
-        assert _database_snapshot(public_app.SPARK_DB) == before
+        assert _database_snapshot(public_app) == before
         assert public_app._WEB_SESSIONS == sessions
-        assert public_app.SYSTEM_KEY_PATH.read_bytes() == key_bytes
+        assert not public_app.SYSTEM_KEY_PATH.exists()
+        assert not public_app.SPARK_DB.exists()
         assert not client.cookies
 
 
@@ -240,29 +244,33 @@ def test_public_get_pages_do_not_create_or_mutate_browser_sessions(public_app):
         })
         client.cookies.set(public_app.WEB_SESSION_COOKIE, "old-local")
         sessions = copy.deepcopy(public_app._WEB_SESSIONS)
-        before = _database_snapshot(public_app.SPARK_DB)
-        for path in ("/", "/frontier", "/seed", "/submit", "/canon", "/compost", "/about", "/register"):
+        before = _database_snapshot(public_app)
+        for path in ("/", "/frontier", "/submit", "/about", "/register", "/claims"):
             response = client.get(path)
             assert response.status_code == 200, f"{path}: {response.text}"
             assert "set-cookie" not in response.headers
         assert public_app._WEB_SESSIONS == sessions
-        assert _database_snapshot(public_app.SPARK_DB) == before
+        assert _database_snapshot(public_app) == before
 
 
-def test_public_frontier_read_does_not_recreate_an_externally_dropped_table(public_app):
+def test_public_empty_process_never_initializes_authority_tables(public_app):
     with TestClient(public_app.app) as client:
-        # Startup may initialize schema; later reads must observe damage without
-        # turning a missing table into a request-authorized schema repair.
-        with sqlite3.connect(public_app.SPARK_DB) as conn:
-            conn.execute("DROP TABLE sab_signature_index_v1")
-        before = _database_snapshot(public_app.SPARK_DB)
-        response = client.get("/api/frontier")
-        assert response.status_code == 200, response.text
-        assert _database_snapshot(public_app.SPARK_DB) == before
-        with sqlite3.connect(public_app.SPARK_DB) as conn:
-            assert conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sab_signature_index_v1'"
-            ).fetchone() is None
+        before = _database_snapshot(public_app)
+        for path in ("/", "/api/frontier", "/api/v1/claims", "/api/v1/seeds", "/api/v1/standing", "/health", "/readyz"):
+            response = client.get(path)
+            assert response.status_code == 200, response.text
+            assert response.headers["cache-control"] == "no-store"
+        public_app.init_db()
+        assert _database_snapshot(public_app) == before
+        with public_app._db() as conn:
+            assert conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == []
+        assert not public_app.SPARK_DB.exists()
+        assert not public_app.SYSTEM_KEY_PATH.exists()
+        assert client.get("/publication").json()["status"] == "not_configured"
+        assert client.get("/publication/manifest").status_code == 404
+        assert client.get("/api/v1/witness/verify").status_code == 503
+        with pytest.raises(RuntimeError, match="no signing key"):
+            public_app._system_sign({"kind": "unauthorized startup work"})
 
 
 @pytest.mark.parametrize("sync_handler", [False, True], ids=["async", "threadpool"])
@@ -276,13 +284,9 @@ def test_future_get_handler_cannot_insert_into_public_database(
         attempts.append(True)
         with public_app._db() as conn:
             if disable_query_only:
-                # The read-only file connection remains the boundary even if a
-                # future helper accidentally clears the connection-local flag.
+                # A future helper cannot clear the frozen reader's guard.
                 conn.execute("PRAGMA query_only = OFF")
-            conn.execute(
-                """INSERT INTO web_agents (id, name, public_key, created_at)
-                   VALUES ('get_write', 'Unauthorized GET', 'fixture_key', '2000-01-01')"""
-            )
+            conn.execute("CREATE TABLE unauthorized_get_write (id INTEGER)")
         return {"written": True}
 
     if sync_handler:
@@ -294,64 +298,64 @@ def test_future_get_handler_cannot_insert_into_public_database(
         public_app.app.add_api_route("/_read_boundary_probe", async_insert, methods=["GET"])
 
     with TestClient(public_app.app) as client:
-        before = _database_snapshot(public_app.SPARK_DB)
-        with pytest.raises(sqlite3.OperationalError, match="readonly|read-only"):
-            client.get("/_read_boundary_probe")
-        assert attempts == [True]
-        assert _database_snapshot(public_app.SPARK_DB) == before
-        # The failed request must not poison subsequent maintenance operations.
-        with public_app._db() as conn:
-            conn.execute(
-                """INSERT INTO web_agents (id, name, public_key, created_at)
-                   VALUES ('maintenance', 'Maintenance fixture', 'maintenance_key', '2000-01-01')"""
-            )
-        with sqlite3.connect(public_app.SPARK_DB) as conn:
-            assert conn.execute("SELECT id FROM web_agents").fetchall() == [("maintenance",)]
+        before = _database_snapshot(public_app)
+        assert client.get("/_read_boundary_probe").status_code == 404
+        assert attempts == []  # An unlisted path never reaches its handler.
+        assert _database_snapshot(public_app) == before
+        # Direct helpers and startup work have the same frozen source boundary.
+        with pytest.raises(sqlite3.DatabaseError, match="authorized|readonly|read-only"):
+            try_insert()
+        assert _database_snapshot(public_app) == before
 
 
-def _seed_expiring_records(module) -> None:
+def _seed_expiring_records(conn) -> None:
     """Stored history that used to cause writes merely by being read."""
     timestamp = "2000-01-01T00:00:00+00:00"
-    with module._db() as conn:
+    conn.execute(
+        """INSERT INTO sab_seed_packets_v1
+           (seed_id, seed_type, title, claim_id, claimant_identity,
+            authority_lease_id, state, packet_json, packet_hash, created_at, updated_at)
+           VALUES (?, 'claim', 'Read-only expiry fixture', 'claim_readonly', 'agent_readonly',
+                   'lease_readonly', 'challenged', '{}', 'fixture_hash', ?, ?)""",
+        ("seed_readonly", timestamp, timestamp),
+    )
+    conn.execute(
+        """INSERT INTO sab_challenge_packets_v1
+           (challenge_id, target_seed_id, target_claim_id, challenger_identity, status,
+            packet_json, packet_hash, respond_by, created_at, updated_at)
+           VALUES ('challenge_readonly', 'seed_readonly', 'claim_readonly', 'agent_challenger',
+                   'pending', '{}', 'fixture_hash', ?, ?, ?)""",
+        (timestamp, timestamp, timestamp),
+    )
+    for standing_id, stored_status, expiry in (
+        ("standing_expired", "active", timestamp),
+        ("standing_future", "active", "2999-01-01T00:00:00Z"),
+        ("standing_canon_expired", "canon", timestamp),
+        ("standing_invalid", "active", "not-a-date"),
+        ("standing_empty", "active", ""),
+    ):
         conn.execute(
-            """INSERT INTO sab_seed_packets_v1
-               (seed_id, seed_type, title, claim_id, claimant_identity,
-                authority_lease_id, state, packet_json, packet_hash, created_at, updated_at)
-               VALUES (?, 'claim', 'Read-only expiry fixture', 'claim_readonly', 'agent_readonly',
-                       'lease_readonly', 'challenged', '{}', 'fixture_hash', ?, ?)""",
-            ("seed_readonly", timestamp, timestamp),
+            """INSERT INTO sab_standing_leases_v1
+               (standing_id, subject_seed_id, subject_claim_id, scope, purpose, status,
+                lease_json, lease_hash, expiry, revoker, challenge_path, issued_by,
+                issued_at, updated_at)
+               VALUES (?, 'seed_readonly', 'claim_readonly', 'fixture', 'expiry observation',
+                       ?, '{}', 'fixture_hash', ?, 'agent_revoker', '/challenge',
+                       'agent_issuer', ?, ?)""",
+            (standing_id, stored_status, expiry, timestamp, timestamp),
         )
-        conn.execute(
-            """INSERT INTO sab_challenge_packets_v1
-               (challenge_id, target_seed_id, target_claim_id, challenger_identity, status,
-                packet_json, packet_hash, respond_by, created_at, updated_at)
-               VALUES ('challenge_readonly', 'seed_readonly', 'claim_readonly', 'agent_challenger',
-                       'pending', '{}', 'fixture_hash', ?, ?, ?)""",
-            (timestamp, timestamp, timestamp),
-        )
-        for standing_id, stored_status, expiry in (
-            ("standing_expired", "active", timestamp),
-            ("standing_future", "active", "2999-01-01T00:00:00Z"),
-            ("standing_canon_expired", "canon", timestamp),
-            ("standing_invalid", "active", "not-a-date"),
-            ("standing_empty", "active", ""),
-        ):
-            conn.execute(
-                """INSERT INTO sab_standing_leases_v1
-                   (standing_id, subject_seed_id, subject_claim_id, scope, purpose, status,
-                    lease_json, lease_hash, expiry, revoker, challenge_path, issued_by,
-                    issued_at, updated_at)
-                   VALUES (?, 'seed_readonly', 'claim_readonly', 'fixture', 'expiry observation',
-                           ?, '{}', 'fixture_hash', ?, 'agent_revoker', '/challenge',
-                           'agent_issuer', ?, ?)""",
-                (standing_id, stored_status, expiry, timestamp, timestamp),
-            )
 
 
-def test_v1_reads_observe_expiry_without_changing_stored_history(public_app):
+def test_v1_reads_observe_expiry_without_changing_stored_history(tmp_path, monkeypatch):
+    from publication_fixtures import source_database, configure_publication, import_public_app
+
+    with source_database() as source:
+        _seed_expiring_records(source)
+        bundle = configure_publication(source, tmp_path / "bundle", monkeypatch)
+    public_app = import_public_app(tmp_path, monkeypatch)
+    bundle_before = {p.name: p.read_bytes() for p in bundle.iterdir()}
     with TestClient(public_app.app) as client:
-        _seed_expiring_records(public_app)
-        before = _database_snapshot(public_app.SPARK_DB)
+        before = _database_snapshot(public_app)
         paths = (
             "/api/v1/seeds/seed_readonly",
             "/api/v1/seeds/seed_readonly/chain",
@@ -385,9 +389,10 @@ def test_v1_reads_observe_expiry_without_changing_stored_history(public_app):
         assert {item["standing_id"] for item in unknown} == {"standing_invalid", "standing_empty"}
         assert client.get("/api/v1/seeds/seed_readonly").json()["state"] == "challenged"
         assert client.get("/api/v1/challenges/challenge_readonly").json()["status"] == "pending"
-        assert _database_snapshot(public_app.SPARK_DB) == before
+        assert _database_snapshot(public_app) == before
         assert not public_app._WEB_SESSIONS
         assert not client.cookies
+        assert {p.name: p.read_bytes() for p in bundle.iterdir()} == bundle_before
 
 
 @pytest.mark.parametrize(
@@ -440,3 +445,91 @@ def test_mode_cannot_be_changed_by_environment_after_startup(public_app, monkeyp
         monkeypatch.setenv("SAB_PUBLIC_MODE", "local")
         _assert_readonly(client.post("/register", data={"display_name": "override attempt"}))
         assert public_app.app.state.public_mode == "public_readonly"
+
+
+def test_public_import_ignores_private_paths_and_does_not_generate_keys(tmp_path, monkeypatch):
+    from nacl.signing import SigningKey
+
+    private = tmp_path / "readonly.db"
+    private.write_bytes(b"PRIVATE AUTHORITY DATA: deliberately not SQLite")
+    key = tmp_path / "system.key"
+    key.write_bytes(b"PRIVATE CUSTODY: deliberately not an Ed25519 key")
+    files_before = {p: p.read_bytes() for p in tmp_path.iterdir()}
+    original_connect = sqlite3.connect
+
+    def memory_only(database, *args, **kwargs):
+        assert database == ":memory:", "public process opened a file database"
+        return original_connect(database, *args, **kwargs)
+
+    def forbidden_key(*args, **kwargs):
+        pytest.fail("public import or startup generated a signing key")
+
+    monkeypatch.setattr(sqlite3, "connect", memory_only)
+    monkeypatch.setattr(SigningKey, "generate", forbidden_key)
+    module = _load_app(tmp_path, monkeypatch)
+    assert module.SYSTEM_SIGNING_KEY is None
+    assert module.SYSTEM_VERIFY_KEY_HEX is None
+    with TestClient(module.app) as client:
+        for path in ("/", "/claims", "/api/frontier", "/api/node/status", "/health", "/readyz"):
+            response = client.get(path)
+            assert response.status_code == 200, response.text
+            assert "PRIVATE" not in response.text
+            assert str(tmp_path) not in response.text
+    assert {p: p.read_bytes() for p in tmp_path.iterdir()} == files_before
+
+
+def test_public_frontier_never_scans_private_repository_artifacts(public_app, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("public read consulted private repository artifacts")
+
+    monkeypatch.setattr(public_app, "_frontier_receipts_by_seed", forbidden)
+    monkeypatch.setattr(public_app, "_read_json_object", forbidden)
+    assert public_app._seed_claim_payload() == {"claims": [], "stats": {"availability": "not_published"}}
+    with TestClient(public_app.app) as client:
+        assert client.get("/api/frontier").json()["packets"] == []
+        assert client.get("/frontier").status_code == 200
+        for path in ("/seed", "/feed", "/canon", "/compost", "/spark/1", "/agent/1",
+                     "/api/feed", "/api/cache/stats", "/api/v1/agents/me/home", "/static/private.json"):
+            response = client.get(path)
+            assert response.status_code == 404, path
+            assert response.json()["code"] == "not_published"
+
+
+@pytest.mark.parametrize("pin", [None, "0" * 64])
+def test_unapproved_snapshot_configuration_fails_without_private_fallback(tmp_path, monkeypatch, pin):
+    from agora.public_snapshot import PublicSnapshotError
+    from publication_fixtures import import_public_app
+
+    monkeypatch.setenv("SAB_PUBLIC_SNAPSHOT", str(tmp_path / "unapproved"))
+    if pin is None:
+        monkeypatch.delenv("SAB_PUBLIC_SNAPSHOT_SHA256", raising=False)
+    else:
+        monkeypatch.setenv("SAB_PUBLIC_SNAPSHOT_SHA256", pin)
+    with pytest.raises(PublicSnapshotError):
+        import_public_app(tmp_path, monkeypatch)
+    assert not (tmp_path / "private").exists()
+
+
+def test_served_publication_is_frozen_after_external_bundle_changes(tmp_path, monkeypatch):
+    from publication_fixtures import source_database, configure_publication, import_public_app
+    from test_claim_dossier_web import seed
+
+    with source_database() as source:
+        seed(source)
+        bundle = configure_publication(source, tmp_path / "bundle", monkeypatch)
+    module = import_public_app(tmp_path, monkeypatch)
+    with TestClient(module.app) as client:
+        before = client.get("/api/v1/claims").json()
+        manifest = client.get("/publication/manifest").json()
+        frontier = client.get("/api/frontier").json()
+        assert frontier["stats"]["store"]["available"] is True
+        assert frontier["stats"]["store"]["seeds"] == 1
+        assert client.get("/api/v1/witness/verify").json()["verified"] is None
+        assert client.get("/api/v1/witness/chain").json()["verified"] is None
+        with sqlite3.connect(bundle / "snapshot.sqlite3") as conn:
+            conn.execute("UPDATE sab_seed_packets_v1 SET title = 'Unapproved replacement'")
+        (bundle / "manifest.json").write_text('{"unapproved":"replacement"}')
+        assert client.get("/api/v1/claims").json()["items"] == before["items"]
+        assert client.get("/publication/manifest").json() == manifest
+        assert "Unapproved replacement" not in client.get("/").text
+        assert not module.SPARK_DB.exists()

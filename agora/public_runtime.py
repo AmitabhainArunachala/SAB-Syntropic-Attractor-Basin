@@ -7,9 +7,10 @@ startup choice, never something a request, cookie, or proxy header can select.
 from __future__ import annotations
 
 import os
+import re
 from contextvars import ContextVar
 from enum import Enum
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
@@ -29,10 +30,9 @@ _PUBLIC_READ_REQUEST: ContextVar[bool] = ContextVar("sab_public_read_request", d
 def public_read_request() -> bool:
     """Whether execution is inside an allowed read-only public HTTP request.
 
-    Database helpers use this context to prevent lazy schema repair or accidental
-    writes in GET handlers. Startup and direct maintenance calls stay outside
-    the request boundary. Context propagates into mounted apps and threadpool
-    handlers, and resets when the request finishes or raises.
+    Context propagates into mounted apps and threadpool handlers, and resets
+    when the request finishes or raises. This is an additional request guard;
+    the public application's database remains frozen outside requests too.
     """
     return _PUBLIC_READ_REQUEST.get()
 
@@ -62,9 +62,16 @@ class PublicReadonlyMiddleware:
     Lifespan initialization is passed through to the application.
     """
 
-    def __init__(self, app: ASGIApp, mode: str | PublicMode = PublicMode.PUBLIC_READONLY):
+    def __init__(
+        self, app: ASGIApp, mode: str | PublicMode = PublicMode.PUBLIC_READONLY,
+        public_read_paths: Sequence[str] | None = None,
+    ):
         self.app = app
         self.mode = _validate_mode(mode)
+        self.public_read_paths = (
+            tuple(re.compile(pattern) for pattern in public_read_paths)
+            if public_read_paths is not None else None
+        )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if self.mode == PublicMode.PUBLIC_READONLY:
@@ -86,9 +93,27 @@ class PublicReadonlyMiddleware:
                 )
                 return
             if scope["type"] == "http":
+                if self.public_read_paths is not None and not any(
+                    pattern.fullmatch(scope.get("path", "")) for pattern in self.public_read_paths
+                ):
+                    response = JSONResponse(
+                        status_code=404,
+                        content={"code": "not_published", "detail": "This route is not part of the public inspection surface.",
+                                 "claims": "/claims"},
+                        headers={"Cache-Control": "no-store"},
+                    )
+                    await response(scope, receive, send)
+                    return
                 token = _PUBLIC_READ_REQUEST.set(True)
                 try:
-                    await self.app(scope, receive, send)
+                    async def public_send(message):
+                        if message["type"] == "http.response.start":
+                            message = dict(message)
+                            headers = [(k, v) for k, v in message.get("headers", []) if k.lower() != b"cache-control"]
+                            message["headers"] = [*headers, (b"cache-control", b"no-store")]
+                        await send(message)
+
+                    await self.app(scope, receive, public_send)
                 finally:
                     _PUBLIC_READ_REQUEST.reset(token)
                 return
@@ -96,7 +121,8 @@ class PublicReadonlyMiddleware:
 
 
 def install_public_runtime(
-    app: Starlette, mode: str | PublicMode | None = None
+    app: Starlette, mode: str | PublicMode | None = None, *,
+    public_read_paths: Sequence[str] | None = None,
 ) -> PublicMode:
     """Validate policy and install the boundary before the first request.
 
@@ -105,7 +131,7 @@ def install_public_runtime(
     before application imports initialize databases or signing keys.
     """
     resolved = read_public_mode() if mode is None else _validate_mode(mode)
-    app.add_middleware(PublicReadonlyMiddleware, mode=resolved)
+    app.add_middleware(PublicReadonlyMiddleware, mode=resolved, public_read_paths=public_read_paths)
     app.state.public_mode = resolved.value
     app.state.public_readonly = resolved == PublicMode.PUBLIC_READONLY
     return resolved

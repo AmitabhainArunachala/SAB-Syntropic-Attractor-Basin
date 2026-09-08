@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -34,6 +34,7 @@ from .rv_signal import measure_rv_signal
 from .sab_seeding_storage import init_sab_seeding_storage
 from .sab_identity import AgentIdentityV1
 from .public_runtime import PublicMode, install_public_runtime, public_read_request, read_public_mode
+from .public_snapshot import load_public_snapshot
 from .witness_service import (
     PUBLICATION_WITNESS_DOMAIN,
     attach_witness_meta,
@@ -50,6 +51,10 @@ except ImportError as exc:  # pragma: no cover - runtime safety
 
 
 PUBLIC_MODE = read_public_mode()
+PUBLIC_SNAPSHOT = (
+    load_public_snapshot(os.getenv("SAB_PUBLIC_SNAPSHOT"), os.getenv("SAB_PUBLIC_SNAPSHOT_SHA256"))
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY else None
+)
 DEFAULT_SPARK_DB = get_db_path().with_name("spark.db")
 SPARK_DB = Path(os.getenv("SAB_SPARK_DB_PATH", os.getenv("SAB_AUTHORITY_DB_PATH", str(DEFAULT_SPARK_DB))))
 SYSTEM_KEY_PATH = Path(
@@ -104,8 +109,9 @@ SAB_17_DIMENSIONS: List[Dict[str, str]] = [
     {"id": "INTEGRITY", "label": "Integrity", "source_gate": "telos_alignment"},
 ]
 
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
-TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+if PUBLIC_MODE == PublicMode.LOCAL:
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
@@ -259,6 +265,8 @@ def _json_string_list(raw: Any) -> List[str]:
 
 
 def _seed_claim_payload() -> Dict[str, Any]:
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+        return {"claims": [], "stats": {"availability": "not_published"}}
     if not SEED_CLAIMS_PATH.exists():
         return {"claims": [], "stats": {"missing": str(SEED_CLAIMS_PATH)}}
     try:
@@ -475,12 +483,18 @@ def _load_or_create_system_signing_key(path: Path) -> SigningKey:
     return key
 
 
-SYSTEM_SIGNING_KEY = _load_or_create_system_signing_key(SYSTEM_KEY_PATH)
-SYSTEM_VERIFY_KEY_HEX = SYSTEM_SIGNING_KEY.verify_key.encode(encoder=HexEncoder).decode()
+SYSTEM_SIGNING_KEY = _load_or_create_system_signing_key(SYSTEM_KEY_PATH) if PUBLIC_MODE == PublicMode.LOCAL else None
+SYSTEM_VERIFY_KEY_HEX = SYSTEM_SIGNING_KEY.verify_key.encode(encoder=HexEncoder).decode() if SYSTEM_SIGNING_KEY else None
 
 
 @contextmanager
 def _db() -> sqlite3.Connection:
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+        if PUBLIC_SNAPSHOT is None:
+            raise RuntimeError("The public snapshot reader is unavailable")
+        with PUBLIC_SNAPSHOT.connection() as conn:
+            yield conn
+        return
     if public_read_request():
         conn = sqlite3.connect(SPARK_DB.resolve().as_uri() + "?mode=ro", uri=True)
         conn.execute("PRAGMA query_only = ON")
@@ -547,7 +561,7 @@ def _migrate_legacy_public_tables(conn: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
-    if public_read_request():
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY or public_read_request():
         return
     with _db() as conn:
         cursor = conn.cursor()
@@ -666,6 +680,8 @@ def init_db() -> None:
 
 
 def _system_sign(payload: Dict[str, Any]) -> str:
+    if SYSTEM_SIGNING_KEY is None:
+        raise RuntimeError("The public inspection process has no signing key")
     return SYSTEM_SIGNING_KEY.sign(_canonical_bytes(payload)).signature.hex()
 
 
@@ -1201,11 +1217,10 @@ class WitnessSignRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    init_db()
-    # Complete schema setup once before serving read-only requests. GET handlers
-    # must not initialize or migrate v1 tables as a side effect of inspection.
-    with _db() as conn:
-        _init_v1_tables(conn)
+    if PUBLIC_MODE == PublicMode.LOCAL:
+        init_db()
+        with _db() as conn:
+            _init_v1_tables(conn)
     yield
 
 
@@ -1215,7 +1230,21 @@ app = FastAPI(
     version=SAB_VERSION,
     lifespan=lifespan,
 )
-install_public_runtime(app, PUBLIC_MODE)
+# Publication is opt-in for routes as well as records. Legacy discussion,
+# profiles, caches and repository packets are outside the public surface.
+PUBLIC_READ_PATHS = (
+    r"/", r"/claims(?:/[^\x00]*)?", r"/frontier", r"/about", r"/submit", r"/register",
+    r"/api/frontier", r"/api/node/status", r"/healthz?", r"/readyz",
+    r"/publication(?:/manifest)?", r"/\.well-known/sab-standing\.json",
+    r"/(?:skill|seed|auth|heartbeat|rules)\.md", r"/openapi\.json", r"/docs(?:/oauth2-redirect)?", r"/redoc",
+    r"/schemas/(?:index\.json|sab\.(?:seed_packet|claim_dossier|public_snapshot)\.v1\.schema\.json)",
+    r"/static/(?:web\.(?:css|js)|favicon\.svg|(?:seed_fusion|frontier|reliance|dossier)\.css)",
+    r"/api/v1/claims(?:/record)?", r"/api/v1/seeds(?:/[^/]+(?:/chain)?)?",
+    r"/api/v1/seeds/[^\x00]+/dossier", r"/api/v1/challenges/[^/]+",
+    r"/api/v1/witness-events/[^/]+", r"/api/v1/witness/(?:chain|verify)",
+    r"/api/v1/standing(?:/[^/]+)?",
+)
+install_public_runtime(app, PUBLIC_MODE, public_read_paths=PUBLIC_READ_PATHS)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -1243,6 +1272,7 @@ async def public_standing_discovery() -> JSONResponse:
             "inspection_authentication": "none",
             "authority_effect": "none",
             "standing_effect": "none",
+            "publication": PUBLIC_SNAPSHOT.status if PUBLIC_SNAPSHOT is not None else {"status": "local_rehearsal"},
             "links": {
                 "home": "/",
                 "claims": "/claims",
@@ -1254,6 +1284,8 @@ async def public_standing_discovery() -> JSONResponse:
                 "rules": "/rules.md",
                 "openapi": "/openapi.json",
                 "schemas": "/schemas/index.json",
+                "publication": "/publication",
+                "publication_manifest": "/publication/manifest",
             },
             "dossier_schema": "sab.claim_dossier.v1",
             "verification_limits": [
@@ -1271,7 +1303,28 @@ async def public_schema_index() -> Dict[str, Any]:
     return {"schemas": [
         {"schema": "sab.seed_packet.v1", "url": "/schemas/sab.seed_packet.v1.schema.json"},
         {"schema": "sab.claim_dossier.v1", "url": "/schemas/sab.claim_dossier.v1.schema.json"},
+        {"schema": "sab.public_snapshot.v1", "url": "/schemas/sab.public_snapshot.v1.schema.json"},
     ]}
+
+
+@app.get("/publication")
+async def public_publication_status() -> Dict[str, Any]:
+    return PUBLIC_SNAPSHOT.status if PUBLIC_SNAPSHOT is not None else {"status": "local_rehearsal", "configured": False}
+
+
+@app.get("/publication/manifest")
+async def public_publication_manifest() -> Response:
+    if PUBLIC_SNAPSHOT is None or PUBLIC_SNAPSHOT.manifest_bytes is None:
+        raise HTTPException(status_code=404, detail="No public snapshot is configured")
+    return Response(PUBLIC_SNAPSHOT.manifest_bytes, media_type="application/json")
+
+
+@app.get("/schemas/sab.public_snapshot.v1.schema.json", include_in_schema=False)
+async def public_snapshot_schema() -> FileResponse:
+    path = REPO_ROOT / "nodes" / "schemas" / "sab.public_snapshot.v1.schema.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Public snapshot schema unavailable")
+    return FileResponse(path, media_type="application/schema+json")
 
 
 @app.get("/schemas/sab.claim_dossier.v1.schema.json", include_in_schema=False)
@@ -1331,6 +1384,7 @@ app.include_router(
             utc_now=_utc_now,
             invalidate_web_cache=_invalidate_web_cache,
             read_only=PUBLIC_MODE == PublicMode.PUBLIC_READONLY,
+            publication_configured=PUBLIC_SNAPSHOT.configured if PUBLIC_SNAPSHOT is not None else True,
         )
     )
 )
@@ -1957,11 +2011,17 @@ def _render_template(
     *,
     status_code: int = 200,
 ) -> HTMLResponse:
+    publication = PUBLIC_SNAPSHOT.status if PUBLIC_SNAPSHOT is not None else None
     payload = {
         "request": request,
         **context,
         "public_readonly": PUBLIC_MODE == PublicMode.PUBLIC_READONLY,
         "public_mode": PUBLIC_MODE.value,
+        "publication": publication,
+        "publication_observed_label": (
+            datetime.fromisoformat(publication["observed_at"]).strftime("%d %b %Y, %H:%M UTC")
+            if publication and publication["observed_at"] else None
+        ),
     }
     return templates.TemplateResponse(request, template_name, payload, status_code=status_code)
 
@@ -2174,7 +2234,7 @@ def _frontier_store_stats() -> Dict[str, Any]:
 
         init_db()
         with _db() as conn:
-            if not public_read_request():
+            if PUBLIC_MODE == PublicMode.LOCAL and not public_read_request():
                 init_sab_seeding_storage(conn)
                 _init_v1_tables(conn)
             seed_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_seed_packets_v1").fetchone()["c"])
@@ -2188,13 +2248,13 @@ def _frontier_store_stats() -> Dict[str, Any]:
             standing_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_standing_leases_v1").fetchone()["c"])
             observed_at = datetime.now(timezone.utc)
             conn.create_function(
-                "sab_standing_status", 2,
+                "sab_observed_standing_status", 2,
                 lambda stored, expiry: observe_standing_status(stored, expiry, observed_at=observed_at)["status"],
             )
             active_standing = int(
                 conn.execute(
                     "SELECT COUNT(*) AS c FROM sab_standing_leases_v1 "
-                    "WHERE sab_standing_status(status, expiry) = 'active'",
+                    "WHERE sab_observed_standing_status(status, expiry) = 'active'",
                 ).fetchone()[
                     "c"
                 ]
@@ -2228,7 +2288,7 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
 
         init_db()
         with _db() as conn:
-            if not public_read_request():
+            if PUBLIC_MODE == PublicMode.LOCAL and not public_read_request():
                 init_sab_seeding_storage(conn)
                 _init_v1_tables(conn)
             rows = conn.execute(
@@ -2345,10 +2405,10 @@ def _frontier_board_lanes(cards: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
 
 
 def _frontier_snapshot(limit: int = 24) -> Dict[str, Any]:
-    receipts = _frontier_receipts_by_seed()
+    receipts = _frontier_receipts_by_seed() if PUBLIC_MODE == PublicMode.LOCAL else {}
     cards: List[Dict[str, Any]] = _frontier_db_seed_cards(limit)
     seen_seed_ids = {str(card.get("seed_id")) for card in cards}
-    if FRONTIER_PACKET_DIR.exists():
+    if PUBLIC_MODE == PublicMode.LOCAL and FRONTIER_PACKET_DIR.exists():
         for path in sorted(FRONTIER_PACKET_DIR.glob("*.json"), key=lambda item: item.name, reverse=True):
             payload = _read_json_object(path)
             if not payload:
@@ -2388,7 +2448,7 @@ def _frontier_snapshot(limit: int = 24) -> Dict[str, Any]:
                 "evidence grade, uncertainty, and authority affect typechecking and evaluation?"
             ),
             "target_rule": "Claim[Attested_by, womb] cannot satisfy Claim[Proven_by, core] without an accepted promotion proof.",
-            "source_doc": _safe_repo_relative(LANGUAGE_WOMB_SEED_DOC),
+            "source_doc": _safe_repo_relative(LANGUAGE_WOMB_SEED_DOC) if PUBLIC_MODE == PublicMode.LOCAL else None,
             "next_question": _frontier_open_questions()[0],
         },
         "stats": {
@@ -2482,6 +2542,9 @@ async def feed_compost(
 
 @app.get("/api/node/status")
 async def node_status() -> Dict[str, Any]:
+    if PUBLIC_SNAPSHOT is not None:
+        return {"status": "healthy", "version": SAB_VERSION, "public_mode": PUBLIC_MODE.value,
+                "publication": PUBLIC_SNAPSHOT.status, "timestamp": _utc_now()}
     init_db()
     with _db() as conn:
         total = int(conn.execute("SELECT COUNT(*) AS c FROM sparks").fetchone()["c"])
@@ -2562,6 +2625,8 @@ async def healthz() -> Dict[str, Any]:
 
 @app.get("/readyz")
 async def readyz() -> Dict[str, Any]:
+    if PUBLIC_SNAPSHOT is not None:
+        return {"status": "ready", "surface": "agora.app", "publication": PUBLIC_SNAPSHOT.status, "timestamp": _utc_now()}
     init_db()
     with _db() as conn:
         conn.execute("SELECT 1").fetchone()
@@ -2588,6 +2653,8 @@ async def web_home(
     # Retain old bookmarked feed filters while giving the main entry point a
     # concrete claim to inspect. Selection means newest, never highest trust.
     if mode is not None:
+        if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+            return RedirectResponse("/claims", status_code=307)
         return RedirectResponse("/feed?" + urlencode({"mode": mode, "limit": limit}), status_code=307)
     with _db() as conn:
         ledger = list_claims(conn, limit=1)
