@@ -259,7 +259,7 @@ def test_historical_canon_is_disclosed_without_rewriting_evidence(client: TestCl
         assert item["status"] == "spark"
         assert item["legacy_status"] == "canon"
         assert item["authority"]["standing_effect"] == "none"
-    for route in ("/", "/canon", "/?mode=canon", f"/spark/{spark_id}"):
+    for route in ("/feed", "/canon", "/?mode=canon", f"/spark/{spark_id}"):
         page = client.get(route)
         assert page.status_code == 200
         assert "Historical endorsement" in page.text

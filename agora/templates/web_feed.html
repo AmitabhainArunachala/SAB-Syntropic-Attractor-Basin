@@ -12,7 +12,7 @@
   <nav class="flex flex-wrap gap-2 text-sm" aria-label="Feed sort modes">
     {% set modes = [('newest', 'Newest'), ('most-challenged', 'Most Challenged'), ('canon', 'Endorsement archive'), ('compost', 'Compost')] %}
     {% for val, label in modes %}
-    <a href="/?mode={{ val }}" class="px-2.5 py-1 rounded-[--radius-sm] border transition-colors hover:no-underline
+    <a href="/feed?mode={{ val }}" class="px-2.5 py-1 rounded-[--radius-sm] border transition-colors hover:no-underline
       {% if mode != val %}border-[--color-border-subtle] text-[--color-muted] hover:border-[--color-accent] hover:text-[--color-accent]{% endif %}"
       {% if mode == val %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
@@ -80,7 +80,7 @@
 {% elif path_name == '/compost' %}
   {% set more_href = '/compost?sort=' ~ sort_mode ~ '&limit=' ~ next_limit %}
 {% else %}
-  {% set more_href = '/?mode=' ~ mode ~ '&limit=' ~ next_limit %}
+  {% set more_href = '/feed?mode=' ~ mode ~ '&limit=' ~ next_limit %}
 {% endif %}
 <div class="py-8 text-center">
   <a href="{{ more_href }}" class="load-more-link">Show more</a>

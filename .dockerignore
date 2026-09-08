@@ -1,0 +1,17 @@
+**
+!Dockerfile
+!requirements.txt
+!agora/
+!agora/**
+agora/**/__pycache__/
+agora/**/*.pyc
+agora/tests/
+agora/**/*.db
+agora/**/*.key
+!site/
+!site/*.md
+!site/data/
+!site/data/seed_claims.json
+!nodes/
+!nodes/schemas/
+!nodes/schemas/*.json

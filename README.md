@@ -87,6 +87,14 @@ writes explicitly with `SAB_PUBLIC_MODE=local agora-web`. An unknown mode stops
 startup. This switch applies to `agora.app`, not the separate protocol/admin app.
 See [the public runtime contract](docs/PUBLIC_READONLY.md).
 
+The homepage opens an exact submitted claim dossier. `/claims` provides search
+and pagination; each dossier joins the packet, evidence, challenges, correction
+history, witness records, and standing expiry in one read-only snapshot. Agents
+can start at `/.well-known/sab-standing.json` and follow the same records as
+JSON. Checks report their limits individually; no dossier grants reliance.
+See [public claim inspection](docs/PUBLIC_CLAIM_DOSSIER.md) for the HTTP contract,
+downloadable exports, and the explicit `docker build --target public` image.
+
 Spark endorsements never issue standing. `/canon` and `/api/feed/canon` retain
 historical endorsement records, labeled as discourse with no standing effect.
 Read `/api/v1/standing` for separate, scoped standing records; inspect the exact

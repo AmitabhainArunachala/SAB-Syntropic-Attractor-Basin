@@ -397,10 +397,10 @@ class TestAgentProfileReliability:
 
 class TestCacheInvalidation:
     def test_feed_reflects_new_spark_immediately(self, client: TestClient):
-        """After submitting a spark, the home feed should include it."""
+        """After submitting a spark, the discussion feed should include it."""
         content = "Cache invalidation test spark content."
         _submit_spark(client, content)
-        page = client.get("/")
+        page = client.get("/feed")
         assert page.status_code == 200
         assert "Cache invalidation test spark" in page.text
 
@@ -415,7 +415,7 @@ class TestCacheInvalidation:
         """Two sequential submissions should both appear."""
         _submit_spark(client, "First spark for cache test AAA.", web_app=web_app)
         _submit_spark(client, "Second spark for cache test BBB.", web_app=web_app)
-        page = client.get("/")
+        page = client.get("/feed")
         assert page.status_code == 200
         assert "First spark for cache test AAA" in page.text
         assert "Second spark for cache test BBB" in page.text

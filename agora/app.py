@@ -19,9 +19,10 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -106,6 +107,22 @@ SAB_17_DIMENSIONS: List[Dict[str, str]] = [
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+def _evidence_url(value: Any) -> Optional[str]:
+    """Only make ordinary web references clickable; never resolve or fetch them."""
+    if not isinstance(value, str) or any(ord(char) < 32 for char in value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme in {"https", "http"} and parsed.hostname and parsed.username is None:
+            return value
+    except ValueError:
+        pass
+    return None
+
+
+templates.env.filters["evidence_url"] = _evidence_url
 
 _WEB_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _WEB_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -1214,6 +1231,57 @@ async def public_skill_md() -> FileResponse:
     return _public_agent_doc("skill.md")
 
 
+@app.get("/.well-known/sab-standing.json", include_in_schema=False)
+async def public_standing_discovery() -> JSONResponse:
+    """Describe this running inspection surface without claiming deployment or A2A binding."""
+    return JSONResponse(
+        {
+            "profile": "sab-standing",
+            "profile_version": "v1",
+            "runtime_mode": PUBLIC_MODE.value,
+            "public_mutation_enabled": PUBLIC_MODE == PublicMode.LOCAL,
+            "inspection_authentication": "none",
+            "authority_effect": "none",
+            "standing_effect": "none",
+            "links": {
+                "home": "/",
+                "claims": "/claims",
+                "claim_ledger": "/api/v1/claims",
+                "dossier_template": "/api/v1/seeds/{seed_id}/dossier",
+                "human_dossier_template": "/claims/{seed_id}",
+                "standing": "/api/v1/standing",
+                "skill": "/skill.md",
+                "rules": "/rules.md",
+                "openapi": "/openapi.json",
+                "schemas": "/schemas/index.json",
+            },
+            "dossier_schema": "sab.claim_dossier.v1",
+            "verification_limits": [
+                "Digest and hash-link checks are scoped to the returned database snapshot.",
+                "Signatures, evidence contents, operator independence, and permission to rely require further verification.",
+                "This is a SAB HTTP inspection profile, not a bound MCP server or A2A service.",
+            ],
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/schemas/index.json", include_in_schema=False)
+async def public_schema_index() -> Dict[str, Any]:
+    return {"schemas": [
+        {"schema": "sab.seed_packet.v1", "url": "/schemas/sab.seed_packet.v1.schema.json"},
+        {"schema": "sab.claim_dossier.v1", "url": "/schemas/sab.claim_dossier.v1.schema.json"},
+    ]}
+
+
+@app.get("/schemas/sab.claim_dossier.v1.schema.json", include_in_schema=False)
+async def public_claim_dossier_schema() -> FileResponse:
+    path = REPO_ROOT / "nodes" / "schemas" / "sab.claim_dossier.v1.schema.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Claim dossier schema unavailable")
+    return FileResponse(path, media_type="application/schema+json")
+
+
 @app.get("/seed.md", include_in_schema=False)
 async def public_seed_md() -> FileResponse:
     return _public_agent_doc("seed.md")
@@ -1251,6 +1319,7 @@ from .sab_seeding_api import (  # noqa: E402
     observe_standing_status,
     _init_v1_tables,
 )
+from .claim_dossier import list_claims, load_claim_dossier  # noqa: E402
 
 app.include_router(
     create_sab_seeding_router(
@@ -2030,6 +2099,8 @@ def _frontier_card_from_packet_payload(
     return {
         "source": source,
         "seed_id": str(packet.get("seed_id") or packet_path),
+        "dossier_url": "/claims?" + urlencode({"seed_id": str(packet.get("seed_id"))})
+        if source == "store" and packet.get("seed_id") else None,
         "title": str(packet.get("title") or "Untitled seed packet"),
         "status": str(state or packet.get("status") or "unknown"),
         "loop_position": str(packet.get("loop_position") or "spark"),
@@ -2511,6 +2582,71 @@ async def cache_stats() -> Dict[str, Any]:
 @app.get("/", response_class=HTMLResponse)
 async def web_home(
     request: Request,
+    mode: Optional[str] = Query(None, pattern="^(newest|most-challenged|canon|compost)$"),
+    limit: int = Query(30, ge=1, le=100),
+) -> HTMLResponse:
+    # Retain old bookmarked feed filters while giving the main entry point a
+    # concrete claim to inspect. Selection means newest, never highest trust.
+    if mode is not None:
+        return RedirectResponse("/feed?" + urlencode({"mode": mode, "limit": limit}), status_code=307)
+    with _db() as conn:
+        ledger = list_claims(conn, limit=1)
+        dossier = load_claim_dossier(conn, ledger["items"][0]["seed_id"]) if ledger["items"] else None
+    response = _render_template(
+        request, "web_claim_dossier.html",
+        {"dossier": dossier, "path_name": "/", "is_home": True, "session": _read_web_session(request)},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/claims", response_class=HTMLResponse)
+async def web_claims(
+    request: Request,
+    seed_id: Optional[str] = Query(None),
+    q: str = Query("", max_length=200),
+    state: str = Query("", max_length=64),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> HTMLResponse:
+    if seed_id is not None:
+        return await web_claim_dossier(request, seed_id)
+    with _db() as conn:
+        ledger = list_claims(conn, q=q, state=state, limit=limit, offset=offset)
+    page_query = {"q": q, "state": state, "limit": limit}
+    response = _render_template(
+        request, "web_claims.html",
+        {"ledger": ledger, "q": q, "state": state, "path_name": "/claims",
+         "next_url": "/claims?" + urlencode({**page_query, "offset": offset + limit})
+         if offset + limit < ledger["total"] else None,
+         "previous_url": "/claims?" + urlencode({**page_query, "offset": max(0, offset - limit)})
+         if offset else None,
+         "session": _read_web_session(request)},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/claims/{seed_id:path}", response_class=HTMLResponse)
+async def web_claim_dossier(request: Request, seed_id: str) -> HTMLResponse:
+    if not seed_id:
+        return RedirectResponse("/claims", status_code=307)
+    with _db() as conn:
+        dossier = load_claim_dossier(conn, seed_id)
+    response = _render_template(
+        request, "web_claim_dossier.html",
+        {"dossier": dossier, "path_name": "/claims", "is_home": False,
+         "session": _read_web_session(request)},
+    )
+    if dossier is None:
+        response.status_code = 404
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/feed", response_class=HTMLResponse)
+async def web_feed(
+    request: Request,
     mode: str = Query("newest", pattern="^(newest|most-challenged|canon|compost)$"),
     limit: int = Query(30, ge=1, le=100),
 ) -> HTMLResponse:
@@ -2540,7 +2676,7 @@ async def web_home(
             **feed_context,
             "title": "Endorsement archive" if mode == "canon" else "SAB Feed",
             "mode": mode,
-            "path_name": "/",
+            "path_name": "/feed",
             "session": session,
         },
     )

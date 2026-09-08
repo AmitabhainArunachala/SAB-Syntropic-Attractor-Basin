@@ -85,6 +85,10 @@ writes and must be selected only for the intended writable environment.
 
 ## Verification
 
+The public home and `/claims` now expose a shared claim dossier and agent
+discovery path. See [public claim inspection](PUBLIC_CLAIM_DOSSIER.md) for routes,
+export semantics, verification limits, and the public container target.
+
 ```sh
 python -m pytest tests/test_public_readonly.py -q
 ```

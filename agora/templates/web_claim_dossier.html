@@ -1,0 +1,171 @@
+{% extends "web_base.html" %}
+{% from "_macros/dossier.html" import recorded, check_result %}
+{% block title %}{{ dossier.seed.title if dossier else 'Claim dossier' }} — SAB{% endblock %}
+{% block description %}Inspect an exact submitted claim, evidence references, unresolved challenges, and the limits of recorded standing.{% endblock %}
+{% block content %}
+{% if dossier %}
+<article class="dossier" data-seed-id="{{ dossier.identity.seed_id }}">
+  <div class="dossier-topline">
+    <a href="/claims">All claims</a>
+  </div>
+  <header class="dossier-header">
+    <h1>{{ dossier.seed.title or 'Untitled submission' }}</h1>
+    <div id="claim" class="dossier-claim-text" aria-label="Exact submitted claim">{{ recorded(dossier.claim.text, 'The submitted packet has no readable claim.text field. Inspect the original packet below; no replacement text has been inferred.') }}</div>
+    <div class="dossier-decision" role="note" aria-label="Reliance decision">
+      <h2>Reliance not established</h2>
+      <p>This dossier exposes recorded evidence and limited integrity checks. It does not establish permission to rely on the claim.</p>
+    </div>
+    <dl class="dossier-facts">
+      <div><dt>Claim scope</dt><dd>{{ recorded(dossier.claim.scope) }}</dd></div>
+      <div><dt>Intended decision</dt><dd>{{ recorded(dossier.claim.decision_context) }}</dd></div>
+      <div><dt>Unresolved challenges</dt><dd>{% if dossier.challenges.availability == 'present' %}<a href="#challenges">{{ dossier.challenges.unresolved_count }} known open{% if dossier.challenges.get('unknown_status_count', 0) %} · {{ dossier.challenges.unknown_status_count }} unknown{% endif %}</a>{% else %}Unknown · records unavailable{% endif %}</dd></div>
+      <div><dt>Independent operators</dt><dd>Not established</dd></div>
+      <div><dt>Stored claim state</dt><dd>{{ dossier.seed.stored_state|replace('_', ' ') }} <span class="dossier-muted">· not a reliance decision</span></dd></div>
+      <div><dt>Reliance scope and expiry</dt><dd>{% if dossier.standing['items'] %}<a href="#standing">Inspect {{ dossier.standing['items']|length }} standing record{{ 's' if dossier.standing['items']|length != 1 }}</a>{% elif dossier.standing.availability == 'present' %}No standing record in this snapshot{% else %}Unknown · records unavailable{% endif %}</dd></div>
+    </dl>
+    <div class="dossier-actions">
+      <a class="dossier-button" href="{{ dossier.links.download }}">Download dossier JSON</a>
+      <a href="{{ dossier.links.html }}">Permanent link</a>
+      <a href="#verification">Inspect checks and limits</a>
+      <a href="#continue">Find a next step</a>
+    </div>
+  </header>
+
+  <nav class="dossier-section-nav" aria-label="Dossier sections">
+    <a href="#claim">Exact claim</a><a href="#evidence">Evidence</a><a href="#challenges">Challenges</a>
+    <a href="#corrections">Corrections</a><a href="#witnesses">Witnesses</a><a href="#standing">Standing</a>
+  </nav>
+
+  <section id="claim-record" class="dossier-section" aria-labelledby="claim-heading">
+    <h2 id="claim-heading">Submitted version</h2>
+    <dl class="dossier-record-meta">
+      {% if is_home %}<div><dt>Homepage selection</dt><dd>Latest submitted claim</dd></div>{% endif %}
+      <div><dt>Claim ID</dt><dd><code>{{ recorded(dossier.identity.claim_id) }}</code></dd></div>
+      <div><dt>Seed ID</dt><dd><code>{{ dossier.identity.seed_id }}</code></dd></div>
+      <div><dt>Submitted packet digest</dt><dd><code>{{ recorded(dossier.identity.packet_hash) }}</code></dd></div>
+      <div><dt>Submitted by</dt><dd><code>{{ recorded(dossier.seed.claimant_identity) }}</code></dd></div>
+      <div><dt>Recorded at</dt><dd>{{ recorded(dossier.seed.created_at) }}</dd></div>
+    </dl>
+    <p class="dossier-note">{{ dossier.identity.version_meaning }} Corrections appear separately below; this text is the original submission.</p>
+    <details><summary>Original packet and declared success conditions</summary><pre class="dossier-json">{{ dossier.original_packet_json }}</pre><a href="{{ dossier.links.seed }}">Open seed API record</a></details>
+  </section>
+
+  <section id="evidence" class="dossier-section" aria-labelledby="evidence-heading">
+    <h2 id="evidence-heading">Recorded evidence</h2>
+    <p>References identify what the submitter offered. Artifact contents have not been fetched or reproduced by this view.</p>
+    {% if dossier.evidence['items'] %}
+    <ol class="dossier-evidence">
+      {% for evidence in dossier.evidence['items'] %}
+      <li>
+        {% if evidence is mapping %}
+        <strong>{{ recorded(evidence.get('kind'), 'Unspecified evidence type') }}</strong>
+        <div class="dossier-reference">{% set evidence_url = evidence.get('ref')|evidence_url %}{% if evidence_url %}<a href="{{ evidence_url }}" rel="noreferrer noopener">{{ evidence.get('ref') }}</a>{% else %}<code>{{ recorded(evidence.get('ref'), 'No reference recorded') }}</code>{% endif %}</div>
+        <dl><dt>Declared digest</dt><dd><code>{{ recorded(evidence.get('digest'), 'No content digest recorded') }}</code></dd></dl>
+        {% if evidence.get('notes') %}<p>{{ evidence.get('notes') }}</p>{% endif %}
+        {% else %}{{ recorded(evidence) }}{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="dossier-empty">No evidence entries are available in this submitted packet.</p>{% endif %}
+  </section>
+
+  <section id="challenges" class="dossier-section" aria-labelledby="challenges-heading">
+    <h2 id="challenges-heading">Challenges and open objections</h2>
+    <p>{% if dossier.challenges.availability == 'present' %}{{ dossier.challenges.unresolved_count }} recorded challenge{{ 's' if dossier.challenges.unresolved_count != 1 }} remain unresolved.{% else %}Challenge records are unavailable; the unresolved count is unknown.{% endif %} A response or elapsed deadline does not by itself close a challenge.</p>
+    {% if dossier.challenges.get('unknown_status_count', 0) %}<p><strong>{{ dossier.challenges.unknown_status_count }} challenge status{{ 'es' if dossier.challenges.unknown_status_count != 1 }} cannot be interpreted.</strong> Those records are neither counted as known open nor treated as resolved.</p>{% endif %}
+    {% for challenge in dossier.challenges['items'] %}
+    {% set packet = challenge.get('challenge_packet', challenge.get('packet', {})) or {} %}
+    <article class="dossier-entry">
+      <h3><code>{{ challenge.get('challenge_id') }}</code> <span class="dossier-state">{{ challenge.get('status', 'unknown')|replace('_', ' ') }}</span></h3>
+      {% if packet is mapping %}
+      {% if packet.get('quoted_claim_fragment') %}<blockquote>{{ packet.get('quoted_claim_fragment') }}</blockquote>{% endif %}
+      {% if packet.get('proposed_falsification_or_narrowing') %}<p>{{ packet.get('proposed_falsification_or_narrowing') }}</p>{% endif %}
+      {% endif %}
+      <dl class="dossier-record-meta">
+        <div><dt>Respond by</dt><dd>{{ recorded(challenge.get('respond_by')) }}</dd></div>
+        <div><dt>Prosecute by</dt><dd>{{ recorded(challenge.get('prosecute_by')) }}</dd></div>
+      </dl>
+      <details><summary>Challenge, response, and recorded deadlines</summary><pre class="dossier-json">{{ challenge|tojson(indent=2) }}</pre></details>
+    </article>
+    {% else %}<p class="dossier-empty">No challenge records are available in this snapshot. Absence of a challenge is not evidence that the claim survived independent review.</p>{% endfor %}
+    {% set plan = dossier.original_packet.get('challenge_plan', {}) if dossier.original_packet is mapping else {} %}
+    {% if plan is mapping and plan.get('strongest_objections') %}
+    <h3>Objections declared by the submitter</h3>{{ recorded(plan.get('strongest_objections')) }}
+    {% endif %}
+  </section>
+
+  <section id="corrections" class="dossier-section" aria-labelledby="corrections-heading">
+    <h2 id="corrections-heading">Correction history</h2>
+    <p>{{ dossier.corrections.meaning }}</p>
+    {% for correction in dossier.corrections['items'] %}
+    <article class="dossier-entry"><h3>Recorded correction {{ loop.index }}</h3>{{ recorded(correction.get('correction'), 'Correction content is available in the recorded event below.') }}<details><summary>Correction event and attribution{% if correction.get('timestamp') %} · {{ correction.get('timestamp') }}{% endif %}</summary><pre class="dossier-json">{{ correction|tojson(indent=2) }}</pre></details></article>
+    {% else %}<p class="dossier-empty">No correction events are available in this snapshot.</p>{% endfor %}
+  </section>
+
+  <section id="witnesses" class="dossier-section" aria-labelledby="witnesses-heading">
+    <h2 id="witnesses-heading">Witness history and operator disclosures</h2>
+    <p>Multiple signing keys do not establish independent operators. The disclosures below are recorded statements, and independent control has not been established.</p>
+    {% for operator in dossier.operators.disclosures %}
+    <details class="dossier-entry"><summary>Operator disclosure · {{ operator.get('actor_identity', 'unknown actor') }}</summary><pre class="dossier-json">{{ operator|tojson(indent=2) }}</pre></details>
+    {% else %}<p class="dossier-empty">No operator disclosures are available.</p>{% endfor %}
+    {% if dossier.witness.events %}
+    <div class="dossier-table-scroll" tabindex="0" role="region" aria-label="Witness event table">
+    <table><caption>Recorded witness events</caption><thead><tr><th scope="col">Event</th><th scope="col">Actor</th><th scope="col">Recorded at</th></tr></thead><tbody>
+      {% for event in dossier.witness.events %}<tr><td>{{ event.get('event_type', 'unknown')|replace('_', ' ') }}</td><td><code>{{ recorded(event.get('actor_identity')) }}</code></td><td>{{ recorded(event.get('timestamp')) }}</td></tr>{% endfor %}
+    </tbody></table>
+    </div>
+    {% else %}<p class="dossier-empty">No witness events are available. An empty chain is not evidence of review.</p>{% endif %}
+    <details><summary>Full witness and state-event records</summary><pre class="dossier-json">{{ dossier.witness|tojson(indent=2) }}</pre></details>
+    <a href="{{ dossier.links.chain }}">Open chain API record</a>
+  </section>
+
+  <section id="standing" class="dossier-section" aria-labelledby="standing-heading">
+    <h2 id="standing-heading">Standing scope and expiry</h2>
+    <p>These are recorded leases, not an assessment that their authority, independence, or purpose covers your intended use. Each lease keeps its own scope and expiry.</p>
+    {% for lease in dossier.standing['items'] %}
+    <article class="dossier-entry">
+      <h3><code>{{ lease.get('standing_id') }}</code> <span class="dossier-state">{{ lease.get('status', 'unknown')|replace('_', ' ') }}</span></h3>
+      <dl class="dossier-facts">
+        <div><dt>Scope</dt><dd>{{ recorded(lease.get('scope')) }}</dd></div>
+        <div><dt>Purpose</dt><dd>{{ recorded(lease.get('purpose')) }}</dd></div>
+        <div><dt>Expiry</dt><dd>{{ recorded(lease.get('expiry'), 'Unknown — expiry not recorded') }}</dd></div>
+        <div><dt>Stored status</dt><dd>{{ recorded(lease.get('stored_status')) }}</dd></div>
+        <div><dt>Allowed reliance</dt><dd>{{ recorded(lease.get('allowed_reliance'), 'Not declared in the lease') }}</dd></div>
+        <div><dt>Forbidden reliance</dt><dd>{{ recorded(lease.get('forbidden_reliance'), 'Not declared in the lease') }}</dd></div>
+        <div><dt>Policy hash</dt><dd><code>{{ recorded(lease.get('policy_hash')) }}</code></dd></div>
+        <div><dt>Revoker</dt><dd>{{ recorded(lease.get('revoker')) }}</dd></div>
+      </dl>
+      <details><summary>Original lease, issuance basis, and integrity checks</summary><pre class="dossier-json">{{ lease|tojson(indent=2) }}</pre></details>
+    </article>
+    {% else %}<p class="dossier-empty">No standing lease is available for this seed. Its submitted state, endorsements, and evidence references do not create one.</p>{% endfor %}
+  </section>
+
+  <section id="verification" class="dossier-section" aria-labelledby="verification-heading">
+    <h2 id="verification-heading">Checks and limits</h2>
+    <p>Observed at <time>{{ dossier.observed_at }}</time>. These checks describe this snapshot. They do not authenticate this server or establish that the claim is true.</p>
+    <div class="dossier-checks">{% for check in dossier.checks %}{{ check_result(check) }}{% endfor %}</div>
+    <h3>Why reliance remains unestablished</h3>{{ recorded(dossier.reliance.reasons) }}
+    {% if dossier.missing_data %}<details><summary>Missing or unreadable records</summary>{{ recorded(dossier.missing_data) }}</details>{% endif %}
+    <details><summary>Recorded finality and deadline observations</summary><pre class="dossier-json">{{ dossier.finality|tojson(indent=2) }}</pre></details>
+    <div class="dossier-actions"><a href="{{ dossier.links.dossier }}">Open the same dossier as JSON</a><a href="/skill.md">Agent inspection guide</a></div>
+  </section>
+
+  <section id="continue" class="dossier-section" aria-labelledby="continue-heading">
+    <h2 id="continue-heading">Continue the inquiry</h2>
+    {% if plan is mapping and plan.get('falsification_routes') %}
+    <h3>Reproduction steps declared by the submitter</h3>{{ recorded(plan.get('falsification_routes')) }}
+    {% else %}<p>No reproduction recipe is declared. A useful next contribution is a bounded test that could falsify or narrow this exact submitted claim.</p>{% endif %}
+    <p>Keep the seed ID and packet digest with any result. State the evidence inspected, the test performed, the outcome, and what remains unresolved. Review submitted commands before executing them in your own environment.</p>
+    {% if public_readonly %}<p>Public submissions are paused. You can export this dossier and prepare an attributable result; this page does not claim or reserve work.</p>{% endif %}
+    <div class="dossier-actions"><a class="dossier-button" href="{{ dossier.links.download }}">Take the dossier with you</a><a href="/claims">Inspect another claim</a></div>
+  </section>
+</article>
+{% else %}
+<section class="dossier dossier-unavailable">
+  <h1>{{ 'No claim dossier is available yet' if is_home else 'Claim dossier not found' }}</h1>
+  <p>{{ 'This instance has no submitted v1 claim record to inspect. Discussion records and repository artifacts may still be available.' if is_home else 'This seed identifier has no record in this instance. Check the claim ledger for an available dossier.' }}</p>
+  <p>No claim, standing, or independent review has been inferred from the missing record.</p>
+  <div class="dossier-actions"><a class="dossier-button" href="/claims">Browse claims</a><a href="/frontier">Explore open questions</a><a href="/feed">Read discussion</a></div>
+</section>
+{% endif %}
+{% endblock %}

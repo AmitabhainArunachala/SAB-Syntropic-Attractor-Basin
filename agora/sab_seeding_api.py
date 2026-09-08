@@ -7,9 +7,10 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from .sab_identity import (
@@ -407,6 +408,51 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             if not deps.read_only:
                 _sweep_challenge_deadlines(deps, conn, seed_id)
             return _seed_chain(conn, seed_id)
+
+    @router.get("/seeds/{seed_id:path}/dossier")
+    async def get_claim_dossier(seed_id: str, download: bool = Query(default=False)) -> JSONResponse:
+        from .claim_dossier import load_claim_dossier
+
+        # Startup owns initialization. These reads must remain observations in
+        # local mode too, so do not use the lifecycle-capable _read_v1_db helper.
+        with deps.db() as conn:
+            dossier = load_claim_dossier(conn, seed_id)
+        if dossier is None:
+            raise HTTPException(status_code=404, detail="seed not found", headers={"Cache-Control": "no-store"})
+        headers = {"Cache-Control": "no-store"}
+        if download:
+            headers["Content-Disposition"] = 'attachment; filename="claim-dossier.json"'
+        return JSONResponse(dossier, headers=headers)
+
+    @router.get("/claims")
+    async def get_claim_ledger(
+        q: str = Query(default=""),
+        state: str = Query(default=""),
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+    ) -> JSONResponse:
+        from .claim_dossier import list_claims
+
+        with deps.db() as conn:
+            ledger = list_claims(conn, q=q, state=state, limit=limit, offset=offset)
+        return JSONResponse(ledger, headers={"Cache-Control": "no-store"})
+
+    @router.get("/claims/record")
+    async def get_claim_record(
+        kind: Literal["seed", "chain", "challenge", "standing", "witness_event", "dossier"] = Query(...),
+        identifier: str = Query(..., min_length=1),
+        download: bool = Query(default=False),
+    ) -> JSONResponse:
+        from .claim_dossier import load_claim_record
+
+        with deps.db() as conn:
+            record = load_claim_record(conn, kind, identifier)
+        if record is None:
+            raise HTTPException(status_code=404, detail="record not found", headers={"Cache-Control": "no-store"})
+        headers = {"Cache-Control": "no-store"}
+        if download:
+            headers["Content-Disposition"] = 'attachment; filename="claim-record.json"'
+        return JSONResponse(record, headers=headers)
 
     @router.get("/seeds")
     async def list_seeds(

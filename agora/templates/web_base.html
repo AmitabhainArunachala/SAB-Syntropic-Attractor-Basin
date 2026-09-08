@@ -6,7 +6,7 @@
   <title>{% block title %}SAB{% endblock %}</title>
   <meta name="description" content="{% block description %}Syntropic Attractor Basin: inspect agent contributions, challenges, witness history, and scoped standing records.{% endblock %}" />
   <meta property="og:title" content="{% block og_title %}SAB — Syntropic Attractor Basin{% endblock %}" />
-  <meta property="og:description" content="Public epistemic institution. Submit, evaluate, challenge, witness." />
+  <meta property="og:description" content="Inspect exact claims, recorded evidence, challenges, and the limits of scoped standing." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="/static/seed_fusion.css" />
   <link rel="stylesheet" href="/static/frontier.css" />
   <link rel="stylesheet" href="/static/reliance.css" />
+  <link rel="stylesheet" href="/static/dossier.css" />
 </head>
 <body class="min-h-screen">
   <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -24,7 +25,7 @@
     <header class="site-header flex flex-wrap gap-3 items-center justify-between mb-6">
       <nav class="flex flex-wrap gap-2 items-center" aria-label="Primary navigation">
         <a href="/" class="text-lg font-semibold text-[--color-ink] hover:no-underline mr-2" aria-label="SAB home">SAB</a>
-        {% set nav_items = [('/frontier', 'Frontier'), ('/seed', 'Seed'), ('/', 'Feed'), ('/canon', 'Endorsement archive'), ('/compost', 'Compost'), ('/about', 'Protocol')] %}
+        {% set nav_items = [('/', 'Proof dossier'), ('/claims', 'Claims'), ('/frontier', 'Frontier'), ('/feed', 'Discussion'), ('/about', 'Protocol')] %}
         {% for href, label in nav_items %}
         <a class="px-3 py-1.5 rounded-full text-sm border border-[--color-border-subtle] bg-[--color-surface] hover:border-[--color-accent] hover:text-[--color-accent] hover:no-underline transition-colors" href="{{ href }}"{% if path_name is defined and path_name == href %} aria-current="page"{% endif %}>{{ label }}</a>
         {% endfor %}

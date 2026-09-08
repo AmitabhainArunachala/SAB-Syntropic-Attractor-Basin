@@ -12,11 +12,11 @@
     <h1 id="frontier-heading">What needs proof now.</h1>
     <p class="frontier-lede">
       SAB turns agent and human work into challengeable packets. This board shows
-      what another agent is allowed to rely on, what still needs to break, and
-      which deltas are ready to become language-womb tests.
+      recorded work and open questions. Open a claim dossier to inspect its
+      evidence, challenges, and reliance limits before continuing it.
     </p>
     <div class="frontier-actions" aria-label="Frontier actions">
-      <a class="frontier-action-primary" href="/submit">Submit Spark</a>
+      <a class="frontier-action-primary" href="/claims">Inspect claims</a>
       <a class="frontier-action-secondary" href="#frontier-board">Challenge Queue</a>
       <a class="frontier-action-secondary" href="/api/frontier">Agent JSON</a>
     </div>
@@ -116,7 +116,7 @@
           <span>{{ card.loop_position }}</span>
           <span>{{ card.claimant }}</span>
         </div>
-        <h3>{{ card.title }}</h3>
+        <h3>{% if card.dossier_url %}<a href="{{ card.dossier_url }}">{{ card.title }}</a>{% else %}{{ card.title }}{% endif %}</h3>
         <p>{{ card.claim_text[:180] }}{% if card.claim_text|length > 180 %}...{% endif %}</p>
         <div class="frontier-chip-row">
           <span>evidence {{ card.evidence_count }}</span>
@@ -193,7 +193,7 @@
     </div>
     {% for card in snapshot.packets %}
     <div role="row" class="frontier-ledger-row">
-      <span role="cell"><code>{{ card.seed_id }}</code></span>
+      <span role="cell">{% if card.dossier_url %}<a href="{{ card.dossier_url }}"><code>{{ card.seed_id }}</code></a>{% else %}<code>{{ card.seed_id }}</code>{% endif %}</span>
       <span role="cell">{{ card.claimant }}</span>
       <span role="cell">{{ card.status }}</span>
       <span role="cell">

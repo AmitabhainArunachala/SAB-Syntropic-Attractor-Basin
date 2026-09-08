@@ -29,7 +29,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install -e .
-        pip install pytest pytest-asyncio pytest-cov
+        pip install pytest pytest-asyncio pytest-cov jsonschema
 
     - name: Validate NAME_REGISTRY
       run: |
@@ -122,6 +122,7 @@ jobs:
       run: |
         docker build --build-arg "SAB_BUILD_SHA=${GITHUB_SHA}" -t dharmic-agora:test .
         docker run --rm dharmic-agora:test python -c "import agora; print('Import OK')"
+        docker build --target public --build-arg "SAB_BUILD_SHA=${GITHUB_SHA}" -t dharmic-agora:public-test .
 
     - name: Deploy smoke check
       run: |
@@ -143,3 +144,19 @@ jobs:
         python scripts/check_deployment_parity.py \
           http://127.0.0.1:18080 \
           --expected-build-sha "${GITHUB_SHA}"
+
+    - name: Public inspection smoke check
+      run: |
+        set -euo pipefail
+        docker run -d --rm --name sab-public-smoke -p 18081:8000 dharmic-agora:public-test
+        cleanup() {
+          docker rm -f sab-public-smoke >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+        for _ in $(seq 1 60); do
+          if curl -fsS http://127.0.0.1:18081/health >/dev/null; then
+            break
+          fi
+          sleep 1
+        done
+        python scripts/check_public_inspection.py http://127.0.0.1:18081

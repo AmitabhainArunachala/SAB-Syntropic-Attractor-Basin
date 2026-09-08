@@ -1,0 +1,15 @@
+{% macro recorded(value, empty='Not recorded') -%}
+  {% if value is none or value == '' %}<span class="dossier-muted">{{ empty }}</span>
+  {% elif value is mapping %}<pre class="dossier-json">{{ value|tojson(indent=2) }}</pre>
+  {% elif value is iterable and value is not string %}
+    {% if value %}<ul class="dossier-list">{% for item in value %}<li>{{ recorded(item, empty) }}</li>{% endfor %}</ul>
+    {% else %}<span class="dossier-muted">{{ empty }}</span>{% endif %}
+  {% else %}{{ value }}{% endif %}
+{%- endmacro %}
+
+{% macro check_result(check) %}
+<details class="dossier-check">
+  <summary><strong>{{ check.label }}</strong><span class="dossier-check-state" data-check-state="{{ check.state }}">{{ check.state|replace('_', ' ') }}</span></summary>
+  <p>{{ check.detail }}</p>
+</details>
+{% endmacro %}

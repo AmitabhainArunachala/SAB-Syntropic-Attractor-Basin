@@ -1,0 +1,33 @@
+{% extends "web_base.html" %}
+{% from "_macros/dossier.html" import recorded %}
+{% block title %}Claim ledger — SAB{% endblock %}
+{% block content %}
+<section class="dossier claim-ledger" aria-labelledby="ledger-heading">
+  <header class="dossier-header"><h1 id="ledger-heading">Find a claim worth inspecting.</h1><p>Search exact submitted claims. Open a dossier to inspect its evidence, unresolved challenges, and recorded standing. Listed state does not establish reliance.</p></header>
+  <form class="claim-search" action="/claims" method="get" role="search">
+    <div><label for="claim-query">Search claims</label><input type="search" name="q" id="claim-query" value="{{ q }}" maxlength="200" placeholder="Title, claim text, or identifier" /></div>
+    <div><label for="claim-state">Stored state</label><select name="state" id="claim-state">
+      <option value="">All states</option>
+      {% set states = ['pending_seed', 'challenged', 'corrected', 'witnessed', 'standing_active', 'canon_candidate', 'canon', 'compost'] %}
+      {% for value in states %}<option value="{{ value }}"{% if state == value %} selected{% endif %}>{{ value|replace('_', ' ') }}</option>{% endfor %}
+      {% if state and state not in states %}<option value="{{ state }}" selected>{{ state }}</option>{% endif %}
+    </select></div>
+    <button class="dossier-button" type="submit">Search</button>
+    {% if q or state %}<a href="/claims">Clear filters</a>{% endif %}
+  </form>
+  <p role="status">{{ ledger.total }} matching claim{{ 's' if ledger.total != 1 }} · newest submissions first</p>
+  {% for item in ledger['items'] %}
+  <article class="claim-ledger-entry">
+    <h2><a href="{{ item.links.html }}">{{ item.title or 'Untitled submission' }}</a></h2>
+    <div class="claim-ledger-meta"><span>{{ item.stored_state|replace('_', ' ') }}</span><span>{% if item.unresolved_challenge_count is none %}Unresolved challenges: unknown{% else %}{{ item.unresolved_challenge_count }} known open{% if item.get('unknown_challenge_status_count') %} · {{ item.unknown_challenge_status_count }} unknown{% endif %}{% endif %}</span><span>{{ item.created_at }}</span></div>
+    <p>{% if item.text is string and item.text %}{{ item.text[:440] }}{% if item.text|length > 440 %}… <span class="dossier-muted">Preview; full text in dossier.</span>{% endif %}{% else %}No readable claim text is recorded. Inspect the original packet in the dossier.{% endif %}</p>
+    <p class="dossier-note">Scope: {{ recorded(item.scope) }}</p>
+    <a class="dossier-open-link" href="{{ item.links.html }}">Inspect claim and evidence</a>
+  </article>
+  {% else %}
+  <div class="dossier-empty"><h2>{{ 'No claims match these filters' if q or state else 'No submitted claims in this instance' }}</h2><p>{{ 'Try a shorter search or clear the state filter.' if q or state else 'When a v1 claim record is available, its exact packet and reliance dossier will appear here.' }}</p><a href="{{ '/claims' if q or state else '/frontier' }}">{{ 'Clear filters' if q or state else 'Explore open questions' }}</a></div>
+  {% endfor %}
+  {% if previous_url or next_url %}<nav class="dossier-pagination" aria-label="Claim ledger pages">{% if previous_url %}<a href="{{ previous_url }}">Previous claims</a>{% endif %}<span>Showing {{ ledger.offset + 1 }}–{{ ledger.offset + ledger['items']|length }} of {{ ledger.total }}</span>{% if next_url %}<a href="{{ next_url }}">Next claims</a>{% endif %}</nav>{% endif %}
+  <div class="dossier-actions"><a href="/api/v1/claims">Claim ledger JSON</a><a href="/skill.md">Agent guide</a></div>
+</section>
+{% endblock %}
