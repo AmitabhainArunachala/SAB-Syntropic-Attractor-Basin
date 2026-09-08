@@ -12,10 +12,12 @@ from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
 from .public_freshness import PublicationObservation, current_publication_observation
 from .key_control import KeyControlError, KeyControlService
+from .authority import AuthorityError, AuthorityService
 from .sab_identity import (
     AgentIdentityV1,
     HIGH_IMPACT_LEVELS,
@@ -109,6 +111,14 @@ WITNESSING_EVENT_TYPES = {"affirm", "refuse"}
 CHALLENGE_RESPOND_WINDOW = timedelta(days=7)
 CHALLENGE_PROSECUTE_WINDOW = timedelta(days=7)
 
+# Historical actor signatures accepted uppercase and the six ASCII whitespace
+# characters accepted by bytes.fromhex. Index their byte identity without
+# changing old records, so new requests never scan unbounded signature history.
+_SIGNATURE_IDENTITY_SQL = "signature"
+for _ascii_space in (32, 9, 10, 13, 11, 12):
+    _SIGNATURE_IDENTITY_SQL = f"replace({_SIGNATURE_IDENTITY_SQL}, char({_ascii_space}), '')"
+_SIGNATURE_IDENTITY_SQL = f"lower({_SIGNATURE_IDENTITY_SQL})"
+
 
 @dataclass(frozen=True)
 class SabSeedingDeps:
@@ -122,6 +132,7 @@ class SabSeedingDeps:
     publication_configured: bool = True
     read_observation: Optional[Callable[[], Optional[PublicationObservation]]] = None
     key_control: Optional[KeyControlService] = None
+    authority: Optional[AuthorityService] = None
 
 
 def _read_observation(deps: SabSeedingDeps) -> Optional[PublicationObservation]:
@@ -150,12 +161,95 @@ def _read_v1_db(deps: SabSeedingDeps) -> Iterator[sqlite3.Connection]:
     """Public reads observe an approved frozen source, without schema repair."""
     if deps.read_only and not deps.publication_configured:
         raise HTTPException(status_code=503, detail="No public snapshot is configured")
-    if not deps.read_only:
-        deps.init_db()
     with deps.db() as conn:
-        if not deps.read_only:
-            _init_v1_tables(conn)
         yield conn
+
+
+@contextmanager
+def _mutation_v1_db(deps: SabSeedingDeps) -> Iterator[sqlite3.Connection]:
+    """Serialize permission checks and effects; a rejected command rolls back."""
+    if deps.read_only:
+        raise HTTPException(status_code=403, detail="Public inspection does not accept commands")
+    deps.init_db()
+    with deps.db() as conn:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        try:
+            _init_v1_tables(conn)
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+
+
+def _require_authority(deps: SabSeedingDeps) -> AuthorityService:
+    if deps.authority is None or not deps.authority.enabled:
+        raise AuthorityError("authority_unavailable", 428, "Explicit issuer authority policy is required.")
+    return deps.authority
+
+
+def _authorize_actor(
+    deps: SabSeedingDeps, conn: sqlite3.Connection, *, actor: str, action: str,
+    seed_id: str, reference: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    service = _require_authority(deps)
+    subject = _actor_subject(conn, actor)
+    if reference is None:
+        grant = service.authorize_actor(conn, subject_id=subject, action=action, target_seed_id=seed_id)
+    else:
+        grant = service.authorize(conn, reference, subject_id=subject, action=action, target_seed_id=seed_id)
+    return {"lease_id": grant["lease_id"], "lease_sha256": grant["lease_sha256"], "action": action}
+
+
+def _reject_unsigned_authority_selector(payload: Dict[str, Any]) -> None:
+    if {"authority_lease", "authority_lease_id", "authority_lease_sha256", "lease_ref", "lease_id"} & set(payload):
+        raise HTTPException(status_code=400, detail="This command resolves its covering grant; unsigned authority selectors are not accepted")
+
+
+def _require_actor_signer(conn: sqlite3.Connection, actor: str, *payloads: Dict[str, Any]) -> str:
+    actor_subject = _actor_subject(conn, actor)
+    for payload in payloads:
+        signer = _signature_signer(payload)
+        if signer is not None and _actor_subject(conn, signer) != actor_subject:
+            raise HTTPException(status_code=403, detail="signature signer must match the attributed actor")
+    return actor_subject
+
+
+async def _authority_body(request: Request) -> Dict[str, Any]:
+    """Closed commands are validated by the service after bounded strict JSON decoding."""
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+        raise AuthorityError("invalid_content_type", 415, "Authority commands require application/json.")
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > 65536:
+            raise AuthorityError("authority_command_too_large", 413, "Authority commands may contain at most 65536 bytes.")
+        content.extend(chunk)
+
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate member")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError("nonfinite number")
+
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("nonfinite number")
+        return number
+
+    try:
+        payload = json.loads(content, object_pairs_hook=pairs, parse_constant=reject_constant,
+                             parse_float=finite_float)
+        if not isinstance(payload, dict):
+            raise ValueError("object required")
+    except (ValueError, UnicodeError, RecursionError):
+        raise AuthorityError("invalid_json", 400, "Authority commands require a valid JSON object.") from None
+    return payload
 
 
 async def _key_control_body(request: Request) -> Dict[str, Any]:
@@ -210,10 +304,102 @@ async def _key_control_body(request: Request) -> Dict[str, Any]:
     return payload
 
 
+def _authority_request_body(schema: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "requestBody": {
+            "required": True,
+            "description": (
+                "Strict application/json, at most 65536 bytes; duplicate keys and nonfinite numbers are rejected. "
+                "Schema validation checks shape only. The server separately verifies signatures, configured policy, "
+                "current key control, exact resource/action permission, time and immutable grant history."
+            ),
+            "content": {"application/json": {"schema": schema}},
+        }
+    }
+
+
+def _authority_challenge_request_schema() -> Dict[str, Any]:
+    """Describe the extensible legacy packet without falsely claiming closure."""
+    nonempty_string = {"type": "string", "minLength": 1}
+    signature = {
+        "anyOf": [
+            nonempty_string,
+            {
+                "type": "object",
+                "anyOf": [{"required": ["signature"]}, {"required": ["value"]}],
+                "properties": {"signature": nonempty_string, "value": nonempty_string,
+                               "signer": nonempty_string},
+                "additionalProperties": True,
+            },
+        ],
+        "description": "Ed25519 signature over the normal sab_challenge_submit message. A declared signer must resolve to the challenger.",
+    }
+    reference = {
+        "type": "object",
+        "anyOf": [{"required": ["lease_ref"]}, {"required": ["lease_id"]}],
+        "properties": {name: nonempty_string for name in (
+            "lease_ref", "lease_id", "scope", "expires_at", "revoker", "challenge_path"
+        )},
+        "additionalProperties": False,
+        "description": "The challenger's own issued submit_challenge grant; every supplied declaration must match stored metadata.",
+    }
+    packet = {
+        "type": "object",
+        "required": ["challenge_id", "challenger_identity", "created_at", "authority_lease",
+                     "authority_lease_id", "authority_lease_sha256"],
+        "properties": {
+            "schema": {"type": "string", "description": "Canonical packets use sab.challenge_packet.v1."},
+            "challenge_id": nonempty_string,
+            "challenger_identity": nonempty_string,
+            "created_at": nonempty_string,
+            "target_seed_id": {**nonempty_string, "description": "Must match the challenged grant's exact seed; defaults to that seed if omitted."},
+            "target_claim_id": {**nonempty_string, "description": "Must match the existing seed claim; defaults to that claim if omitted."},
+            "authority_lease": reference,
+            "authority_lease_id": {"type": "string", "pattern": "^sab_lease_[A-Za-z0-9_.:-]{3,128}$",
+                                   "description": "The authority basis being challenged; must equal the lease ID in the URL."},
+            "authority_lease_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$",
+                                       "description": "Exact stored digest of the challenged lease and issuer signature."},
+            "signature": signature,
+        },
+        "additionalProperties": True,
+    }
+    variants = [{"allOf": [packet, {"required": ["signature"]}]}]
+    for wrapper in ("challenge_packet", "packet"):
+        variants.append({
+            "type": "object", "required": [wrapper],
+            "properties": {wrapper: packet, "signature": signature},
+            "anyOf": [{"required": ["signature"]}, {"properties": {wrapper: {"required": ["signature"]}}}],
+            "additionalProperties": True,
+        })
+    return {
+        "description": (
+            "An extensible signed v1 challenge packet, directly or inside challenge_packet/packet. "
+            "Additional packet fields remain accepted and are covered by the packet digest in the actor signature. "
+            "This documents the current HTTP contract, not the stricter historical challenge document schema. "
+            "The target seed must already exist. A challenge does not automatically revoke authority."
+        ),
+        "anyOf": variants,
+    }
+
+
 def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
     if deps.read_only and deps.read_observation is None:
         raise ValueError("Public read-only routes require an explicit read_observation dependency")
-    router = APIRouter(prefix="/api/v1", tags=["sab-seeding-v1"])
+    class AuthorityRoute(APIRoute):
+        def get_route_handler(self):
+            handler = super().get_route_handler()
+
+            async def guarded(request: Request):
+                # Reject public writes before FastAPI reads or validates a body.
+                if deps.read_only and request.method not in {"GET", "HEAD", "OPTIONS"}:
+                    return key_control_problem("public_readonly", "Public inspection does not accept commands.", 403)
+                try:
+                    return await handler(request)
+                except AuthorityError as exc:
+                    return key_control_problem(exc.code, exc.detail, exc.status)
+            return guarded
+
+    router = APIRouter(prefix="/api/v1", tags=["sab-seeding-v1"], route_class=AuthorityRoute)
 
     def key_control_problem(code: str, detail: str, status_code: int) -> JSONResponse:
         return JSONResponse(
@@ -366,6 +552,115 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
     async def agent_key_verify(request: Request) -> JSONResponse:
         return await key_control_command(request, "verify")
 
+    def private_authority() -> AuthorityService:
+        if deps.read_only:
+            raise HTTPException(status_code=404, detail="Authority administration is unavailable on public inspection")
+        if deps.authority is None:
+            raise AuthorityError("authority_unavailable", 503, "Authority administration is unavailable.")
+        return deps.authority
+
+    @router.get("/authority/policy")
+    async def authority_policy() -> JSONResponse:
+        service = private_authority()
+        return JSONResponse({"policy": service.policy, "policy_hash": service.policy_hash,
+                             "authority_effect": "none", "standing_effect": "none"},
+                            headers={"Cache-Control": "no-store"})
+
+    @router.post(
+        "/authority/leases", status_code=status.HTTP_201_CREATED,
+        summary="Record an issuer-signed and witnessed authority grant",
+        description="Local policy administration. Exact issuance retry returns 200; a new accepted grant returns 201. Public inspection rejects the command.",
+        responses={200: {"description": "Exact previously accepted issuance; original receipt time retained"}},
+        openapi_extra=_authority_request_body({
+            "type": "object", "required": ["lease", "issuer_signature", "issuance_witness"],
+            "properties": {
+                "lease": {"$ref": "/schemas/sab.authority_lease.v2.schema.json"},
+                "issuer_signature": {"type": "string", "pattern": "^[0-9a-f]{128}$",
+                                     "description": "Ed25519 over all canonical lease fields."},
+                "issuance_witness": {"$ref": "/schemas/sab.authority_issuance_witness.v1.schema.json"},
+            },
+            "additionalProperties": False,
+        }),
+    )
+    async def issue_authority(request: Request) -> JSONResponse:
+        service = private_authority()
+        payload = await _authority_body(request)
+        with _mutation_v1_db(deps) as conn:
+            result = service.issue(conn, payload)
+        return JSONResponse(result, status_code=201 if result["created"] else 200,
+                            headers={"Cache-Control": "no-store"})
+
+    @router.get("/authority/leases/{lease_id}")
+    async def get_authority(lease_id: str) -> JSONResponse:
+        service = private_authority()
+        with _read_v1_db(deps) as conn:
+            result = service.get(conn, lease_id)
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    @router.post(
+        "/authority/leases/{lease_id}/revoke",
+        summary="Retire an issued grant using its designated revoker",
+        description="The signed revocation must identify the exact lease and digest. Retirement does not erase signed history; exact retries retain the original receipt.",
+        openapi_extra=_authority_request_body({
+            "type": "object", "required": ["revocation", "signature"],
+            "properties": {
+                "revocation": {"$ref": "/schemas/sab.authority_revocation.v1.schema.json"},
+                "signature": {"type": "string", "pattern": "^[0-9a-f]{128}$",
+                              "description": "Ed25519 over all canonical revocation fields."},
+            },
+            "additionalProperties": False,
+        }),
+    )
+    async def revoke_authority(lease_id: str, request: Request) -> JSONResponse:
+        service = private_authority()
+        payload = await _authority_body(request)
+        command = payload.get("revocation")
+        if not isinstance(command, dict) or command.get("lease_id") != lease_id:
+            raise AuthorityError("authority_target_mismatch", 400, "Revocation must target the lease in the URL.")
+        with _mutation_v1_db(deps) as conn:
+            result = service.revoke(conn, payload)
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    @router.post(
+        "/authority/leases/{lease_id}/challenges", status_code=status.HTTP_201_CREATED,
+        summary="Challenge an authority basis through its existing seed",
+        description="Requires the challenger's own active submit_challenge grant. The challenged lease ID and digest must appear inside the signed packet. Issuance alone is not a seed or standing; the linked seed must exist.",
+        openapi_extra=_authority_request_body(_authority_challenge_request_schema()),
+    )
+    async def challenge_authority(lease_id: str, request: Request) -> Dict[str, Any]:
+        service = private_authority()
+        payload = await _authority_body(request)
+        packet = _extract_object(payload, "challenge_packet", "packet")
+        with _read_v1_db(deps) as conn:
+            grant = service.get(conn, lease_id)
+            seed_id = grant["lease"]["target_seed_id"]
+            if conn.execute("SELECT 1 FROM sab_seed_packets_v1 WHERE seed_id=?", (seed_id,)).fetchone() is None:
+                raise HTTPException(status_code=409, detail="The linked seed must exist before its authority basis can be challenged")
+            if (packet.get("authority_lease_id") != lease_id
+                    or packet.get("authority_lease_sha256") != grant["lease_sha256"]):
+                raise AuthorityError("authority_challenge_link_mismatch", 400,
+                                     "The signed challenge must identify the exact authority lease and digest.")
+        return await submit_challenge(seed_id, payload)
+
+    @router.get("/authority/leases/{lease_id}/challenges")
+    async def get_authority_challenges(lease_id: str) -> JSONResponse:
+        service = private_authority()
+        with _read_v1_db(deps) as conn:
+            grant = service.get(conn, lease_id)
+            rows = conn.execute(
+                "SELECT * FROM sab_challenge_packets_v1 WHERE target_seed_id=? ORDER BY id DESC LIMIT 500",
+                (grant["lease"]["target_seed_id"],),
+            ).fetchall()
+            items = []
+            for row in rows:
+                packet = json.loads(row["packet_json"])
+                if (packet.get("authority_lease_id") == lease_id
+                        and packet.get("authority_lease_sha256") == grant["lease_sha256"]):
+                    items.append(_serialize_challenge(row))
+            return JSONResponse({"lease_id": lease_id, "lease_sha256": grant["lease_sha256"],
+                                 "items": items, "authority_effect": "none", "standing_effect": "none"},
+                                headers={"Cache-Control": "no-store"})
+
     @router.get("/agents/me/home")
     async def agent_home(subject_id: str = Query(...)) -> Dict[str, Any]:
         with _read_v1_db(deps) as conn:
@@ -401,6 +696,15 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 deps.key_control.binding_status(conn, subject_id)
                 if deps.key_control is not None else {"status": "unproven", "scope": "key_control_only"}
             )
+            authority_grants = []
+            if deps.authority is not None and not deps.read_only:
+                try:
+                    authority_grants = deps.authority.list_for_subject(conn, subject_id)
+                except AuthorityError as exc:
+                    # Old web-only IDs are observable history but cannot be grant subjects.
+                    if exc.code != "invalid_authority_reference":
+                        raise
+            active_grants = [grant for grant in authority_grants if grant["status"] == "active"]
             recorded_identity = conn.execute(
                 "SELECT identity_json FROM sab_agent_identities_v1 WHERE subject_id = ?", (subject_id,)
             ).fetchone()
@@ -413,7 +717,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 "authority_effect": "none",
                 "standing_effect": "none",
                 "agent": dict(agent),
-                "active_authority_leases": [],
+                "active_authority_leases": active_grants,
+                "authority_leases": authority_grants,
                 "pending_seeds": [
                     {
                         "seed_id": str(row["seed_id"]),
@@ -435,7 +740,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 "witness_requests": [],
                 "expiries": [],
                 "recommended_next_action": (
-                    "submit_seed_or_review_challenges" if key_control["status"] == "active"
+                    "submit_seed_or_review_challenges" if key_control["status"] == "active" and active_grants
+                    else "obtain_scoped_authority" if key_control["status"] == "active"
                     else "prove_key_control" if key_control["status"] == "unproven"
                     else "resolve_key_control"
                 ),
@@ -443,31 +749,30 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.post("/seeds", status_code=status.HTTP_201_CREATED)
     async def submit_seed(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _mutation_v1_db(deps) as conn:
             seed_packet = _extract_object(payload, "seed_packet", "packet")
             signature_hex = _extract_signature(seed_packet, payload)
             packet_for_hash = _without_signature(seed_packet)
 
             seed_id = _required_str(packet_for_hash, "seed_id")
             claimant_identity = _claimant_identity(packet_for_hash, seed_packet)
-            authority_lease = _validate_authority_lease(
-                packet_for_hash.get("authority_lease"),
-                expected_subject=claimant_identity,
-                purpose="submit_seed",
-            )
+            authority_reference = _object_value(packet_for_hash, "authority_lease")
+            authority_lease_id = str(authority_reference.get("lease_ref") or authority_reference.get("lease_id") or "")
+            if not authority_lease_id:
+                raise HTTPException(status_code=400, detail="authority_lease lease_ref is required")
             created_at = _required_str(packet_for_hash, "created_at")
-            _ensure_not_expired(authority_lease["expires_at"], "authority lease expired")
+            _require_actor_signer(conn, claimant_identity, seed_packet, payload)
 
             seed_packet_hash = _hash_json(packet_for_hash)
             message = _seed_submit_message(
                 seed_packet_hash=seed_packet_hash,
                 claimant_identity=claimant_identity,
-                authority_lease_id=authority_lease["lease_id"],
+                authority_lease_id=authority_lease_id,
                 created_at=created_at,
             )
             deps.verify_agent_signature(conn, claimant_identity, _canonical_bytes(message), signature_hex)
+            authority = _authorize_actor(deps, conn, actor=claimant_identity, action="submit_seed",
+                                         seed_id=seed_id, reference=authority_reference)
             _record_signature_use(conn, signature_hex, _hash_json(message), claimant_identity)
 
             if conn.execute("SELECT 1 FROM sab_seed_packets_v1 WHERE seed_id = ?", (seed_id,)).fetchone():
@@ -480,7 +785,6 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             if bool(payload.get("create_spark_projection", True)):
                 spark_projection_id = _create_spark_projection(conn, packet_for_hash, claimant_identity, seed_id)
 
-            _upsert_authority_lease(conn, authority_lease, claimant_identity)
             now = deps.utc_now()
             conn.execute(
                 """
@@ -499,7 +803,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                     str(packet_for_hash.get("title") or seed_id),
                     claim_id,
                     claimant_identity,
-                    authority_lease["lease_id"],
+                    authority_lease_id,
                     "pending_seed",
                     _json_dumps(seed_packet),
                     seed_packet_hash,
@@ -518,7 +822,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 to_state="pending_seed",
                 payload={
                     "seed_packet_hash": seed_packet_hash,
-                    "authority_lease_id": authority_lease["lease_id"],
+                    "authority_lease_id": authority_lease_id,
+                    "authority": authority,
                     "spark_projection_id": spark_projection_id,
                 },
                 signature_hex=signature_hex,
@@ -540,8 +845,6 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             _seed_row(conn, seed_id)
-            if not deps.read_only:
-                _sweep_challenge_deadlines(deps, conn, seed_id)
             row = _seed_row(conn, seed_id)
             return _publication_response(_serialize_seed(conn, row), publication, state_basis="stored")
 
@@ -550,8 +853,6 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             _seed_row(conn, seed_id)
-            if not deps.read_only:
-                _sweep_challenge_deadlines(deps, conn, seed_id)
             return _publication_response(_seed_chain(conn, seed_id), publication)
 
     @router.get("/seeds/{seed_id:path}/dossier")
@@ -559,7 +860,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         from .claim_dossier import load_claim_dossier
 
         # Startup owns initialization. These reads must remain observations in
-        # local mode too, so do not use the lifecycle-capable _read_v1_db helper.
+        # local mode too; reads never initialize or advance lifecycle state.
         publication = _read_observation(deps)
         with deps.db() as conn:
             dossier = load_claim_dossier(conn, seed_id, publication_observation=publication)
@@ -644,13 +945,48 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 publication, state_basis="stored",
             )
 
+    @router.post("/seeds/{seed_id}/advance")
+    async def advance_seed_deadlines(seed_id: str, request: Request) -> Dict[str, Any]:
+        _require_authority(deps)
+        payload = await _authority_body(request)
+        if set(payload) != {"actor_identity", "prev_hash", "created_at", "signature"}:
+            raise HTTPException(status_code=400, detail="Advance commands require actor_identity, prev_hash, created_at, and signature only")
+        with _mutation_v1_db(deps) as conn:
+            _seed_row(conn, seed_id)
+            actor = _required_str(payload, "actor_identity")
+            head = _required_str(payload, "prev_hash")
+            created_at = _required_str(payload, "created_at")
+            if head != _latest_witness_hash(conn, seed_id):
+                raise HTTPException(status_code=409, detail="prev_hash is stale")
+            message = {"kind": "sab_seed_advance_deadlines", "seed_id": seed_id,
+                       "actor_identity": actor, "prev_hash": head, "created_at": created_at}
+            signature = _required_str(payload, "signature")
+            deps.verify_agent_signature(conn, actor, _canonical_bytes(message), signature)
+            authority = _authorize_actor(deps, conn, actor=actor, action="advance_deadlines", seed_id=seed_id)
+            _record_signature_use(conn, signature, _hash_json(message), actor)
+            last_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM sab_witness_events_v1").fetchone()[0]
+            _sweep_challenge_deadlines(deps, conn, seed_id, authority=authority)
+            for standing in conn.execute("SELECT * FROM sab_standing_leases_v1 WHERE subject_seed_id=? ORDER BY id", (seed_id,)).fetchall():
+                _expire_standing_if_needed(deps, conn, standing, authority=authority)
+            event = _append_witness_event(
+                conn, event_type="gate_scored", actor_identity=actor, subject_type="seed",
+                subject_id=seed_id, subject_seed_id=seed_id,
+                payload={"kind": "advance_deadlines", "command": message}, signature_hex=signature,
+                timestamp=deps.utc_now(), authority=authority,
+            )
+            generated = [row["event_id"] for row in conn.execute(
+                "SELECT event_id FROM sab_witness_events_v1 WHERE subject_seed_id=? AND id>? ORDER BY id", (seed_id, last_id)
+            ).fetchall()]
+            deps.invalidate_web_cache()
+            return {"seed_id": seed_id, "state": str(_seed_row(conn, seed_id)["state"]),
+                    "generated_witness_ids": generated, "witness_head": event["hash"], "authority": authority,
+                    "state_basis": "stored", "standing_effect": "existing_local_rules_only"}
+
     @router.post("/seeds/{seed_id}/correct")
     async def correct_seed(seed_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        _reject_unsigned_authority_selector(payload)
+        with _mutation_v1_db(deps) as conn:
             row = _seed_row(conn, seed_id)
-            _ensure_seed_lease_active(conn, row)
             actor_identity = _required_str(payload, "actor_identity")
             actor_subject = _actor_subject(conn, actor_identity)
             if str(row["claimant_identity"]) not in {actor_identity, actor_subject}:
@@ -666,7 +1002,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 "correction_sha256": correction_hash,
                 "created_at": created_at,
             }
+            _require_actor_signer(conn, actor_identity, payload)
             deps.verify_agent_signature(conn, actor_identity, _canonical_bytes(message), signature_hex)
+            authority = _authorize_actor(deps, conn, actor=actor_identity, action="correct_seed",
+                                         seed_id=seed_id)
             _record_signature_use(conn, signature_hex, _hash_json(message), actor_identity)
             witness = _record_seed_transition(
                 deps,
@@ -675,7 +1014,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 actor_identity=actor_identity,
                 event_type="correction",
                 to_state="corrected",
-                payload={"correction_hash": correction_hash, "correction": correction_payload},
+                payload={"correction_hash": correction_hash, "correction": correction_payload, "authority": authority},
                 signature_hex=signature_hex,
             )
             deps.invalidate_web_cache()
@@ -683,9 +1022,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.post("/seeds/{seed_id}/withdraw")
     async def withdraw_seed(seed_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        _reject_unsigned_authority_selector(payload)
+        with _mutation_v1_db(deps) as conn:
             row = _seed_row(conn, seed_id)
             actor_identity = _required_str(payload, "actor_identity")
             if actor_identity != str(row["claimant_identity"]):
@@ -700,7 +1038,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 "reason_sha256": _sha256_hex(reason.encode()),
                 "created_at": created_at,
             }
+            _require_actor_signer(conn, actor_identity, payload)
             deps.verify_agent_signature(conn, actor_identity, _canonical_bytes(message), signature_hex)
+            authority = _authorize_actor(deps, conn, actor=actor_identity, action="withdraw_seed",
+                                         seed_id=seed_id)
             _record_signature_use(conn, signature_hex, _hash_json(message), actor_identity)
             witness = _record_seed_transition(
                 deps,
@@ -709,7 +1050,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 actor_identity=actor_identity,
                 event_type="compost",
                 to_state="compost",
-                payload={"reason": reason, "withdrawn": True},
+                payload={"reason": reason, "withdrawn": True, "authority": authority},
                 signature_hex=signature_hex,
             )
             deps.invalidate_web_cache()
@@ -717,16 +1058,11 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.post("/seeds/{seed_id}/challenges", status_code=status.HTTP_201_CREATED)
     async def submit_challenge(seed_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
-            _seed_row(conn, seed_id)
-            _sweep_challenge_deadlines(deps, conn, seed_id)
+        with _mutation_v1_db(deps) as conn:
             seed = _seed_row(conn, seed_id)
             if str(seed["state"]) in FINAL_SEED_STATES:
                 raise HTTPException(status_code=409, detail=f"seed is final in state {seed['state']}")
             _ensure_challenge_window_open(seed)
-            _ensure_seed_lease_active(conn, seed)
             challenge_packet = _extract_object(payload, "challenge_packet", "packet")
             packet_for_hash = _without_signature(challenge_packet)
             if str(packet_for_hash.get("target_seed_id") or seed_id) != seed_id:
@@ -737,14 +1073,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 raise HTTPException(status_code=400, detail="challenge target_claim_id does not match seed claim")
             challenger_identity = _required_str(packet_for_hash, "challenger_identity")
             created_at = _required_str(packet_for_hash, "created_at")
-            challenge_lease = packet_for_hash.get("authority_lease")
-            if challenge_lease is not None:
-                lease = _validate_authority_lease(challenge_lease, expected_subject=challenger_identity, purpose="challenge")
-                _ensure_not_expired(lease["expires_at"], "authority lease expired")
-                _upsert_authority_lease(conn, lease, challenger_identity)
+            challenge_reference = _object_value(packet_for_hash, "authority_lease")
 
             signature_hex = _extract_signature(challenge_packet, payload)
-            signature_signer = _signature_signer(challenge_packet) or challenger_identity
+            signature_signer = _require_actor_signer(conn, challenger_identity, challenge_packet, payload)
             challenge_packet_hash = _hash_json(packet_for_hash)
             message = _challenge_submit_message(
                 target_seed_id=seed_id,
@@ -754,6 +1086,12 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 created_at=created_at,
             )
             deps.verify_agent_signature(conn, signature_signer, _canonical_bytes(message), signature_hex)
+            authority = _authorize_actor(deps, conn, actor=challenger_identity, action="submit_challenge",
+                                         seed_id=seed_id, reference=challenge_reference)
+            _sweep_challenge_deadlines(deps, conn, seed_id, authority=authority)
+            seed = _seed_row(conn, seed_id)
+            if str(seed["state"]) in FINAL_SEED_STATES:
+                raise HTTPException(status_code=409, detail="seed is final")
             _record_signature_use(conn, signature_hex, _hash_json(message), signature_signer)
             if conn.execute(
                 "SELECT 1 FROM sab_challenge_packets_v1 WHERE challenge_id = ?",
@@ -795,7 +1133,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 actor_identity=challenger_identity,
                 event_type="challenge",
                 to_state="challenged",
-                payload={"challenge_id": challenge_id, "challenge_packet_hash": challenge_packet_hash},
+                payload={"challenge_id": challenge_id, "challenge_packet_hash": challenge_packet_hash, "authority": authority},
                 signature_hex=signature_hex,
             )
             challenge = _challenge_row(conn, challenge_id)
@@ -835,9 +1173,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.post("/witness-events", status_code=status.HTTP_201_CREATED)
     async def submit_witness_event(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        _reject_unsigned_authority_selector(payload)
+        with _mutation_v1_db(deps) as conn:
             event_type = _required_str(payload, "event_type")
             if event_type not in WITNESS_EVENT_TYPES:
                 raise HTTPException(status_code=400, detail="unsupported witness event_type")
@@ -853,8 +1190,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             event_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
             signature_hex = _required_str(payload, "signature")
             subject_seed_id = _subject_seed_id(conn, subject_type, subject_id)
-            if subject_seed_id:
-                _sweep_challenge_deadlines(deps, conn, subject_seed_id)
+            if subject_seed_id is None:
+                raise HTTPException(status_code=400, detail="Witness events require a specific existing seed, challenge, or standing subject")
             expected_prev_hash = _latest_witness_hash(conn, subject_seed_id or f"{subject_type}:{subject_id}")
             supplied_prev_hash = str(payload.get("prev_hash") or expected_prev_hash)
             if supplied_prev_hash != expected_prev_hash:
@@ -872,7 +1209,13 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 prev_hash=expected_prev_hash,
                 created_at=created_at,
             )
+            _require_actor_signer(conn, actor_identity, payload)
             deps.verify_agent_signature(conn, actor_identity, _canonical_bytes(message), signature_hex)
+            action = {"response": "respond_challenge", "correction": "correct_seed"}.get(event_type, "submit_witness_event")
+            if event_type in {"response", "correction"} and seed is not None:
+                if _actor_subject(conn, actor_identity) != _actor_subject(conn, str(seed["claimant_identity"])):
+                    raise HTTPException(status_code=403, detail="Only the claimant may record a response or correction effect")
+            authority = _authorize_actor(deps, conn, actor=actor_identity, action=action, seed_id=subject_seed_id)
             _record_signature_use(conn, signature_hex, _hash_json(message), actor_identity)
             independence: Optional[Dict[str, Any]] = None
             if seed is not None and event_type in WITNESSING_EVENT_TYPES:
@@ -888,11 +1231,13 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 signature_hex=signature_hex,
                 timestamp=created_at,
                 expected_prev_hash=expected_prev_hash,
+                authority=authority,
             )
             if subject_type == "seed" and subject_seed_id and target_state:
                 transition_payload: Dict[str, Any] = {
                     "witness_event_id": event["event_id"],
                     "payload_hash": payload_hash,
+                    "authority": authority,
                 }
                 if independence is not None:
                     transition_payload["independence"] = independence
@@ -960,30 +1305,25 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 "Standing review requires a signed standing lease and an active reviewer key binding.",
                 428,
             )
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        _reject_unsigned_authority_selector(payload)
+        with _mutation_v1_db(deps) as conn:
             standing_lease = _extract_object(payload, "standing_lease", "lease")
             lease_for_hash = _without_signature(standing_lease)
             standing_id = _required_str(lease_for_hash, "standing_id")
             subject_seed_id = _required_str(lease_for_hash, "subject_seed_id")
             subject_claim_id = _required_str(lease_for_hash, "subject_claim_id")
             _seed_row(conn, subject_seed_id)
-            _sweep_challenge_deadlines(deps, conn, subject_seed_id)
             seed = _seed_row(conn, subject_seed_id)
             if str(seed["claim_id"]) != subject_claim_id:
                 raise HTTPException(status_code=400, detail="standing subject_claim_id does not match seed")
-            if _pending_challenge_count(conn, subject_seed_id) > 0:
-                raise HTTPException(status_code=409, detail="standing review requires resolved challenge path")
-            if _challenge_count(conn, subject_seed_id) < 1:
-                raise HTTPException(status_code=409, detail="standing review requires a challenge")
-            if _seed_witness_count(conn, subject_seed_id) < 1:
-                raise HTTPException(status_code=409, detail="standing review requires a witness event")
             _validate_standing_lease(lease_for_hash)
             _ensure_not_expired(_standing_expiry(lease_for_hash), "standing lease expired")
             reviewer_identity = str(payload.get("reviewer_identity") or lease_for_hash.get("issued_by") or "")
             if not reviewer_identity:
                 raise HTTPException(status_code=400, detail="reviewer_identity is required")
+            if str(lease_for_hash.get("issued_by") or "") != reviewer_identity:
+                raise HTTPException(status_code=403, detail="standing issued_by must match the authenticated reviewer")
+            _require_actor_signer(conn, reviewer_identity, standing_lease, payload)
             created_at = str(lease_for_hash.get("issued_at") or payload.get("created_at") or "")
             if not created_at:
                 raise HTTPException(status_code=400, detail="issued_at is required")
@@ -997,6 +1337,16 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 "created_at": created_at,
             }
             deps.verify_agent_signature(conn, reviewer_identity, _canonical_bytes(message), signature_hex)
+            authority = _authorize_actor(deps, conn, actor=reviewer_identity, action="request_standing_review",
+                                         seed_id=subject_seed_id)
+            _sweep_challenge_deadlines(deps, conn, subject_seed_id, authority=authority)
+            seed = _seed_row(conn, subject_seed_id)
+            if _pending_challenge_count(conn, subject_seed_id) > 0:
+                raise HTTPException(status_code=409, detail="standing review requires resolved challenge path")
+            if _challenge_count(conn, subject_seed_id) < 1:
+                raise HTTPException(status_code=409, detail="standing review requires a challenge")
+            if _seed_witness_count(conn, subject_seed_id) < 1:
+                raise HTTPException(status_code=409, detail="standing review requires a witness event")
             _record_signature_use(conn, signature_hex, _hash_json(message), reviewer_identity)
             if conn.execute(
                 "SELECT 1 FROM sab_standing_leases_v1 WHERE standing_id = ?",
@@ -1041,7 +1391,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 actor_identity=reviewer_identity,
                 event_type="standing_issued",
                 to_status=issued_status,
-                payload={"standing_lease_hash": standing_lease_hash, "issued_under": issued_under},
+                payload={"standing_lease_hash": standing_lease_hash, "issued_under": issued_under, "authority": authority},
                 signature_hex=signature_hex,
             )
             _record_seed_transition(
@@ -1051,7 +1401,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 actor_identity=reviewer_identity,
                 event_type="standing_issued",
                 to_state="standing_active",
-                payload={"standing_id": standing_id, "standing_lease_hash": standing_lease_hash},
+                payload={"standing_id": standing_id, "standing_lease_hash": standing_lease_hash, "authority": authority},
                 signature_hex=signature_hex,
                 precreated_witness=event,
             )
@@ -1064,12 +1414,6 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         with _read_v1_db(deps) as conn:
             row = _standing_row(conn, standing_id)
             observation = _observe_standing(row, publication_observation=publication)
-            if (
-                not deps.read_only
-                and observation["status_basis"] == "expiry_observation"
-                and observation["stored_status"] != "canon"
-            ):
-                return _observe_standing(_expire_standing_if_needed(deps, conn, row))
             return _publication_response(observation, publication)
 
     @router.get("/standing")
@@ -1119,13 +1463,6 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             for row in rows:
                 observation = _observe_standing(row, include_lease=False, observed_at=observed_at,
                                                 publication_observation=publication)
-                if (
-                    not deps.read_only
-                    and observation["status_basis"] == "expiry_observation"
-                    and observation["stored_status"] != "canon"
-                ):
-                    row = _expire_standing_if_needed(deps, conn, row)
-                    observation = _observe_standing(row, include_lease=False, observed_at=observed_at)
                 items.append(observation)
             return _publication_response({"items": items}, publication)
 
@@ -1139,7 +1476,12 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.post("/standing/{standing_id}/revalidate")
     async def revalidate_standing(standing_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        promote_to_canon = bool(payload.get("promote_to_canon") or payload.get("canon"))
+        for flag in ("promote_to_canon", "canon"):
+            if flag in payload and not isinstance(payload[flag], bool):
+                raise HTTPException(status_code=400, detail="Canon promotion flags must be booleans")
+        if "promote_to_canon" in payload and "canon" in payload and payload["promote_to_canon"] != payload["canon"]:
+            raise HTTPException(status_code=400, detail="Canon promotion flags conflict")
+        promote_to_canon = payload.get("promote_to_canon", payload.get("canon", False))
         return _standing_action(
             deps,
             standing_id,
@@ -1162,6 +1504,10 @@ def _init_v1_tables(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         )
         """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sab_signature_identity_v1 "
+        f"ON sab_signature_index_v1 ({_SIGNATURE_IDENTITY_SQL})"
     )
     conn.execute(
         """
@@ -1279,6 +1625,7 @@ def _init_v1_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    _ensure_v1_column(conn, "sab_witness_events_v1", "authority_json", "authority_json TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sab_witness_chain_scope ON sab_witness_events_v1(chain_scope, id ASC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sab_witness_subject ON sab_witness_events_v1(subject_type, subject_id, id ASC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sab_witness_seed ON sab_witness_events_v1(subject_seed_id, id ASC)")
@@ -1621,8 +1968,10 @@ def _challenge_prosecute_by(packet: Dict[str, Any]) -> str:
     return (datetime.now(timezone.utc) + CHALLENGE_PROSECUTE_WINDOW).isoformat()
 
 
-def _sweep_challenge_deadlines(deps: SabSeedingDeps, conn: sqlite3.Connection, seed_id: str) -> None:
-    now = datetime.now(timezone.utc)
+def _sweep_challenge_deadlines(
+    deps: SabSeedingDeps, conn: sqlite3.Connection, seed_id: str, *, authority: Dict[str, Any]
+) -> None:
+    now = deps.key_control.observe_time() if deps.key_control is not None else datetime.now(timezone.utc)
     rows = conn.execute(
         """
         SELECT challenge_id, status, respond_by, prosecute_by
@@ -1671,6 +2020,7 @@ def _sweep_challenge_deadlines(deps: SabSeedingDeps, conn: sqlite3.Connection, s
                     payload={
                         "challenge_id": challenge_id,
                         "adjudication": "sustained_by_default",
+                        "authority": authority,
                         "reason": "claimant did not respond before respond_by",
                         "respond_by": str(deadline_raw),
                     },
@@ -1714,6 +2064,7 @@ def _sweep_challenge_deadlines(deps: SabSeedingDeps, conn: sqlite3.Connection, s
                     payload={
                         "challenge_id": challenge_id,
                         "challenge_status": "lapsed",
+                        "authority": authority,
                         "reason": "challenger did not prosecute before prosecute_by",
                         "prosecute_by": str(deadline_raw),
                     },
@@ -1739,7 +2090,7 @@ def _required_str(payload: Dict[str, Any], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise HTTPException(status_code=400, detail=f"{key} is required")
-    return value.strip()
+    return value if key == "signature" else value.strip()
 
 
 def _object_value(payload: Dict[str, Any], key: str) -> Dict[str, Any]:
@@ -1763,44 +2114,6 @@ def _claimant_identity(packet: Dict[str, Any], signed_packet: Dict[str, Any]) ->
     raise HTTPException(status_code=400, detail="claimant_identity.subject_id is required")
 
 
-def _validate_authority_lease(
-    lease: Any,
-    *,
-    expected_subject: str,
-    purpose: str,
-) -> Dict[str, str]:
-    if not isinstance(lease, dict):
-        raise HTTPException(status_code=400, detail="authority_lease is required")
-    scope = str(lease.get("scope") or "").strip()
-    expires_at = str(lease.get("expires_at") or lease.get("expiry") or "").strip()
-    revoker = str(lease.get("revoker") or "").strip()
-    challenge_path = str(lease.get("challenge_path") or "").strip()
-    lease_id = str(lease.get("lease_ref") or lease.get("lease_id") or "").strip()
-    if not scope:
-        raise HTTPException(status_code=400, detail="authority_lease.scope is required")
-    if not expires_at:
-        raise HTTPException(status_code=400, detail="authority_lease.expires_at is required")
-    if not revoker:
-        raise HTTPException(status_code=400, detail="authority_lease.revoker is required")
-    if not challenge_path:
-        raise HTTPException(status_code=400, detail="authority_lease.challenge_path is required")
-    subject_id = str(lease.get("subject_id") or expected_subject).strip()
-    if subject_id != expected_subject:
-        raise HTTPException(status_code=400, detail="authority_lease subject does not match actor")
-    if not lease_id:
-        lease_id = f"sab_lease_{_hash_json(lease)[:16]}"
-    return {
-        "lease_id": lease_id,
-        "subject_id": subject_id,
-        "purpose": str(lease.get("purpose") or purpose),
-        "scope": scope,
-        "expires_at": expires_at,
-        "revoker": revoker,
-        "challenge_path": challenge_path,
-        "lease_json": _json_dumps(lease),
-    }
-
-
 def _parse_datetime(value: str) -> datetime:
     raw = value.strip()
     if raw.endswith("Z"):
@@ -1817,41 +2130,6 @@ def _parse_datetime(value: str) -> datetime:
 def _ensure_not_expired(value: str, detail: str) -> None:
     if _parse_datetime(value) <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail=detail)
-
-
-def _upsert_authority_lease(conn: sqlite3.Connection, lease: Dict[str, str], subject_id: str) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    conn.execute(
-        """
-        INSERT INTO sab_authority_leases_v1
-            (
-                lease_id, subject_id, purpose, scope, expires_at, revoker,
-                challenge_path, lease_json, status, created_at, updated_at
-            )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
-        ON CONFLICT(lease_id) DO UPDATE SET
-            subject_id = excluded.subject_id,
-            purpose = excluded.purpose,
-            scope = excluded.scope,
-            expires_at = excluded.expires_at,
-            revoker = excluded.revoker,
-            challenge_path = excluded.challenge_path,
-            lease_json = excluded.lease_json,
-            updated_at = excluded.updated_at
-        """,
-        (
-            lease["lease_id"],
-            subject_id,
-            lease["purpose"],
-            lease["scope"],
-            lease["expires_at"],
-            lease["revoker"],
-            lease["challenge_path"],
-            lease["lease_json"],
-            now,
-            now,
-        ),
-    )
 
 
 def _challenge_window_closes_at(packet: Dict[str, Any], created_at: str) -> str:
@@ -1941,20 +2219,27 @@ def _witness_event_message(
 
 
 def _record_signature_use(conn: sqlite3.Connection, signature: str, message_hash: str, actor_identity: str) -> None:
+    try:
+        decoded = bytes.fromhex(signature)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Actor signatures require canonical Ed25519 hex") from None
+    if len(decoded) != 64:
+        raise HTTPException(status_code=400, detail="Actor signatures require canonical Ed25519 hex")
+    canonical_signature = decoded.hex()
     row = conn.execute(
-        "SELECT message_hash FROM sab_signature_index_v1 WHERE signature = ?",
-        (signature,),
+        f"SELECT 1 FROM sab_signature_index_v1 WHERE {_SIGNATURE_IDENTITY_SQL} = ? LIMIT 1",  # nosec B608 - fixed expression, parameterized signature.
+        (canonical_signature,),
     ).fetchone()
     if row is not None:
-        if str(row["message_hash"]) != message_hash:
-            raise HTTPException(status_code=409, detail="signature replayed for different payload")
-        return
+        raise HTTPException(status_code=409, detail="signature already used; actor commands have one effect")
+    if signature != canonical_signature:
+        raise HTTPException(status_code=400, detail="New actor signatures require exactly 128 lowercase hex characters")
     conn.execute(
         """
         INSERT INTO sab_signature_index_v1 (signature, message_hash, actor_identity, created_at)
         VALUES (?, ?, ?, ?)
         """,
-        (signature, message_hash, actor_identity, datetime.now(timezone.utc).isoformat()),
+        (canonical_signature, message_hash, actor_identity, datetime.now(timezone.utc).isoformat()),
     )
 
 
@@ -2026,18 +2311,6 @@ def _standing_row(conn: sqlite3.Connection, standing_id: str) -> sqlite3.Row:
     return row
 
 
-def _ensure_seed_lease_active(conn: sqlite3.Connection, seed: sqlite3.Row) -> None:
-    lease = conn.execute(
-        "SELECT expires_at, status FROM sab_authority_leases_v1 WHERE lease_id = ?",
-        (str(seed["authority_lease_id"]),),
-    ).fetchone()
-    if lease is None:
-        raise HTTPException(status_code=400, detail="authority lease not found")
-    if str(lease["status"]) != "active":
-        raise HTTPException(status_code=400, detail="authority lease is not active")
-    _ensure_not_expired(str(lease["expires_at"]), "authority lease expired")
-
-
 def _latest_witness_hash(conn: sqlite3.Connection, chain_scope: str) -> str:
     row = conn.execute(
         """
@@ -2064,6 +2337,7 @@ def _append_witness_event(
     signature_hex: str,
     timestamp: str,
     expected_prev_hash: Optional[str] = None,
+    authority: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     chain_scope = subject_seed_id or f"{subject_type}:{subject_id}"
     prev_hash = expected_prev_hash if expected_prev_hash is not None else _latest_witness_hash(conn, chain_scope)
@@ -2084,6 +2358,8 @@ def _append_witness_event(
         "signature": signature_hex,
         "prev_hash": prev_hash,
     }
+    if authority is not None:
+        material["authority"] = authority
     event_hash = _hash_json(material)
     conn.execute(
         """
@@ -2091,9 +2367,9 @@ def _append_witness_event(
             (
                 event_id, chain_scope, event_type, actor_identity, subject_type,
                 subject_id, subject_seed_id, timestamp, payload_hash,
-                payload_json, signature, prev_hash, event_hash
+                payload_json, signature, prev_hash, event_hash, authority_json
             )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             event_id,
@@ -2109,6 +2385,7 @@ def _append_witness_event(
             signature_hex,
             prev_hash,
             event_hash,
+            _json_dumps(authority) if authority is not None else None,
         ),
     )
     return {
@@ -2125,6 +2402,7 @@ def _append_witness_event(
         "prev_hash": prev_hash,
         "hash": event_hash,
         "event_hash": event_hash,
+        **({"authority": authority} if authority is not None else {}),
     }
 
 
@@ -2317,7 +2595,9 @@ def _serialize_challenge(row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def _serialize_witness_event(row: sqlite3.Row) -> Dict[str, Any]:
+    authority = json.loads(row["authority_json"]) if "authority_json" in row.keys() and row["authority_json"] else None
     return {
+        **({"authority": authority} if authority is not None else {}),
         "event_id": str(row["event_id"]),
         "event_type": str(row["event_type"]),
         "actor_identity": str(row["actor_identity"]),
@@ -2482,6 +2762,8 @@ def _verify_witness_rows(rows: List[sqlite3.Row]) -> bool:
             "signature": row["signature"],
             "prev_hash": row["prev_hash"],
         }
+        if "authority_json" in row.keys() and row["authority_json"]:
+            material["authority"] = json.loads(row["authority_json"])
         if str(row["prev_hash"]) != expected_prev:
             return False
         if str(row["event_hash"]) != _hash_json(material):
@@ -2532,15 +2814,11 @@ def _resolve_challenge_action(
     challenge_status: str,
     seed_state: str,
 ) -> Dict[str, Any]:
-    deps.init_db()
-    with deps.db() as conn:
-        _init_v1_tables(conn)
+    _reject_unsigned_authority_selector(payload)
+    with _mutation_v1_db(deps) as conn:
         challenge = _challenge_row(conn, challenge_id)
         seed_id = str(challenge["target_seed_id"])
-        _sweep_challenge_deadlines(deps, conn, seed_id)
-        challenge = _challenge_row(conn, challenge_id)
         seed = _seed_row(conn, seed_id)
-        _ensure_seed_lease_active(conn, seed)
         current_status = str(challenge["status"])
         if current_status not in OPEN_CHALLENGE_STATUSES:
             raise HTTPException(status_code=409, detail=f"challenge is already {current_status}")
@@ -2576,7 +2854,7 @@ def _resolve_challenge_action(
             body = payload.get("correction")
         body_payload = body if isinstance(body, dict) else {"value": str(body or "")}
         signature_hex = _required_str(payload, "signature")
-        signature_signer = _signature_signer(payload) or _identity_ref_subject(conn, actor_identity) or actor_identity
+        signature_signer = _require_actor_signer(conn, actor_identity, payload)
         body_hash = _hash_json(body_payload)
         message = {
             "kind": f"sab_challenge_{action}",
@@ -2585,7 +2863,9 @@ def _resolve_challenge_action(
             "payload_sha256": body_hash,
             "created_at": created_at,
         }
-        if not _verify_signature_with_fallback(deps, conn, signature_signer, message, signature_hex):
+        if action != "respond":
+            deps.verify_agent_signature(conn, signature_signer, _canonical_bytes(message), signature_hex)
+        elif not _verify_signature_with_fallback(deps, conn, signature_signer, message, signature_hex):
             legacy_message = _challenge_response_message(
                 challenge_id=challenge_id,
                 responder_identity=actor_identity,
@@ -2593,8 +2873,20 @@ def _resolve_challenge_action(
             )
             deps.verify_agent_signature(conn, signature_signer, _canonical_bytes(legacy_message), signature_hex)
             message = legacy_message
+        authority = _authorize_actor(
+            deps, conn, actor=actor_identity,
+            action="respond_challenge" if action == "respond" else "adjudicate_challenge", seed_id=seed_id,
+        )
+        _sweep_challenge_deadlines(deps, conn, seed_id, authority=authority)
+        challenge = _challenge_row(conn, challenge_id)
+        if str(challenge["status"]) not in OPEN_CHALLENGE_STATUSES:
+            raise HTTPException(status_code=409, detail="challenge deadline requires explicit advancement before further action")
         _record_signature_use(conn, signature_hex, _hash_json(message), signature_signer)
-        prosecute_by = _challenge_prosecute_by(json.loads(str(challenge["packet_json"]))) if action == "respond" else challenge["prosecute_by"]
+        prosecute_by = challenge["prosecute_by"]
+        if action == "respond" and not prosecute_by:
+            if str(challenge["status"]) == "responded":
+                raise HTTPException(status_code=409, detail="Responded challenge is missing its original prosecution deadline")
+            prosecute_by = _challenge_prosecute_by(json.loads(str(challenge["packet_json"])))
         conn.execute(
             """
             UPDATE sab_challenge_packets_v1
@@ -2608,6 +2900,7 @@ def _resolve_challenge_action(
             "action": action,
             "payload_hash": body_hash,
             "payload": body_payload,
+            "authority": authority,
         }
         if adjudication_meta is not None:
             transition_payload["adjudication"] = adjudication_meta
@@ -2648,7 +2941,7 @@ def _pending_challenge_count(conn: sqlite3.Connection, seed_id: str) -> int:
             """
             SELECT COUNT(*) AS c
             FROM sab_challenge_packets_v1
-            WHERE target_seed_id = ? AND status = 'pending'
+            WHERE target_seed_id = ? AND status IN ('pending', 'responded')
             """,
             (seed_id,),
         ).fetchone()["c"]
@@ -2684,11 +2977,13 @@ def _expire_standing_if_needed(
     deps: SabSeedingDeps,
     conn: sqlite3.Connection,
     row: sqlite3.Row,
+    *, authority: Dict[str, Any],
 ) -> sqlite3.Row:
     status_value = str(row["status"])
     if status_value in {"revoked", "expired", "compost", "canon"}:
         return row
-    if _parse_datetime(str(row["expiry"])) > datetime.now(timezone.utc):
+    now = deps.key_control.observe_time() if deps.key_control is not None else datetime.now(timezone.utc)
+    if _parse_datetime(str(row["expiry"])) > now:
         return row
     signature = deps.system_sign(
         {
@@ -2704,7 +2999,7 @@ def _expire_standing_if_needed(
         actor_identity="system",
         event_type="expired",
         to_status="expired",
-        payload={"expiry": str(row["expiry"])},
+        payload={"expiry": str(row["expiry"]), "authority": authority},
         signature_hex=signature,
     )
     seed_row = _seed_row(conn, str(row["subject_seed_id"]))
@@ -2716,7 +3011,7 @@ def _expire_standing_if_needed(
             actor_identity="system",
             event_type="expired",
             to_state="expired",
-            payload={"standing_id": str(row["standing_id"])},
+            payload={"standing_id": str(row["standing_id"]), "authority": authority},
             signature_hex=signature,
             precreated_witness=event,
         )
@@ -2732,10 +3027,9 @@ def _standing_action(
     to_status: str,
     seed_state: str,
 ) -> Dict[str, Any]:
-    deps.init_db()
-    with deps.db() as conn:
-        _init_v1_tables(conn)
-        standing = _expire_standing_if_needed(deps, conn, _standing_row(conn, standing_id))
+    _reject_unsigned_authority_selector(payload)
+    with _mutation_v1_db(deps) as conn:
+        standing = _standing_row(conn, standing_id)
         current_status = str(standing["status"])
         if current_status == "revoked":
             raise HTTPException(status_code=409, detail="standing is revoked")
@@ -2759,9 +3053,22 @@ def _standing_action(
             "payload_sha256": _hash_json(action_payload),
             "created_at": created_at,
         }
+        if action == "revalidate" and to_status == "canon":
+            message["promote_to_canon"] = True
+        _require_actor_signer(conn, actor_identity, payload)
         deps.verify_agent_signature(conn, actor_identity, _canonical_bytes(message), signature_hex)
+        authority = _authorize_actor(
+            deps, conn, actor=actor_identity,
+            action="canonize_standing" if action == "revalidate" and to_status == "canon" else f"{action}_standing",
+            seed_id=str(standing["subject_seed_id"]),
+        )
+        if action == "revalidate" and _pending_challenge_count(conn, str(standing["subject_seed_id"])) > 0:
+            raise HTTPException(status_code=409, detail="Standing revalidation requires a resolved challenge path")
+        standing = _expire_standing_if_needed(deps, conn, standing, authority=authority)
+        if str(standing["status"]) == "expired":
+            raise HTTPException(status_code=409, detail="standing is expired")
         _record_signature_use(conn, signature_hex, _hash_json(message), actor_identity)
-        event_payload: Dict[str, Any] = dict(action_payload)
+        event_payload: Dict[str, Any] = {**action_payload, "authority": authority}
         if action == "revalidate":
             seed = _seed_row(conn, str(standing["subject_seed_id"]))
             issued_under = _independence_gate(conn, seed)
@@ -2799,7 +3106,7 @@ def _standing_action(
             actor_identity=actor_identity,
             event_type=event_type,
             to_state=seed_state,
-            payload={"standing_id": standing_id, **action_payload},
+            payload={"standing_id": standing_id, **action_payload, "authority": authority},
             signature_hex=signature_hex,
             precreated_witness=event,
         )

@@ -343,7 +343,8 @@ def test_payload_digest_is_checked_separately_from_self_consistent_event_hash(co
     _event(conn)
     conn.execute("UPDATE sab_witness_events_v1 SET payload_hash = ?", ("0" * 64,))
     row = dict(conn.execute("SELECT * FROM sab_witness_events_v1").fetchone())
-    material = {key: value for key, value in row.items() if key not in {"id", "event_hash"}}
+    assert row["authority_json"] is None  # Historical witness hash omits absent authority.
+    material = {key: value for key, value in row.items() if key not in {"id", "event_hash", "authority_json"}}
     conn.execute("UPDATE sab_witness_events_v1 SET event_hash = ?", (_hash_json(material),))
     dossier = load_claim_dossier(conn, SEED, observed_at=NOW)
     assert _check(dossier, "event_hashes_and_links")["state"] == "passed"

@@ -111,8 +111,8 @@ def historical_web_identity(module, public_key, display_name):
         return dict(conn.execute("SELECT * FROM web_agents WHERE id=?", (subject_id,)).fetchone())
 
 
-def signed_seed(key, subject_id, seed_id="sab_seed_key_control_http"):
+def signed_seed(key, subject_id, seed_id="sab_seed_key_control_http", *, authority_reference=None):
     # Reuse the existing complete seed contract; registration is independent.
     from test_sab_seeding_api import _seed_packet, _sign_seed
 
-    return _sign_seed(key, _seed_packet(subject_id, seed_id=seed_id), subject_id)
+    return _sign_seed(key, _seed_packet(subject_id, seed_id=seed_id, authority_reference=authority_reference), subject_id)

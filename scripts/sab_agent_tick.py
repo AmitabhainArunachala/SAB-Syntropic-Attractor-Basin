@@ -3,8 +3,8 @@
 
 Runs on a launchd schedule (com.dharma.sab-agent-tick). Each tick:
   1. health-checks the SAB server,
-  2. reconciles lane packet files into the API store (re-signing with local
-     keys where the legacy file signature does not match the API contract),
+  2. verifies an existing issued grant against an explicit local policy pin,
+     then reconciles permitted lane packets using the local signer,
   3. reports every seed's lifecycle state and challenge window,
   4. writes a digest to ~/.dharma/sab_agent/LATEST.md and appends log.jsonl.
 
@@ -17,6 +17,7 @@ Hard policy (AGENT_CONSTITUTION.md + SAB_MASTER_VISION_V1.md §6):
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -149,6 +150,45 @@ def ensure_registered(agent_id: str, sk) -> bool:
     return True
 
 
+def inspect_submission_grant(packet: dict) -> bool:
+    """Verify an existing grant under an explicit pin before loading a signer.
+
+    This observation never grants permission. The server must recheck the grant
+    in the submission transaction; the tick cannot create or change a lease.
+    """
+    from agora.authority import AuthorityError, lease_reference, load_authority_policy
+    from agora.authority_client import AuthorityClientError, inspect_lease
+    from agora.key_control_client import KeyControlClientError
+
+    try:
+        policy = load_authority_policy(
+            os.environ.get("SAB_AUTHORITY_POLICY_PATH"),
+            os.environ.get("SAB_AUTHORITY_POLICY_SHA256"),
+        )
+        if policy is None:
+            return False
+        reference = packet.get("authority_lease")
+        if not isinstance(reference, dict):
+            return False
+        observed = inspect_lease(BASE, reference.get("lease_ref"), policy)
+        lease = observed["lease"]
+        now = datetime.now(timezone.utc)
+        def stamp(value):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return (
+            observed["reported_status"] == "active"
+            and lease["subject_id"] == packet["claimant_identity"]["subject_id"]
+            and lease["target_seed_id"] == packet["seed_id"]
+            and "submit_seed" in lease["allowed_actions"]
+            and reference == lease_reference(observed)
+            and stamp(policy["not_before"]) <= now < stamp(policy["expires_at"])
+            and stamp(lease["issued_at"]) <= now < stamp(lease["expires_at"])
+        )
+    except (AuthorityError, AuthorityClientError, KeyControlClientError,
+            ValueError, TypeError, KeyError, OSError):
+        return False
+
+
 def reconcile_packet(path: Path):
     """Submit a lane seed packet through the API if it is not there yet."""
     packet = json.loads(path.read_text())
@@ -160,6 +200,8 @@ def reconcile_packet(path: Path):
         return {"packet": path.name, "action": "none", "reason": "already in store"}
 
     claimant = (packet.get("claimant_identity") or {}).get("subject_id", "")
+    if not inspect_submission_grant(packet):
+        return {"packet": path.name, "action": "skip", "reason": "existing scoped authority grant required"}
     key_path = find_key(claimant)
     if key_path is None:
         return {"packet": path.name, "action": "skip", "reason": f"no local key for {claimant}"}

@@ -36,6 +36,7 @@ from .sab_identity import AgentIdentityV1
 from .public_runtime import PublicMode, install_public_runtime, public_read_request, read_public_mode
 from .public_snapshot import load_public_snapshot
 from .key_control import KeyControlError, KeyControlService
+from .authority import AuthorityService, load_authority_policy
 from .public_freshness import (
     PublicationFreshnessObserver,
     current_publication_observation,
@@ -43,6 +44,7 @@ from .public_freshness import (
 )
 from .public_resources import (
     PublicResourceError,
+    SCHEMA_SOURCES,
     STATIC_MEDIA_TYPES,
     read_public_resource,
     read_public_static,
@@ -66,6 +68,16 @@ PUBLIC_MODE = read_public_mode()
 KEY_CONTROL = (
     KeyControlService(os.environ.get("SAB_IDENTITY_ORIGIN", "http://127.0.0.1:8000"))
     if PUBLIC_MODE == PublicMode.LOCAL else None
+)
+AUTHORITY = (
+    AuthorityService(
+        load_authority_policy(
+            os.environ.get("SAB_AUTHORITY_POLICY_PATH"),
+            os.environ.get("SAB_AUTHORITY_POLICY_SHA256"),
+        ),
+        KEY_CONTROL,
+    )
+    if KEY_CONTROL is not None else None
 )
 PUBLIC_FRESHNESS_POLICY = read_freshness_policy() if PUBLIC_MODE == PublicMode.PUBLIC_READONLY else None
 PUBLIC_SNAPSHOT = (
@@ -1301,6 +1313,7 @@ PUBLIC_READ_PATHS = (
     r"/publication(?:/manifest)?", r"/\.well-known/sab-standing\.json",
     r"/(?:skill|seed|auth|heartbeat|rules)\.md", r"/openapi\.json", r"/docs(?:/oauth2-redirect)?", r"/redoc",
     r"/schemas/(?:index\.json|sab\.(?:seed_packet|claim_dossier|public_snapshot|public_read_observation)\.v1\.schema\.json)",
+    r"/schemas/sab\.authority_(?:policy\.v1|lease\.v2|issuance_witness\.v1|revocation\.v1)\.schema\.json",
     r"/static/(?:web\.(?:css|js)|favicon\.svg|(?:seed_fusion|frontier|reliance|dossier)\.css)",
     r"/api/v1/claims(?:/record)?", r"/api/v1/seeds(?:/[^/]+(?:/chain)?)?",
     r"/api/v1/seeds/[^\x00]+/dossier", r"/api/v1/challenges/[^/]+",
@@ -1380,10 +1393,8 @@ async def public_standing_discovery() -> JSONResponse:
 @app.get("/schemas/index.json", include_in_schema=False)
 async def public_schema_index() -> Dict[str, Any]:
     return {"schemas": [
-        {"schema": "sab.seed_packet.v1", "url": "/schemas/sab.seed_packet.v1.schema.json"},
-        {"schema": "sab.claim_dossier.v1", "url": "/schemas/sab.claim_dossier.v1.schema.json"},
-        {"schema": "sab.public_snapshot.v1", "url": "/schemas/sab.public_snapshot.v1.schema.json"},
-        {"schema": "sab.public_read_observation.v1", "url": "/schemas/sab.public_read_observation.v1.schema.json"},
+        {"schema": name.removesuffix(".schema.json"), "url": "/schemas/" + name}
+        for name in SCHEMA_SOURCES
     ]}
 
 
@@ -1439,6 +1450,11 @@ async def public_seed_packet_schema() -> Response:
     return _public_document("schemas", "sab.seed_packet.v1.schema.json", "application/schema+json")
 
 
+@app.get("/schemas/{schema_name}", include_in_schema=False)
+async def public_allowlisted_schema(schema_name: str) -> Response:
+    return _public_document("schemas", schema_name, "application/schema+json")
+
+
 from .sab_seeding_api import (  # noqa: E402
     SabSeedingDeps,
     create_sab_seeding_router,
@@ -1460,6 +1476,7 @@ app.include_router(
             publication_configured=PUBLIC_SNAPSHOT.configured if PUBLIC_SNAPSHOT is not None else True,
             read_observation=_public_read_observation if PUBLIC_FRESHNESS is not None else None,
             key_control=KEY_CONTROL,
+            authority=AUTHORITY,
         )
     )
 )

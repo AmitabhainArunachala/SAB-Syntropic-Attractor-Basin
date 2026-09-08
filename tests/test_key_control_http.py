@@ -42,13 +42,27 @@ def local_app(tmp_path, monkeypatch):
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / "system.key"))
     monkeypatch.delenv("SAB_PUBLIC_SNAPSHOT", raising=False)
     monkeypatch.delenv("SAB_PUBLIC_SNAPSHOT_SHA256", raising=False)
-    return _reload_app()
+    from authority_fixtures import provision_authority_policy
+
+    authority = provision_authority_policy(tmp_path, monkeypatch)
+    module = _reload_app()
+    module._test_authority = authority
+    return module
 
 
 @pytest.fixture
 def client(local_app):
     with TestClient(local_app.app) as test_client:
+        test_client.authority = local_app._test_authority
         yield test_client
+
+
+def _issue_submit_grant(client, subject, seed="sab_seed_key_control_http"):
+    """Explicitly enroll policy principals and issue the named submission grant."""
+    if not client.authority.grants:
+        client.authority.enroll(client)
+    client.authority.issue(client, subject, seed, ["submit_seed"])
+    return client.authority.reference(subject, seed)
 
 
 def _state(module):
@@ -71,7 +85,7 @@ def _problem(response, status, code):
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_challenge_is_not_identity_and_only_verified_proof_enables_contribution(client, local_app):
+def test_contribution_requires_verified_key_and_separately_issued_authority(client, local_app):
     from agora.sab_identity import canonical_json_bytes, subject_id_from_public_key
 
     key = SigningKey.generate()
@@ -109,6 +123,16 @@ def test_challenge_is_not_identity_and_only_verified_proof_enables_contribution(
     assert result["authority_effect"] == result["standing_effect"] == "none"
     assert _row_count(local_app, "sab_key_control_challenges_v1") == 0
     assert _row_count(local_app, "sab_key_control_proofs_v1") == 1
+    before = _state(local_app)
+    denied = client.post("/api/v1/seeds", json=packet)
+    assert denied.status_code == 404, denied.text
+    assert denied.json()["code"] == "authority_unknown"
+    assert _state(local_app) == before
+    home = client.get("/api/v1/agents/me/home", params={"subject_id": subject}).json()
+    assert home["active_authority_leases"] == []
+    assert home["recommended_next_action"] == "obtain_scoped_authority"
+    reference = _issue_submit_grant(client, subject)
+    packet = signed_seed(key, subject, authority_reference=reference)
     submitted = client.post("/api/v1/seeds", json=packet)
     assert submitted.status_code == 201, submitted.text
     assert submitted.json()["state"] == "pending_seed"
@@ -117,7 +141,8 @@ def test_challenge_is_not_identity_and_only_verified_proof_enables_contribution(
     assert home["recommended_next_action"] == "submit_seed_or_review_challenges"
     assert home["identity"] == result["identity"]
     assert home["key_control"] == result["binding"]
-    assert home["active_authority_leases"] == []
+    assert len(home["active_authority_leases"]) == 1
+    assert home["active_authority_leases"][0]["lease_id"] == reference["lease_ref"]
     assert home["authority_effect"] == home["standing_effect"] == "none"
 
 
@@ -155,7 +180,8 @@ def test_attacker_cannot_squat_a_fresh_key_through_legacy_registration(
     assert identity["public_key"] == public_key
     assert _row_count(local_app, "web_agents") == 1
     assert _row_count(local_app, "sab_key_control_bindings_v1") == 1
-    response = client.post("/api/v1/seeds", json=signed_seed(owner, identity["subject_id"]))
+    reference = _issue_submit_grant(client, identity["subject_id"])
+    response = client.post("/api/v1/seeds", json=signed_seed(owner, identity["subject_id"], authority_reference=reference))
     assert response.status_code == 201, response.text
 
 
@@ -327,7 +353,8 @@ def test_revocation_rejects_new_writes_and_reenrollment_preserving_signed_histor
     registration = registration_for(key)
     identity = enroll_identity(client, key, registration)
     subject = identity["subject_id"]
-    packet = signed_seed(key, subject, "sab_seed_before_revocation")
+    reference = _issue_submit_grant(client, subject, "sab_seed_before_revocation")
+    packet = signed_seed(key, subject, "sab_seed_before_revocation", authority_reference=reference)
     assert client.post("/api/v1/seeds", json=packet).status_code == 201
     history = client.get("/api/v1/seeds/sab_seed_before_revocation").json()
     pending = issue_control(client, {"action": "register", "registration": registration})
@@ -376,7 +403,8 @@ def test_rotation_requires_both_keys_and_leaves_original_authorship_with_retired
     old_key, new_key = SigningKey.generate(), SigningKey.generate()
     old_identity = enroll_identity(client, old_key)
     old_subject = old_identity["subject_id"]
-    packet = signed_seed(old_key, old_subject, "sab_seed_before_rotation")
+    reference = _issue_submit_grant(client, old_subject, "sab_seed_before_rotation")
+    packet = signed_seed(old_key, old_subject, "sab_seed_before_rotation", authority_reference=reference)
     assert client.post("/api/v1/seeds", json=packet).status_code == 201
     history = client.get("/api/v1/seeds/sab_seed_before_rotation").json()
     challenge = issue_control(
@@ -422,12 +450,13 @@ def test_rotation_requires_both_keys_and_leaves_original_authorship_with_retired
     )
     assert _legacy_signed_contribution(client, old_key, old_subject).status_code == 403
     assert _state(local_app) == transitioned
-    assert (
-        client.post(
-            "/api/v1/seeds", json=signed_seed(new_key, new_subject, "sab_seed_successor_rotation")
-        ).status_code
-        == 201
-    )
+    successor_seed = "sab_seed_successor_rotation"
+    denied = client.post("/api/v1/seeds", json=signed_seed(new_key, new_subject, successor_seed))
+    assert denied.status_code == 404, denied.text
+    assert _state(local_app) == transitioned
+    reference = _issue_submit_grant(client, new_subject, successor_seed)
+    accepted = client.post("/api/v1/seeds", json=signed_seed(new_key, new_subject, successor_seed, authority_reference=reference))
+    assert accepted.status_code == 201, accepted.text
     assert client.get("/api/v1/seeds/sab_seed_before_rotation").json() == history
     assert history["seed_packet"]["signature"]["signer"] == old_subject
     old_home = client.get("/api/v1/agents/me/home", params={"subject_id": old_subject}).json()
@@ -602,7 +631,8 @@ def test_contribution_commits_before_concurrent_retirement_and_future_writes_fai
     identity = enroll_identity(client, key)
     subject = identity["subject_id"]
     revoke = issue_control(client, {"action": "revoke", "subject_id": subject})
-    packet = signed_seed(key, subject, "sab_seed_linearized_before_revoke")
+    reference = _issue_submit_grant(client, subject, "sab_seed_linearized_before_revoke")
+    packet = signed_seed(key, subject, "sab_seed_linearized_before_revoke", authority_reference=reference)
     writer_checked, retirement_entered, release_writer = Event(), Event(), Event()
     original_check = local_app.KEY_CONTROL.require_active_binding
     original_transaction = key_control._transaction
@@ -700,6 +730,7 @@ def test_process_restart_preserves_active_proof_but_invalidates_pending_challeng
 ):
     active_key = SigningKey.generate()
     identity = enroll_identity(client, active_key)
+    reference = _issue_submit_grant(client, identity["subject_id"])
     pending_key = SigningKey.generate()
     pending = issue_control(
         client, {"action": "register", "registration": registration_for(pending_key)}
@@ -714,7 +745,7 @@ def test_process_restart_preserves_active_proof_but_invalidates_pending_challeng
         )
         assert _state(reloaded) == before
         response = restarted_client.post(
-            "/api/v1/seeds", json=signed_seed(active_key, identity["subject_id"])
+            "/api/v1/seeds", json=signed_seed(active_key, identity["subject_id"], authority_reference=reference)
         )
         assert response.status_code == 201, response.text
         home = restarted_client.get(

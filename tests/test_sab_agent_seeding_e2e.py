@@ -196,7 +196,7 @@ def _verify_agent_message(agent: AgentFixture, message: dict[str, Any], signatur
     return hmac.compare_digest(_sign_message(agent.signing_key, message), signature_hex)
 
 
-def _seed_packet(agent: AgentFixture, *, now: datetime | None = None) -> dict[str, Any]:
+def _seed_packet(agent: AgentFixture, *, now: datetime | None = None, authority_reference: dict | None = None) -> dict[str, Any]:
     created_at = now or _utc_now()
     packet: dict[str, Any] = {
         "schema": "sab.seed_packet.v1",
@@ -230,7 +230,7 @@ def _seed_packet(agent: AgentFixture, *, now: datetime | None = None) -> dict[st
             "disclosure": "self-attested lane 6 test agent",
             "concentration_attestation": "self_attested",
         },
-        "authority_lease": {
+        "authority_lease": authority_reference or {
             "lease_ref": "sab_lease_lane6_submit_seed",
             "scope": "Submit one public seed packet for witnessed challenge only.",
             "expires_at": _iso(created_at + timedelta(days=30)),
@@ -289,6 +289,7 @@ def _challenge_packet(
     challenger: AgentFixture,
     *,
     now: datetime | None = None,
+    authority_reference: dict | None = None,
 ) -> dict[str, Any]:
     created_at = now or _utc_now()
     packet: dict[str, Any] = {
@@ -312,6 +313,8 @@ def _challenge_packet(
         "deadline": _iso(created_at + timedelta(days=7)),
         "created_at": _iso(created_at),
     }
+    if authority_reference is not None:
+        packet["authority_lease"] = authority_reference
     challenge_material = copy.deepcopy(packet)
     challenge_hash = _sha256_obj(challenge_material)
     message = {
@@ -477,12 +480,16 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(db_path))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(key_path))
 
+    from authority_fixtures import provision_authority_policy
+    authority = provision_authority_policy(tmp_path, monkeypatch)
     for mod_name in list(sys.modules):
         if mod_name == "agora" or mod_name.startswith("agora."):
             del sys.modules[mod_name]
 
     try:
-        return importlib.import_module("agora.app")
+        module = importlib.import_module("agora.app")
+        module.authority_test_fixture = authority
+        return module
     except ImportError as exc:
         pytest.skip(f"agora.app runtime dependency missing for live API tests: {exc}")
     except RuntimeError as exc:
@@ -494,6 +501,7 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def client(sab_app):
     with TestClient(sab_app.app) as test_client:
+        sab_app.authority_test_fixture.enroll(test_client)
         yield test_client
 
 
@@ -746,7 +754,10 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
     _v1_register_or_xfail(client, agent_a)
     _v1_register_or_xfail(client, agent_b)
 
-    seed = _seed_packet(agent_a)
+    seed_id = "sab_seed_lane6_scope_boundary"
+    client.authority.issue(client, agent_a.subject_id, seed_id, ["submit_seed", "respond_challenge"])
+    client.authority.issue(client, agent_b.subject_id, seed_id, ["submit_challenge"])
+    seed = _seed_packet(agent_a, authority_reference=client.authority.reference(agent_a.subject_id, seed_id))
     seed_response = _post_or_xfail(client, API_CONTRACTS["submit_seed"], "/api/v1/seeds", seed)
     assert seed_response.status_code == API_CONTRACTS["submit_seed"].success_status, seed_response.text
     seed_body = seed_response.json()
@@ -764,7 +775,7 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
     assert chain_body["verified"] is True
     assert [event["event_type"] for event in chain_body["events"][:1]] == ["submit"]
 
-    challenge = _challenge_packet(seed, agent_b)
+    challenge = _challenge_packet(seed, agent_b, authority_reference=client.authority.reference(agent_b.subject_id, seed_id))
     challenge_response = _post_or_xfail(
         client,
         API_CONTRACTS["challenge_seed"],
@@ -810,6 +821,7 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
 
     reviewer = _agent("agent-reviewer")
     _v1_register_or_xfail(client, reviewer)
+    client.authority.issue(client, reviewer.subject_id, seed_id, ["adjudicate_challenge", "submit_witness_event", "request_standing_review"])
     reviewed_at = _iso(_utc_now())
     reason = "The recorded correction addresses the local scope objection."
     resolution = client.post(
@@ -906,7 +918,9 @@ def test_api_v1_seed_submit_adversarial_rejection_contract(
     del case_name
     agent = _agent("agent-a")
     _v1_register_or_xfail(client, agent)
-    packet = _seed_packet(agent)
+    seed_id = "sab_seed_lane6_scope_boundary"
+    client.authority.issue(client, agent.subject_id, seed_id, ["submit_seed"])
+    packet = _seed_packet(agent, authority_reference=client.authority.reference(agent.subject_id, seed_id))
     mutate(packet)
 
     response = _post_or_xfail(client, API_CONTRACTS["submit_seed"], "/api/v1/seeds", packet)

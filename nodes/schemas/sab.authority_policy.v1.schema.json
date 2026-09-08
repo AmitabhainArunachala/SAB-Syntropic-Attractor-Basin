@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.authority_policy.v1.schema.json",
+  "title": "sab.authority_policy.v1",
+  "description": "Closed signing data. Shape validation alone proves no authority. The evaluator verifies exact configured pins, real Ed25519 signatures, key control, action/resource bounds, logical time intervals and immutable history before any permission is usable.",
+  "type": "object",
+  "required": [
+    "schema",
+    "audience",
+    "policy_id",
+    "not_before",
+    "expires_at",
+    "issuers",
+    "witnesses",
+    "revokers"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sab.authority_policy.v1"
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "An exact configured canonical HTTPS origin, or explicit loopback HTTP origin. Evaluator verifies canonical form."
+    },
+    "policy_id": {
+      "type": "string",
+      "pattern": "^sab_[A-Za-z0-9_.:-]{3,150}$"
+    },
+    "not_before": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$"
+    },
+    "issuers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "subject_id",
+          "public_key",
+          "allowed_actions",
+          "allowed_seed_ids",
+          "all_seeds",
+          "max_ttl_seconds",
+          "revoker_ids"
+        ],
+        "properties": {
+          "subject_id": {
+            "type": "string",
+            "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+          },
+          "public_key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "submit_seed",
+                "correct_seed",
+                "withdraw_seed",
+                "submit_challenge",
+                "respond_challenge",
+                "adjudicate_challenge",
+                "submit_witness_event",
+                "request_standing_review",
+                "challenge_standing",
+                "revoke_standing",
+                "revalidate_standing",
+                "canonize_standing",
+                "advance_deadlines",
+                "challenge_authority"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true
+          },
+          "allowed_seed_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^sab_seed_[A-Za-z0-9_.:-]{3,128}$"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "all_seeds": {
+            "type": "boolean"
+          },
+          "max_ttl_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2678400
+          },
+          "revoker_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+            },
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "all_seeds": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "allowed_seed_ids": {
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "allowed_seed_ids": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true
+    },
+    "witnesses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "subject_id",
+          "public_key"
+        ],
+        "properties": {
+          "subject_id": {
+            "type": "string",
+            "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+          },
+          "public_key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true
+    },
+    "revokers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "subject_id",
+          "public_key"
+        ],
+        "properties": {
+          "subject_id": {
+            "type": "string",
+            "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+          },
+          "public_key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

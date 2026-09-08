@@ -51,13 +51,18 @@ def web_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     key_path = tmp_path / ".sab_seeding_system_ed25519.key"
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(db_path))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(key_path))
+    from authority_fixtures import provision_authority_policy
+    authority = provision_authority_policy(tmp_path, monkeypatch)
     _reset_agora_modules()
-    return importlib.import_module("agora.app")
+    module = importlib.import_module("agora.app")
+    module.authority_test_fixture = authority
+    return module
 
 
 @pytest.fixture
 def client(web_app):
     with TestClient(web_app.app) as test_client:
+        web_app.authority_test_fixture.enroll(test_client)
         yield test_client
 
 
@@ -67,7 +72,7 @@ def _register(client: TestClient, sk: SigningKey, name: str) -> str:
     return enroll_identity(client, sk, display_name=name)["subject_id"]
 
 
-def _seed_packet(agent_id: str, *, seed_id: str = "sab_seed_test_001", expires_at: str | None = None) -> Dict[str, Any]:
+def _seed_packet(agent_id: str, *, seed_id: str = "sab_seed_test_001", expires_at: str | None = None, authority_reference: dict | None = None) -> Dict[str, Any]:
     return {
         "schema": "sab.seed_packet.v1",
         "seed_id": seed_id,
@@ -91,7 +96,7 @@ def _seed_packet(agent_id: str, *, seed_id: str = "sab_seed_test_001", expires_a
             "disclosure": "unit test",
             "concentration_attestation": "self_attested",
         },
-        "authority_lease": {
+        "authority_lease": authority_reference or {
             "lease_ref": f"sab_lease_{seed_id}",
             "scope": "submit one public test seed",
             "expires_at": expires_at or _future(),
@@ -146,7 +151,8 @@ def _sign_seed(sk: SigningKey, packet: Dict[str, Any], agent_id: str) -> Dict[st
 
 
 def _submit_seed(client: TestClient, sk: SigningKey, agent_id: str, seed_id: str) -> Dict[str, Any]:
-    packet = _sign_seed(sk, _seed_packet(agent_id, seed_id=seed_id), agent_id)
+    packet = _sign_seed(sk, _seed_packet(agent_id, seed_id=seed_id,
+                        authority_reference=client.authority.reference(agent_id, seed_id)), agent_id)
     res = client.post("/api/v1/seeds", json=packet)
     assert res.status_code == 201, res.text
     return res.json()
@@ -159,6 +165,7 @@ def _challenge_packet(
     seed_id: str,
     claim_id: str,
     challenge_id: str,
+    authority_reference: dict | None = None,
 ) -> Dict[str, Any]:
     packet = {
         "schema": "sab.challenge_packet.v1",
@@ -174,6 +181,8 @@ def _challenge_packet(
         "deadline": _future(3),
         "created_at": _now(),
     }
+    if authority_reference is not None:
+        packet["authority_lease"] = authority_reference
     message = {
         "kind": "sab_challenge_submit",
         "target_seed_id": seed_id,
@@ -225,6 +234,7 @@ def _submit_challenge(
         seed_id=seed_id,
         claim_id=claim_id,
         challenge_id=challenge_id,
+        authority_reference=client.authority.reference(challenger_id, seed_id),
     )
     res = client.post(f"/api/v1/seeds/{seed_id}/challenges", json=packet)
     assert res.status_code == 201, res.text
@@ -312,6 +322,7 @@ def _sign_standing_action(
     reason: str,
     evidence: Dict[str, Any],
     created_at: str,
+    promote_to_canon: bool = False,
 ) -> str:
     message = {
         "kind": f"sab_standing_{action}",
@@ -320,13 +331,16 @@ def _sign_standing_action(
         "payload_sha256": _hash_json({"reason": reason, "evidence": evidence}),
         "created_at": created_at,
     }
+    if promote_to_canon:
+        message["promote_to_canon"] = True
     return sk.sign(_canonical_bytes(message)).signature.hex()
 
 
 def test_seed_submit_fetch_list_chain_and_projection(client: TestClient) -> None:
     sk = SigningKey.generate()
     agent_id = _register(client, sk, "seed-author")
-    packet = _sign_seed(sk, _seed_packet(agent_id), agent_id)
+    client.authority.issue(client, agent_id, "sab_seed_test_001", ["submit_seed"])
+    packet = _sign_seed(sk, _seed_packet(agent_id, authority_reference=client.authority.reference(agent_id, "sab_seed_test_001")), agent_id)
 
     submit = client.post("/api/v1/seeds", json=packet)
 
@@ -376,14 +390,13 @@ def test_seed_submit_rejects_invalid_signature_and_bad_leases(client: TestClient
     assert missing.status_code == 400
     assert "authority_lease" in missing.text
 
-    expired_packet = _sign_seed(
-        sk,
-        _seed_packet(agent_id, seed_id="sab_seed_expired", expires_at=_past()),
-        agent_id,
-    )
+    client.authority.issue(client, agent_id, "sab_seed_expired", ["submit_seed"])
+    reference = client.authority.reference(agent_id, "sab_seed_expired")
+    reference["expires_at"] = _past()
+    expired_packet = _sign_seed(sk, _seed_packet(agent_id, seed_id="sab_seed_expired", authority_reference=reference), agent_id)
     expired = client.post("/api/v1/seeds", json=expired_packet)
-    assert expired.status_code == 400
-    assert "expired" in expired.text
+    assert expired.status_code == 409
+    assert "authority" in expired.text
 
 
 def test_challenge_respond_sustain_reject_and_seed_correct(client: TestClient) -> None:
@@ -393,6 +406,11 @@ def test_challenge_respond_sustain_reject_and_seed_correct(client: TestClient) -
     author = _register(client, author_sk, "challenge-author")
     challenger = _register(client, challenger_sk, "challenge-agent")
     reviewer = _register(client, reviewer_sk, "challenge-reviewer")
+
+    for seed_id in ("sab_seed_respond", "sab_seed_sustain", "sab_seed_reject"):
+        client.authority.issue(client, author, seed_id, ["submit_seed", "respond_challenge", "correct_seed"])
+        client.authority.issue(client, challenger, seed_id, ["submit_challenge"])
+        client.authority.issue(client, reviewer, seed_id, ["adjudicate_challenge"])
 
     _submit_seed(client, author_sk, author, "sab_seed_respond")
     seed = client.get("/api/v1/seeds/sab_seed_respond").json()
@@ -552,6 +570,12 @@ def test_witness_and_standing_surfaces_verify_chain(client: TestClient) -> None:
     challenger = _register(client, challenger_sk, "standing-challenger")
     reviewer = _register(client, reviewer_sk, "standing-reviewer")
 
+    client.authority.issue(client, author, "sab_seed_standing", ["submit_seed"])
+    client.authority.issue(client, challenger, "sab_seed_standing", ["submit_challenge", "challenge_standing"])
+    client.authority.issue(client, reviewer, "sab_seed_standing", [
+        "adjudicate_challenge", "submit_witness_event", "request_standing_review", "canonize_standing",
+        "revalidate_standing", "revoke_standing",
+    ])
     _submit_seed(client, author_sk, author, "sab_seed_standing")
     seed = client.get("/api/v1/seeds/sab_seed_standing").json()
     _submit_challenge(
@@ -645,6 +669,7 @@ def test_witness_and_standing_surfaces_verify_chain(client: TestClient) -> None:
         reason="canon-ready after witnessed challenge",
         evidence={"review": "ok"},
         created_at=created_at,
+        promote_to_canon=True,
     )
     canon_attempt = client.post(
         "/api/v1/standing/sab_standing_test/revalidate",

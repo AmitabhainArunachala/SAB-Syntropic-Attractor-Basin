@@ -21,7 +21,10 @@ def test_unsigned_standing_review_preserves_resolved_seed_and_all_history(
         "subject_id"
     ]
     seed_id, challenge_id = "sab_seed_signed_review_only", "sab_challenge_signed_review_only"
-    submitted = client.post("/api/v1/seeds", json=signed_seed(author_key, author, seed_id))
+    client.authority.enroll(client)
+    client.authority.issue(client, author, seed_id, ["submit_seed", "respond_challenge"])
+    client.authority.issue(client, challenger, seed_id, ["submit_challenge"])
+    submitted = client.post("/api/v1/seeds", json=signed_seed(author_key, author, seed_id, authority_reference=client.authority.reference(author, seed_id)))
     assert submitted.status_code == 201
     seed = client.get(f"/api/v1/seeds/{seed_id}").json()
     _submit_challenge(

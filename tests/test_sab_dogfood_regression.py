@@ -1,9 +1,10 @@
 """Regression lock for the Demonstration Zero dogfood loop (2026-07-05).
 
-Replays the exact API sequence receipted under
+Extends the historical API sequence receipted under
 docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/
 against a temporary database: register x3 -> seed -> challenge -> respond
-(scope narrowing) -> witness affirm -> chain verify -> standing lease review.
+(scope narrowing) -> explicit adjudication -> witness affirm -> chain verify
+-> standing lease review, now under authentic exact seed permissions.
 
 D1 (registration/canonical identity round trip) and D2
 (witness_plan.forbidden_witnesses enforcement) are locked as real regression
@@ -60,15 +61,20 @@ class _Agent:
 def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(tmp_path / "dogfood_regression.db"))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / ".dogfood_system_ed25519.key"))
+    from authority_fixtures import provision_authority_policy
+    authority = provision_authority_policy(tmp_path, monkeypatch)
     for mod_name in list(sys.modules):
         if mod_name == "agora" or mod_name.startswith("agora."):
             del sys.modules[mod_name]
-    return importlib.import_module("agora.app")
+    module = importlib.import_module("agora.app")
+    module.authority_test_fixture = authority
+    return module
 
 
 @pytest.fixture
 def client(sab_app):
     with TestClient(sab_app.app) as test_client:
+        sab_app.authority_test_fixture.enroll(test_client)
         yield test_client
 
 
@@ -109,15 +115,7 @@ def _submit_seed(client: TestClient, claimant: _Agent, seed_id: str, claim_id: s
             "scope": "this repo, this venv, one machine, single operator",
         },
         "claimant_identity": {"subject_id": claimant.subject_id},
-        "authority_lease": {
-            "lease_ref": f"sab_lease_{seed_id}_submit",
-            "subject_id": claimant.subject_id,
-            "purpose": "submit_seed",
-            "scope": "submit one regression seed for witnessed challenge only",
-            "expires_at": _iso(_now() + timedelta(days=14)),
-            "revoker": "operator_dogfood_regression",
-            "challenge_path": f"/api/v1/seeds/{seed_id}/challenges",
-        },
+        "authority_lease": client.authority.reference(claimant.subject_id, seed_id),
         "challenge_plan": {"required": True, "challenge_window": "P7D"},
         "witness_plan": {
             "required_roles": ["challenger", "witness"],
@@ -175,6 +173,9 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
         _register(client, agent, f"dogfood-regression-{label}")
 
     seed_id = "sab_seed_dogfood_regression"
+    client.authority.issue(client, claimant.subject_id, seed_id, ["submit_seed", "respond_challenge"])
+    client.authority.issue(client, challenger.subject_id, seed_id, ["submit_challenge"])
+    client.authority.issue(client, witness.subject_id, seed_id, ["adjudicate_challenge", "submit_witness_event", "request_standing_review"])
     claim_id = "sab_claim_dogfood_regression"
     seed_body = _submit_seed(client, claimant, seed_id, claim_id)
     assert seed_body["state"] == "pending_seed"
@@ -187,6 +188,7 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
         "target_seed_id": seed_id,
         "target_claim_id": claim_id,
         "challenger_identity": challenger.subject_id,
+        "authority_lease": client.authority.reference(challenger.subject_id, seed_id),
         "challenge_type": "scope",
         "challenge_text": (
             "This claim is too broad unless scoped to local repo/test environment and does not "
@@ -235,6 +237,16 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
     assert respond.status_code == 201, respond.text
     assert respond.json()["seed_state"] == "corrected"
 
+    adjudication = {"value": "The scoped correction resolves the challenged breadth in this rehearsal"}
+    reviewed_at = _iso(_now())
+    adjudication_message = {"kind": "sab_challenge_reject", "challenge_id": challenge_id,
+                           "actor_identity": witness.subject_id, "payload_sha256": _sha256_obj(adjudication),
+                           "created_at": reviewed_at}
+    resolved = client.post(f"/api/v1/challenges/{challenge_id}/reject", json={
+        "actor_identity": witness.subject_id, "reason": adjudication, "created_at": reviewed_at,
+        "signature": witness.sign(adjudication_message),
+    })
+    assert resolved.status_code == 201, resolved.text
     chain = client.get(f"/api/v1/seeds/{seed_id}/chain").json()
     witness_body = _witness_event_body(
         witness,
@@ -248,7 +260,7 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
 
     verify = client.get(f"/api/v1/witness/verify?seed_id={seed_id}").json()
     assert verify["verified"] is True
-    assert verify["entry_count"] == 4  # submit, challenge, response, affirm
+    assert verify["entry_count"] == 5  # submit, challenge, response, adjudication, affirm
 
     issued_at = _iso(_now())
     standing_id = "sab_standing_dogfood_regression"
@@ -368,6 +380,7 @@ def test_claimant_self_witness_is_rejected_when_seed_forbids_it(client: TestClie
     claimant = _Agent()
     _register(client, claimant, "dogfood-regression-self-witness")
     seed_id = "sab_seed_dogfood_self_witness"
+    client.authority.issue(client, claimant.subject_id, seed_id, ["submit_seed", "submit_witness_event"])
     _submit_seed(client, claimant, seed_id, "sab_claim_dogfood_self_witness")
 
     chain = client.get(f"/api/v1/seeds/{seed_id}/chain").json()

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.metadata
 import json
@@ -39,6 +39,8 @@ print('SAB_KEY_CONTROL_RUNTIME ' + json.dumps({
     'mode': application.PUBLIC_MODE.value,
     'key_control_available': application.KEY_CONTROL is not None,
     'system_key_loaded': application.SYSTEM_SIGNING_KEY is not None,
+    'authority_service_available': application.AUTHORITY is not None,
+    'authority_policy_loaded': bool(application.AUTHORITY and application.AUTHORITY.enabled),
 }), flush=True)
 uvicorn.run(application.app, fd=int(sys.argv[1]), access_log=False,
             log_level='warning', timeout_keep_alive=1, timeout_graceful_shutdown=3)
@@ -64,6 +66,46 @@ def write_private(path, content):
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(content)
+
+
+def signed_seed(subject, key_file, seed_id, reference):
+    """A genuine complete synthetic seed command signed by its participant."""
+    from agora.key_control_client import load_signing_key
+
+    stamp = datetime.now(timezone.utc)
+    packet = {
+        "schema": "sab.seed_packet.v1", "seed_id": seed_id, "seed_type": "project",
+        "title": "Synthetic installed authority rehearsal", "status": "draft", "loop_position": "spark",
+        "north_star": "deepen_truth", "claim": {
+            "claim_id": "sab_claim_" + seed_id,
+            "text": "This synthetic claim has only the local receipt and challenge scope recorded here.",
+            "claim_type": "semantic", "scope": "Installed synthetic protocol rehearsal",
+            "decision_context": "Verify permission before mutation", "success_conditions": ["Exact signatures and grants verify"],
+            "failure_conditions": ["A denied command changes durable state"],
+        },
+        "claimant_identity": {"subject_id": subject, "identity_ref": "sab_identity_" + subject},
+        "operator_backing": {"operator_ref": "synthetic-rehearsal", "disclosure": "One local synthetic operator",
+                             "concentration_attestation": "self_attested"},
+        "authority_lease": reference,
+        "evidence_bundle": [{"ref": "test:installed-rehearsal", "kind": "test", "digest": "", "notes": "Synthetic"}],
+        "challenge_plan": {"required": True, "challenge_window": "P7D", "strongest_objections": ["Permission bypass"],
+                           "challenge_refs": [], "falsification_routes": ["Verify exact signed local commands"]},
+        "witness_plan": {"required_roles": ["tester"], "minimum_witnesses": 1,
+                         "non_adjacent_required": True, "forbidden_witnesses": []},
+        "build_plan": {"artifact_refs": ["test:installed-wheel"], "production_grade_definition": "Rehearsal only"},
+        "anti_capture_rules": ["No standing from enrollment or permission"],
+        "commons_return": {"mode": "public_receipt", "minimum_return": "Synthetic verification receipt"},
+        "canon_compost_policy": {"canon_conditions": ["Separate verified standing process"],
+                                  "compost_conditions": ["Sustained blocking challenge"],
+                                  "revalidation_due": (stamp + timedelta(days=1)).isoformat()},
+        "privacy_class": "public", "created_at": stamp.isoformat(),
+    }
+    message = {"kind": "sab_seed_submit", "seed_packet_sha256": sha(encoded(packet)), "claimant_identity": subject,
+               "authority_lease_id": reference["lease_ref"], "created_at": packet["created_at"]}
+    packet["signature"] = {"alg": "ed25519", "signer": subject,
+                           "signature": load_signing_key(key_file).sign(encoded(message)).signature.hex(),
+                           "canonicalization": "json-sort-keys-compact-v1"}
+    return packet
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -116,6 +158,8 @@ class Rehearsal:
         self.canary = output / "public-private-must-not-exist"
         self.children = []
         self.participant_hashes = {}
+        self.authority_policy_path = None
+        self.authority_policy_sha256 = None
         for directory in (self.participant, self.server, self.public_cwd):
             directory.mkdir(mode=0o700)
 
@@ -219,6 +263,11 @@ class Rehearsal:
             "SAB_SEED_CLAIMS_PATH": str(root / "claims.json"),
             "SAB_LANGUAGE_WOMB_LANE_DIR": str(root / "lane"),
         }
+        if self.authority_policy_path is not None:
+            environment.update(
+                SAB_AUTHORITY_POLICY_PATH=str(self.authority_policy_path if mode == "local" else self.canary / "policy.json"),
+                SAB_AUTHORITY_POLICY_SHA256=self.authority_policy_sha256 if mode == "local" else "0" * 64,
+            )
         child = self.spawn(
             label,
             [sys.executable, "-I", "-B", "-c", CHILD, str(listener.fileno())],
@@ -353,12 +402,15 @@ class Rehearsal:
                     registrations[label],
                 )
                 require(result["binding"]["status"] == "active", "enrollment_not_active")
-            event = self.witness(origin, identities["old"], keys["old"])
+            seed_id = "sab_seed_key_control_requires_authority"
+            missing_reference = {"lease_ref": "sab_lease_key_control_unissued"}
+            self.http(origin, "/api/v1/seeds", signed_seed(
+                identities["old"], keys["old"], seed_id, missing_reference), expected=428)
             history_path = "/api/v1/witness/chain?" + urlencode(
                 {"subject_type": "claim", "subject_id": CLAIM}
             )
             history = self.http(origin, history_path)
-            require(len(history["entries"]) == 1, "synthetic_history_missing")
+            require(len(history["entries"]) == 0, "unissued_mutation_created_history")
             rotated = self.cli(
                 "rotate-old",
                 "rotate",
@@ -435,9 +487,8 @@ class Rehearsal:
                     expected=1,
                 )
                 require(result.get("http_status") == 403, "retired_key_reactivation_not_refused")
-            self.witness(
-                origin, identities["old"], keys["old"], previous=event["event_hash"], expected=403
-            )
+            self.http(origin, "/api/v1/seeds", signed_seed(
+                identities["old"], keys["old"], seed_id, missing_reference), expected=403)
             require(
                 self.http(origin, history_path) == history, "retirement_changed_original_history"
             )
@@ -467,9 +518,9 @@ class Rehearsal:
             pending_restart_rejected=True,
             consumed_replay_rejected=True,
             retired_key_reactivation_rejected=True,
-            original_witness_history_unchanged=True,
+            unissued_mutations_leave_history_empty=True,
             original_history_sha256=sha(encoded(history)),
-            real_v1_command_before_retirement=True,
+            enrolled_key_without_authority_denied=True,
             retired_key_v1_command_rejected=True,
             authority_effect="none",
             standing_effect="none",

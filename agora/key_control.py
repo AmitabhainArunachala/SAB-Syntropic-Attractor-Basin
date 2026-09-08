@@ -477,6 +477,16 @@ class KeyControlService:
             )
         return self._effective_utc, self._last_monotonic
 
+    def observe_time(self) -> datetime:
+        """Return guarded local UTC without creating a key-control challenge.
+
+        Callers performing a database mutation must acquire their SQLite write
+        transaction before this lock. The observation is local clock evidence,
+        not authenticated UTC and not a permission to act.
+        """
+        with self._lock:
+            return self._now()[0]
+
     @staticmethod
     def _subject(payload: Mapping[str, Any]) -> str:
         value = payload.get("subject_id")

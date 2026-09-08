@@ -117,6 +117,15 @@ signed enrollment nonces, replay protection, self-revocation, and rotation signe
 by both keys. The installed `agora-key-control` client keeps private keys local.
 These bindings grant no authority or standing; public writes remain paused.
 
+Local v1 contributions additionally require an explicitly issued authority
+grant. Configure `SAB_AUTHORITY_POLICY_PATH` and `SAB_AUTHORITY_POLICY_SHA256`,
+enroll the configured issuer and separate witness, then use `agora-authority`
+to sign, witness, issue, inspect, or revoke an exact seed/action grant.
+Permission is checked transactionally against current policy, key bindings,
+expiry, and revocation. GETs preserve stored lifecycle state; a permitted signed
+`/advance` command evaluates deadlines. See [the authority guide](docs/AUTHORITY.md)
+for the complete local workflow and remaining release limits.
+
 Spark endorsements never issue standing. In local mode, `/canon` and `/api/feed/canon` retain
 historical endorsement records, labeled as discourse with no standing effect.
 Read `/api/v1/standing` for separate, scoped standing records; inspect the exact

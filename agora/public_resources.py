@@ -20,6 +20,10 @@ SCHEMA_SOURCES = {
         "sab.claim_dossier.v1.schema.json",
         "sab.public_snapshot.v1.schema.json",
         "sab.public_read_observation.v1.schema.json",
+        "sab.authority_policy.v1.schema.json",
+        "sab.authority_lease.v2.schema.json",
+        "sab.authority_issuance_witness.v1.schema.json",
+        "sab.authority_revocation.v1.schema.json",
     )
 }
 STATIC_MEDIA_TYPES = {

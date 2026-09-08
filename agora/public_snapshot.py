@@ -188,6 +188,29 @@ _DDL = {
     + ")"
     for name, table in TABLES.items()
 }
+# A known, reviewed extension of the witness record. The original column set
+# and DDL remain valid so retained publication pins keep their exact meaning.
+# Presence (including SQL NULL) is part of the whole-record hash; exporting a
+# current event never drops its hash-covered authorization reference.
+_AUTHORITY_WITNESS = _Table(
+    TABLES["sab_witness_events_v1"].key,
+    TABLES["sab_witness_events_v1"].columns + (("authority_json", "TEXT"),),
+)
+_AUTHORITY_WITNESS_DDL = (
+    "CREATE TABLE sab_witness_events_v1 ("
+    + ", ".join(f"{name} {kind}" for name, kind in _AUTHORITY_WITNESS.columns)
+    + ")"
+)
+
+
+def _record_spec(table: str, names) -> _Table:
+    if table in TABLES and set(names) == set(TABLES[table].names):
+        return TABLES[table]
+    if table == "sab_witness_events_v1" and set(names) == set(_AUTHORITY_WITNESS.names):
+        return _AUTHORITY_WITNESS
+    raise PublicSnapshotError(
+        "unsupported_columns", "A whole-record hash requires an exact supported publication column set."
+    )
 
 
 def _canonical(value: Any) -> bytes:
@@ -274,12 +297,7 @@ def _typed(value: Any, declaration: str) -> dict[str, Any]:
 
 def public_record_sha256(table: str, values: dict[str, Any]) -> str:
     """Bind all fixed SQL columns, exact text, storage types and mutable fields."""
-    if table not in TABLES or set(values) != set(TABLES[table].names):
-        raise PublicSnapshotError(
-            "unsupported_columns",
-            "A whole-record hash requires exactly the fixed publication columns.",
-        )
-    columns = TABLES[table].columns
+    columns = _record_spec(table, values).columns
     return _sha(
         _canonical(
             {
@@ -301,6 +319,9 @@ def _select(
     alternate: str | None = None,
 ) -> list[dict[str, Any]]:
     spec = TABLES[table]
+    info = _rows(conn, f"PRAGMA table_xinfo({table})")
+    if table == "sab_witness_events_v1" and "authority_json" in {row["name"] for row in info}:
+        spec = _AUTHORITY_WITNESS
     if column not in spec.names or alternate is not None and alternate not in spec.names:
         raise PublicSnapshotError("internal_column", "Unsupported selection column.")
     found: dict[str, dict[str, Any]] = {}
@@ -326,8 +347,7 @@ def _select(
             batch_keys.add(key)
             found[key] = row
     if found:
-        # Extension columns are unsupported by this policy, even if their values are null.
-        info = _rows(conn, f"PRAGMA table_xinfo({table})")
+        # Unknown extensions remain unsupported even when their values are null.
         if {row["name"] for row in info} != set(spec.names) or any(row["hidden"] for row in info):
             raise PublicSnapshotError(
                 "unclassified_source_columns",
@@ -706,11 +726,13 @@ def _populate_database(conn: sqlite3.Connection, rows: dict[str, list[dict[str, 
     conn.execute("PRAGMA journal_mode=MEMORY")
     conn.execute("PRAGMA user_version=1")
     for table in PUBLIC_TABLES:
-        conn.execute(_DDL[table])
-        spec = TABLES[table]
+        spec = _record_spec(table, rows[table][0]) if rows[table] else TABLES[table]
+        conn.execute(_AUTHORITY_WITNESS_DDL if spec is _AUTHORITY_WITNESS else _DDL[table])
         placeholders = ",".join("?" for _ in spec.names)
         # Destination identifiers are fixed; exact approved values are bound.
         sql = f"INSERT INTO {table} ({', '.join(spec.names)}) VALUES ({placeholders})"  # nosec B608
+        if any(set(row) != set(spec.names) for row in rows[table]):
+            raise PublicSnapshotError("unsupported_columns", "Publication records disagree on their column set.")
         conn.executemany(sql, [tuple(row[name] for name in spec.names) for row in rows[table]])
     conn.commit()
 
@@ -1019,7 +1041,11 @@ def _validate_frozen(conn: sqlite3.Connection, manifest: dict[str, Any]) -> None
         if (
             entry["type"] == "table"
             and entry["name"] in TABLES
-            and entry["sql"] == _DDL[entry["name"]]
+            and (
+                entry["sql"] == _DDL[entry["name"]]
+                or entry["name"] == "sab_witness_events_v1"
+                and entry["sql"] == _AUTHORITY_WITNESS_DDL
+            )
         ):
             tables[entry["name"]] = entry
         elif (
@@ -1044,8 +1070,8 @@ def _validate_frozen(conn: sqlite3.Connection, manifest: dict[str, Any]) -> None
         )
     frozen_rows = {}
     for table in PUBLIC_TABLES:
-        spec = TABLES[table]
         info = _rows(conn, f"PRAGMA table_xinfo({table})")
+        spec = _record_spec(table, [row["name"] for row in info])
         if tuple(row["name"] for row in info) != spec.names or any(row["hidden"] for row in info):
             raise PublicSnapshotError(
                 "database_schema", "The frozen database contains unsupported columns."

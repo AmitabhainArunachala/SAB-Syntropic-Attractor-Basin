@@ -117,12 +117,14 @@ not evidence for v1 key control.
 The unsigned `/api/v1/standing/review` shortcut also returns 428. It cannot
 turn arbitrary witness references into a system-signed promotion or compost
 decision. Review uses the existing signed standing-lease request and an active
-reviewer key. This does not complete the separate issuer/lease authority checks.
+reviewer key. The signed actor also needs a covering issued authority grant; see
+[Local authority grants](AUTHORITY.md).
 
-This addresses enrollment, replay, self-revocation, and key rotation. Complete
-issuer/lease verification, operator independence, invitation controls, durable
-participant browser custody, broad abuse controls, command idempotency, and
-independent beta acceptance remain separate requirements. C4/R1 acceptance is
+This addresses enrollment, replay, self-revocation, and key rotation. A separate authority evaluator now checks configured issuers, immutable signed
+grants, issuance witnesses, exact seed/actions, expiry and revocation for local
+v1 actor mutations. Operator independence, invitation controls, durable
+participant browser custody, broad abuse controls, general command idempotency,
+finality/appeals and independent beta acceptance remain separate requirements. C4/R1 acceptance is
 not established by these checks.
 
 ## Prior art and verification

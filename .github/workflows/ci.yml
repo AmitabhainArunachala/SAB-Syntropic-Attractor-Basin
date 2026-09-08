@@ -119,7 +119,7 @@ jobs:
         python -m pip install build
         python -m build --sdist --wheel --outdir "$RUNNER_TEMP/sab-dist"
         python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/sab-sdist-wheel" "$RUNNER_TEMP/sab-dist/"*.tar.gz
-    - name: Inspect installed artifacts and rehearse public recovery and key control
+    - name: Inspect installed artifacts and rehearse public recovery, key control and authority
       run: |
         set -euo pipefail
         cd "$RUNNER_TEMP"
@@ -140,6 +140,8 @@ jobs:
             --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-recovery-$kind"
           "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_key_control.py" \
             --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-key-control-$kind"
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_authority.py" \
+            --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-authority-$kind"
         done
     - name: Retain synthetic artifact verification receipts
       if: always()
@@ -152,6 +154,8 @@ jobs:
           ${{ runner.temp }}/sab-recovery-*/*.log
           ${{ runner.temp }}/sab-key-control-*/receipt.json
           ${{ runner.temp }}/sab-key-control-*/*.log
+          ${{ runner.temp }}/sab-authority-*/receipt.json
+          ${{ runner.temp }}/sab-authority-*/*.log
 
   lint:
     runs-on: ubuntu-latest

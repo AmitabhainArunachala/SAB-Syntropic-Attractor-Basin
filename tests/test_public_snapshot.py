@@ -785,3 +785,57 @@ def test_nonregular_bundle_member_is_rejected_without_blocking(tmp_path, member)
     )
     assert result.returncode == 2, result.stderr
     assert result.stdout.strip() == "bundle_file"
+
+
+def test_authority_reference_is_reviewed_preserved_and_bound_to_public_chain(source, tmp_path):
+    conn, _ = source
+    reference = {"lease_id": "sab_lease_public_fixture", "lease_sha256": "b" * 64,
+                 "action": "submit_witness_event"}
+    event = _append_witness_event(
+        conn, event_type="gate_scored", actor_identity="agent_witness",
+        subject_type="seed", subject_id=SEED, subject_seed_id=SEED,
+        payload={"observation": "Synthetic history; no current authority asserted"},
+        signature_hex="synthetic-history-signature", timestamp=STAMP, authority=reference,
+    )
+    conn.commit()
+    review = _review(conn)
+    record = next(row for row in review["records"]
+                  if row["table"] == "sab_witness_events_v1" and row["values"]["event_id"] == event["event_id"])
+    assert json.loads(record["values"]["authority_json"]) == reference
+    assert "authority_json" in record["raw_json_review"]
+    missing_review = copy.deepcopy(review)
+    for row in missing_review["records"]:
+        if row["table"] == "sab_witness_events_v1":
+            row["raw_json_review"].pop("authority_json", None)
+    with pytest.raises(ps.PublicSnapshotError):
+        ps.export_public_snapshot(conn, tmp_path / "unreviewed-reference", missing_review)
+    bundle = tmp_path / "reviewed-reference"
+    ps.export_public_snapshot(conn, bundle, review)
+    frozen = ps.load_public_snapshot(bundle, _pin(bundle))
+    from agora.sab_seeding_api import _verify_witness_rows
+    with frozen.connection() as public:
+        rows = public.execute("SELECT * FROM sab_witness_events_v1 ORDER BY id").fetchall()
+        assert _verify_witness_rows(rows) is True
+        published = next(dict(row) for row in rows if row["event_id"] == event["event_id"])
+        assert published["authority_json"] == record["values"]["authority_json"]
+        published["authority_json"] = json.dumps({**reference, "action": "canonize_standing"})
+        altered = [published if row["event_id"] == event["event_id"] else row for row in rows]
+        assert _verify_witness_rows(altered) is False
+        assert "sab_authority_grants_v2" not in {row[0] for row in public.execute("SELECT name FROM sqlite_master")}
+
+
+def test_legacy_public_witness_layout_and_record_hash_remain_loadable(source, tmp_path):
+    conn, _ = source
+    conn.execute("ALTER TABLE sab_witness_events_v1 DROP COLUMN authority_json")
+    conn.commit()
+    record = dict(conn.execute("SELECT * FROM sab_witness_events_v1 ORDER BY id LIMIT 1").fetchone())
+    before = ps.public_record_sha256("sab_witness_events_v1", record)
+    bundle = _bundle(source, tmp_path)
+    frozen = ps.load_public_snapshot(bundle, _pin(bundle))
+    from agora.sab_seeding_api import _verify_witness_rows
+    with frozen.connection() as public:
+        rows = public.execute("SELECT * FROM sab_witness_events_v1 ORDER BY id").fetchall()
+        assert "authority_json" not in rows[0].keys()
+        assert dict(rows[0]) == record
+        assert ps.public_record_sha256("sab_witness_events_v1", dict(rows[0])) == before
+        assert _verify_witness_rows(rows) is True

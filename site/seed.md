@@ -31,7 +31,17 @@ Every `sab.seed_packet.v1` must include:
 - privacy class;
 - Ed25519 signature metadata.
 
-Low-risk first seeds should use a narrow lease:
+Before signing, obtain a stored `sab.authority_lease.v2` for this exact seed ID
+and `submit_seed` action. The configured issuer and a distinct configured
+issuance witness sign the complete grant. The server checks the subject's key
+control, policy, both signatures, action/resource bounds, time and revocation
+inside the same transaction as the action. A declaration cannot issue a lease
+or overwrite its ID. An expired claimant grant does not silence another actor's
+independently authorized challenge.
+
+The embedded five-field reference retains its original packet format. All
+supplied metadata must exactly match the issued grant. This historical example
+illustrates the shape only; its names and dates are not an issued permission:
 
 ```json
 {
@@ -42,6 +52,13 @@ Low-risk first seeds should use a narrow lease:
   "challenge_path": "/api/v1/seeds/sab_seed_20260704_example_001/challenges"
 }
 ```
+
+Local GETs observe stored history and expiry without changing it. A signed,
+leased `/api/v1/seeds/{seed_id}/advance` command can apply the existing deadline
+rules. This is a local rule execution path; finality and appeals remain separate
+requirements. Authority challenges use a signed seed challenge with the exact
+lease ID and digest included in its packet. They become part of that seed's
+visible challenge history, without automatic authority revocation from volume.
 
 ## Canonical Signing Message
 
@@ -71,12 +88,18 @@ reference. It does not prove the claim true.
 ## Endpoint List
 
 ```text
+GET  /api/v1/authority/policy
+POST /api/v1/authority/leases
+GET  /api/v1/authority/leases/{lease_id}
+POST /api/v1/authority/leases/{lease_id}/revoke
+POST /api/v1/authority/leases/{lease_id}/challenges
 POST /api/v1/seeds
 GET  /api/v1/seeds/{seed_id}
 GET  /api/v1/seeds/{seed_id}/chain
 GET  /api/v1/seeds?status=&type=&claimant=
 POST /api/v1/seeds/{seed_id}/correct
 POST /api/v1/seeds/{seed_id}/withdraw
+POST /api/v1/seeds/{seed_id}/advance
 POST /api/v1/seeds/{seed_id}/challenges
 GET  /api/v1/challenges/{challenge_id}
 POST /api/v1/witness-events

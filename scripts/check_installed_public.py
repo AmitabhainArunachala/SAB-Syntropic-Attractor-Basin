@@ -18,6 +18,14 @@ import sys
 import zipfile
 
 
+PUBLIC_SCHEMA_NAMES = (
+    "sab.seed_packet.v1.schema.json", "sab.claim_dossier.v1.schema.json",
+    "sab.public_snapshot.v1.schema.json", "sab.public_read_observation.v1.schema.json",
+    "sab.authority_policy.v1.schema.json", "sab.authority_lease.v2.schema.json",
+    "sab.authority_issuance_witness.v1.schema.json", "sab.authority_revocation.v1.schema.json",
+)
+
+
 def digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -67,13 +75,8 @@ def main() -> None:
             for name in ("skill", "seed", "auth", "heartbeat", "rules")
         ),
         *(
-            f"agora/_public_resources/schemas/sab.{name}.v1.schema.json"
-            for name in (
-                "seed_packet",
-                "claim_dossier",
-                "public_snapshot",
-                "public_read_observation",
-            )
+            f"agora/_public_resources/schemas/{name}"
+            for name in PUBLIC_SCHEMA_NAMES
         ),
         *(
             f"agora/static/{name}"
@@ -127,16 +130,8 @@ def main() -> None:
     }
     resources.update(
         {
-            f"/schemas/sab.{name}.v1.schema.json": source
-            / "nodes"
-            / "schemas"
-            / f"sab.{name}.v1.schema.json"
-            for name in (
-                "seed_packet",
-                "claim_dossier",
-                "public_snapshot",
-                "public_read_observation",
-            )
+            f"/schemas/{name}": source / "nodes" / "schemas" / name
+            for name in PUBLIC_SCHEMA_NAMES
         }
     )
     resources.update(
@@ -225,6 +220,7 @@ def main() -> None:
         "agora-public-snapshot": "agora.public_snapshot_cli:main",
         "agora-public-inspect": "agora.public_inspection:main",
         "agora-key-control": "agora.key_control_client:main",
+        "agora-authority": "agora.authority_client:main",
     }.items():
         if entrypoints.get(command) != target:
             raise RuntimeError(f"missing installed command: {command}")
