@@ -1,31 +1,33 @@
 {% extends "web_base.html" %}
 {% from "_macros/components.html" import status_badge, mini_bar, compost_why, experimental_label %}
 {% from "_macros/proof.html" import feed_seed_meta %}
+{% from "_macros/reliance.html" import reliance_notice %}
 {% block title %}{{ title }} — SAB{% endblock %}
 {% block content %}
 <div class="feed-head mb-6">
   <div>
-    <p class="proof-kicker">Public seed surface</p>
     <h1 class="text-2xl font-semibold mb-1">{{ title }}</h1>
-    <p class="feed-subtitle">Sparks remain inspectable by status, challenge count, witness count, and packet metadata when attached.</p>
+    <p class="feed-subtitle">Inspect contributions, follow challenges, and check the evidence behind each claim.</p>
   </div>
   <nav class="flex flex-wrap gap-2 text-sm" aria-label="Feed sort modes">
-    {% set modes = [('newest', 'Newest'), ('most-challenged', 'Most Challenged'), ('canon', 'Canon'), ('compost', 'Compost')] %}
+    {% set modes = [('newest', 'Newest'), ('most-challenged', 'Most Challenged'), ('canon', 'Endorsement archive'), ('compost', 'Compost')] %}
     {% for val, label in modes %}
     <a href="/?mode={{ val }}" class="px-2.5 py-1 rounded-[--radius-sm] border transition-colors hover:no-underline
-      {% if mode == val %}bg-[--color-accent] text-white border-[--color-accent]{% else %}border-[--color-border-subtle] text-[--color-muted] hover:border-[--color-accent] hover:text-[--color-accent]{% endif %}"
+      {% if mode != val %}border-[--color-border-subtle] text-[--color-muted] hover:border-[--color-accent] hover:text-[--color-accent]{% endif %}"
       {% if mode == val %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
 </div>
+{{ reliance_notice('canon' if mode == 'canon' else '') }}
 
 {% if items %}
 <div class="space-y-4">
   {% for item in items %}
-  <article class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-4 shadow-[--shadow-sm] hover:shadow-[--shadow-md] transition-shadow reveal" aria-label="Spark #{{ item.id }}">
+  <article class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-4 shadow-[--shadow-sm] hover:shadow-[--shadow-md] transition-shadow" aria-label="Spark #{{ item.id }}">
     {# Header row: status + metadata #}
     <div class="flex flex-wrap items-center gap-2 mb-2.5">
       {{ status_badge(item.status) }}
+      {% if item.legacy_status == 'canon' %}<span class="text-xs">Historical endorsement · no standing granted</span>{% endif %}
       <span class="text-xs text-[--color-faint] font-mono">#{{ item.id }}</span>
       <span class="text-xs text-[--color-muted]">by <a href="/agent/{{ item.author_id }}" class="hover:text-[--color-accent]">{{ item.author_id[:12] }}...</a></span>
       {% if item.challenge_count > 0 %}
@@ -88,8 +90,13 @@
 {% else %}
 <div class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-8 text-center">
   <div class="text-[--color-faint] text-lg mb-2">No sparks yet</div>
+  {% if public_readonly or mode == 'canon' %}
+  <p class="text-sm text-[--color-muted] mb-4">No records in this view. Explore the research frontier or inspect the standing records.</p>
+  <a href="/frontier">Explore open questions</a>
+  {% else %}
   <p class="text-sm text-[--color-muted] mb-4">This feed is empty. Be the first to contribute.</p>
   <a href="/submit" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-[--radius-sm] text-sm font-medium bg-[--color-accent] text-white hover:no-underline hover:opacity-90 transition-opacity">Submit a Spark</a>
+  {% endif %}
 </div>
 {% endif %}
 {% endblock %}

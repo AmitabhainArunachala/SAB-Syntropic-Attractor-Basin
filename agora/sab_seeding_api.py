@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from pydantic import ValidationError
@@ -114,6 +114,20 @@ class SabSeedingDeps:
     system_sign: Callable[[Dict[str, Any]], str]
     utc_now: Callable[[], str]
     invalidate_web_cache: Callable[[], None]
+    read_only: bool = False
+
+
+@contextmanager
+def _read_v1_db(deps: SabSeedingDeps) -> Iterator[sqlite3.Connection]:
+    """Public reads use the schema initialized at startup and cannot write."""
+    if not deps.read_only:
+        deps.init_db()
+    with deps.db() as conn:
+        if deps.read_only:
+            conn.execute("PRAGMA query_only = ON")
+        else:
+            _init_v1_tables(conn)
+        yield conn
 
 
 def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
@@ -122,11 +136,15 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
     @router.post("/agents/register", status_code=status.HTTP_201_CREATED)
     async def register_agent_identity(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         deps.init_db()
-        public_key = _required_str(payload, "public_key")
+        public_key = _required_str(payload, "public_key").lower()
         display_name = str(payload.get("display_name") or payload.get("name") or "sab-agent").strip()
         if not display_name:
             raise HTTPException(status_code=400, detail="display_name is required")
-        subject_id = str(payload.get("subject_id") or subject_id_from_public_key(public_key)).strip()
+        try:
+            canonical_subject_id = subject_id_from_public_key(public_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid Ed25519 public key (hex)") from exc
+        subject_id = str(payload.get("subject_id") or canonical_subject_id).strip()
         if not subject_id.startswith("agent_"):
             raise HTTPException(status_code=400, detail="subject_id must be an agent identity")
         identity_ref = str(payload.get("identity_ref") or f"sab_identity_{subject_id}").strip()
@@ -160,30 +178,49 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=f"invalid agent identity: {exc}") from exc
         with deps.db() as conn:
+            # Registration has no proof of control. Keep existing bindings and
+            # operator disclosures immutable, including when the caller knows
+            # the public key. Serialize the checks and inserts across workers.
+            conn.execute("BEGIN IMMEDIATE")
             _init_v1_tables(conn)
+            web_rows = conn.execute(
+                "SELECT * FROM web_agents WHERE id = ? OR lower(public_key) = ?",
+                (subject_id, public_key),
+            ).fetchall()
+            identity_rows = conn.execute(
+                "SELECT * FROM sab_agent_identities_v1 WHERE subject_id = ? OR lower(public_key) = ?",
+                (subject_id, public_key),
+            ).fetchall()
+            for row in web_rows:
+                if str(row["id"]) != subject_id or str(row["public_key"]).lower() != public_key:
+                    raise HTTPException(status_code=409, detail="agent subject or public key already registered")
+            for row in identity_rows:
+                if str(row["subject_id"]) != subject_id or str(row["public_key"]).lower() != public_key:
+                    raise HTTPException(status_code=409, detail="agent subject or public key already registered")
+            if web_rows or identity_rows:
+                if len(web_rows) != 1 or len(identity_rows) != 1:
+                    raise HTTPException(status_code=409, detail="existing identity requires authenticated migration")
+                registered_identity = json.loads(str(identity_rows[0]["identity_json"]))
+                # Timestamps and evidence are server-owned. An identical retry
+                # returns the original document and preserves witness history.
+                fields = set(identity) - {"created_at", "evidence_refs"}
+                if any(registered_identity.get(field) != identity[field] for field in fields):
+                    raise HTTPException(status_code=409, detail="registration cannot update an existing identity")
+                return registered_identity
             conn.execute(
                 """
-                INSERT OR REPLACE INTO web_agents
+                INSERT INTO web_agents
                     (id, name, public_key, created_at, witness_count, witness_accuracy)
-                VALUES (?, ?, ?, COALESCE((SELECT created_at FROM web_agents WHERE id = ?), ?), 0, 0.0)
+                VALUES (?, ?, ?, ?, 0, 0.0)
                 """,
-                (subject_id, display_name, public_key, subject_id, created_at),
+                (subject_id, display_name, public_key, created_at),
             )
             conn.execute(
                 """
                 INSERT INTO sab_agent_identities_v1
                     (subject_id, display_name, public_key, controller, operator_id,
                      operator_backing_json, identity_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?,
-                        COALESCE((SELECT created_at FROM sab_agent_identities_v1 WHERE subject_id = ?), ?), ?)
-                ON CONFLICT(subject_id) DO UPDATE SET
-                    display_name = excluded.display_name,
-                    public_key = excluded.public_key,
-                    controller = excluded.controller,
-                    operator_id = excluded.operator_id,
-                    operator_backing_json = excluded.operator_backing_json,
-                    identity_json = excluded.identity_json,
-                    updated_at = excluded.updated_at
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     subject_id,
@@ -193,7 +230,6 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                     operator_backing.operator_id,
                     _json_dumps(operator_backing.model_dump()),
                     _json_dumps(identity),
-                    subject_id,
                     created_at,
                     created_at,
                 ),
@@ -203,9 +239,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/agents/me/home")
     async def agent_home(subject_id: str = Query(...)) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             agent = conn.execute(
                 "SELECT id, name, public_key, created_at FROM web_agents WHERE id = ?",
                 (subject_id,),
@@ -359,21 +393,19 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/seeds/{seed_id}")
     async def get_seed(seed_id: str) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             _seed_row(conn, seed_id)
-            _sweep_challenge_deadlines(deps, conn, seed_id)
+            if not deps.read_only:
+                _sweep_challenge_deadlines(deps, conn, seed_id)
             row = _seed_row(conn, seed_id)
             return _serialize_seed(conn, row)
 
     @router.get("/seeds/{seed_id}/chain")
     async def get_seed_chain(seed_id: str) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             _seed_row(conn, seed_id)
-            _sweep_challenge_deadlines(deps, conn, seed_id)
+            if not deps.read_only:
+                _sweep_challenge_deadlines(deps, conn, seed_id)
             return _seed_chain(conn, seed_id)
 
     @router.get("/seeds")
@@ -384,9 +416,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         claimant: Optional[str] = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
     ) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             clauses: List[str] = []
             params: List[Any] = []
             wanted_state = state or status_filter
@@ -577,9 +607,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/challenges/{challenge_id}")
     async def get_challenge(challenge_id: str) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             return _serialize_challenge(_challenge_row(conn, challenge_id))
 
     @router.post("/challenges/{challenge_id}/respond", status_code=status.HTTP_201_CREATED)
@@ -680,9 +708,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/witness-events/{event_id}")
     async def get_witness_event(event_id: str) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             row = conn.execute(
                 "SELECT * FROM sab_witness_events_v1 WHERE event_id = ?",
                 (event_id,),
@@ -698,9 +724,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         subject_id: Optional[str] = Query(default=None),
         limit: int = Query(default=200, ge=1, le=1000),
     ) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             rows = _witness_rows(conn, seed_id=seed_id, subject_type=subject_type, subject_id=subject_id, limit=limit)
             return {
                 "verified": _verify_witness_rows(rows),
@@ -713,9 +737,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         subject_type: Optional[str] = Query(default=None),
         subject_id: Optional[str] = Query(default=None),
     ) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             rows = _witness_rows(conn, seed_id=seed_id, subject_type=subject_type, subject_id=subject_id, limit=10000)
             return {
                 "verified": _verify_witness_rows(rows),
@@ -827,11 +849,16 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/standing/{standing_id}")
     async def get_standing(standing_id: str) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
-            row = _expire_standing_if_needed(deps, conn, _standing_row(conn, standing_id))
-            return _serialize_standing(row)
+        with _read_v1_db(deps) as conn:
+            row = _standing_row(conn, standing_id)
+            observation = _observe_standing(row)
+            if (
+                not deps.read_only
+                and observation["status_basis"] == "expiry_observation"
+                and observation["stored_status"] != "canon"
+            ):
+                return _observe_standing(_expire_standing_if_needed(deps, conn, row))
+            return observation
 
     @router.get("/standing")
     async def list_standing(
@@ -840,16 +867,24 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         scope: Optional[str] = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
     ) -> Dict[str, Any]:
-        deps.init_db()
-        with deps.db() as conn:
-            _init_v1_tables(conn)
+        with _read_v1_db(deps) as conn:
             clauses: List[str] = []
             params: List[Any] = []
+            observed_at = datetime.now(timezone.utc)
             if subject:
                 clauses.append("subject_seed_id = ?")
                 params.append(subject)
             if status_filter:
-                clauses.append("status = ?")
+                # The same observer handles invalid timestamps and offsets in
+                # list filtering and individual reads, before applying LIMIT.
+                conn.create_function(
+                    "sab_observed_standing_status",
+                    2,
+                    lambda stored, expiry: observe_standing_status(
+                        stored, expiry, observed_at=observed_at
+                    )["status"],
+                )
+                clauses.append("sab_observed_standing_status(status, expiry) = ?")
                 params.append(status_filter)
             if scope:
                 clauses.append("scope = ?")
@@ -865,8 +900,18 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 """,  # nosec B608 - where only contains fixed clauses.
                 (*params, limit),
             ).fetchall()
-            rows = [_expire_standing_if_needed(deps, conn, row) for row in rows]
-            return {"items": [_serialize_standing(row, include_lease=False) for row in rows]}
+            items = []
+            for row in rows:
+                observation = _observe_standing(row, include_lease=False, observed_at=observed_at)
+                if (
+                    not deps.read_only
+                    and observation["status_basis"] == "expiry_observation"
+                    and observation["stored_status"] != "canon"
+                ):
+                    row = _expire_standing_if_needed(deps, conn, row)
+                    observation = _observe_standing(row, include_lease=False, observed_at=observed_at)
+                items.append(observation)
+            return {"items": items}
 
     @router.post("/standing/{standing_id}/challenge")
     async def challenge_standing(standing_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
@@ -2071,6 +2116,50 @@ def _serialize_witness_event(row: sqlite3.Row) -> Dict[str, Any]:
         "hash": str(row["event_hash"]),
         "event_hash": str(row["event_hash"]),
     }
+
+
+def observe_standing_status(
+    stored_status: str,
+    expiry: Any,
+    *,
+    observed_at: Optional[datetime] = None,
+) -> Dict[str, str]:
+    """Observe current lease status without granting authority or changing history.
+
+    Canon records remain historical canon after expiry, but their lease cannot
+    provide current reliance. Missing or malformed expiry never means active.
+    """
+    now = observed_at or datetime.now(timezone.utc)
+    observation = {
+        "status": stored_status,
+        "stored_status": stored_status,
+        "status_basis": "stored",
+        "observed_at": now.isoformat(),
+    }
+    if stored_status in {"revoked", "expired", "compost", "superseded"}:
+        return observation
+    try:
+        expires_at = _parse_datetime(str(expiry or ""))
+    except (HTTPException, ValueError, OverflowError):
+        observation["status"] = "unknown"
+        observation["status_basis"] = "invalid_expiry"
+        return observation
+    if expires_at <= now:
+        observation["status"] = "expired"
+        observation["status_basis"] = "expiry_observation"
+    return observation
+
+
+def _observe_standing(
+    row: sqlite3.Row,
+    *,
+    include_lease: bool = True,
+    observed_at: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Project elapsed expiry without signing events or changing stored authority."""
+    item = _serialize_standing(row, include_lease=include_lease)
+    item.update(observe_standing_status(item["status"], row["expiry"], observed_at=observed_at))
+    return item
 
 
 def _serialize_standing(row: sqlite3.Row, *, include_lease: bool = True) -> Dict[str, Any]:

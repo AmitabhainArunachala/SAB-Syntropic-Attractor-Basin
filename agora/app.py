@@ -32,6 +32,7 @@ from .gates import ALL_GATES, evaluate_submission_gates
 from .rv_signal import measure_rv_signal
 from .sab_seeding_storage import init_sab_seeding_storage
 from .sab_identity import AgentIdentityV1
+from .public_runtime import PublicMode, install_public_runtime, public_read_request, read_public_mode
 from .witness_service import (
     PUBLICATION_WITNESS_DOMAIN,
     attach_witness_meta,
@@ -47,6 +48,7 @@ except ImportError as exc:  # pragma: no cover - runtime safety
     raise RuntimeError("PyNaCl is required for agora.app") from exc
 
 
+PUBLIC_MODE = read_public_mode()
 DEFAULT_SPARK_DB = get_db_path().with_name("spark.db")
 SPARK_DB = Path(os.getenv("SAB_SPARK_DB_PATH", os.getenv("SAB_AUTHORITY_DB_PATH", str(DEFAULT_SPARK_DB))))
 SYSTEM_KEY_PATH = Path(
@@ -55,7 +57,6 @@ SYSTEM_KEY_PATH = Path(
         str(SPARK_DB.with_name(".sab_system_ed25519.key")),
     )
 )
-CANON_QUORUM = int(os.getenv("SAB_CANON_QUORUM", "3"))
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 TEMPLATES_DIR = APP_DIR / "templates"
@@ -376,6 +377,8 @@ def _cleanup_web_sessions() -> None:
 
 
 def _read_web_session(request: Request) -> Optional[Dict[str, Any]]:
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+        return None
     _cleanup_web_sessions()
     token = request.cookies.get(WEB_SESSION_COOKIE)
     if not token:
@@ -388,6 +391,8 @@ def _signing_key_from_session(session: Dict[str, Any]) -> SigningKey:
 
 
 def _create_web_session(conn: sqlite3.Connection, display_name: str) -> Dict[str, Any]:
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+        raise HTTPException(status_code=403, detail="Public inspection does not create signing identities")
     clean_name = (display_name or "").strip()[:80] or "anonymous"
     signing_key = SigningKey.generate()
     private_key_hex = signing_key.encode(encoder=HexEncoder).decode()
@@ -459,8 +464,12 @@ SYSTEM_VERIFY_KEY_HEX = SYSTEM_SIGNING_KEY.verify_key.encode(encoder=HexEncoder)
 
 @contextmanager
 def _db() -> sqlite3.Connection:
-    SPARK_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(SPARK_DB)
+    if public_read_request():
+        conn = sqlite3.connect(SPARK_DB.resolve().as_uri() + "?mode=ro", uri=True)
+        conn.execute("PRAGMA query_only = ON")
+    else:
+        SPARK_DB.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(SPARK_DB)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -521,6 +530,8 @@ def _migrate_legacy_public_tables(conn: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
+    if public_read_request():
+        return
     with _db() as conn:
         cursor = conn.cursor()
         _migrate_legacy_public_tables(conn)
@@ -883,49 +894,23 @@ def _verify_chain_rows(rows: List[sqlite3.Row]) -> bool:
     return True
 
 
-def _promote_if_quorum(conn: sqlite3.Connection, spark_id: int) -> Optional[Dict[str, Any]]:
-    row = conn.execute("SELECT status FROM sparks WHERE id = ?", (spark_id,)).fetchone()
-    if row is None:
-        return None
-    if str(row["status"]) == "canon":
-        return None
-    if _pending_challenge_count(conn, spark_id) > 0:
-        return None
+def _discourse_status(stored_status: str) -> str:
+    """Keep historical labels inspectable without promoting them to standing.
 
-    witnesses = conn.execute(
-        """
-        SELECT DISTINCT witness_id
-        FROM spark_witness_chain
-        WHERE spark_id = ? AND action IN ('affirm', 'canon_affirm')
-        """,
-        (spark_id,),
-    ).fetchall()
-    if len(witnesses) < CANON_QUORUM:
-        return None
+    Legacy canon rows and their signed history remain untouched. A quorum of
+    keys proves neither independent operators nor permission to rely on a claim.
+    Only the v1 standing path can issue a scoped standing record.
+    """
+    return "spark" if stored_status == "canon" else stored_status
 
-    conn.execute("UPDATE sparks SET status = 'canon' WHERE id = ?", (spark_id,))
-    payload = {
-        "spark_id": spark_id,
-        "quorum": CANON_QUORUM,
-        "witness_count": len(witnesses),
+
+def _discourse_authority() -> Dict[str, Any]:
+    return {
+        "kind": "discourse",
+        "standing_effect": "none",
+        "standing_assessment": "not_assessed",
+        "standing_api": "/api/v1/standing",
     }
-    signature = _system_sign(
-        {
-            "kind": "system_witness",
-            "spark_id": spark_id,
-            "action": "canon_promoted",
-            "payload": payload,
-        }
-    )
-    entry = _append_witness(
-        conn,
-        spark_id=spark_id,
-        witness_id="system",
-        action="canon_promoted",
-        payload=payload,
-        signature_hex=signature,
-    )
-    return entry
 
 
 def _serialize_spark_row(row: sqlite3.Row) -> Dict[str, Any]:
@@ -945,7 +930,9 @@ def _serialize_spark_row(row: sqlite3.Row) -> Dict[str, Any]:
         "content_type": str(row["content_type"] or "text"),
         "author_id": str(row["author_id"] or ""),
         "created_at": str(row["created_at"] or ""),
-        "status": str(row["status"] or "spark"),
+        "status": _discourse_status(str(row["status"] or "spark")),
+        "legacy_status": str(row["status"] or "spark"),
+        "authority": _discourse_authority(),
         "rv_contraction": row["rv_contraction"],
         "composite_score": float(row["composite_score"] or 0.0),
         "gate_scores": _load_gate_scores(str(raw_gate_scores) if raw_gate_scores is not None else "{}"),
@@ -1119,11 +1106,11 @@ def _web_feed_items(
                 (SELECT COUNT(*) FROM spark_challenges c WHERE c.spark_id = s.id) AS challenge_count,
                 (SELECT COUNT(*) FROM spark_witness_chain w WHERE w.spark_id = s.id) AS witness_count
             FROM sparks s
-            WHERE s.status = ?
+            WHERE s.status = ? OR (? = 'spark' AND s.status = 'canon')
             ORDER BY s.created_at DESC
             LIMIT ?
             """,
-            (status_filter, limit),
+            (status_filter, status_filter, limit),
         ).fetchall()
     items: List[Dict[str, Any]] = []
     for row in rows:
@@ -1155,7 +1142,7 @@ class AgentRegisterRequest(BaseModel):
             VerifyKey(value.encode(), encoder=HexEncoder)
         except Exception as exc:
             raise ValueError("invalid Ed25519 public key (hex)") from exc
-        return value
+        return value.lower()
 
 
 class SparkSubmitRequest(BaseModel):
@@ -1198,15 +1185,20 @@ class WitnessSignRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    # Complete schema setup once before serving read-only requests. GET handlers
+    # must not initialize or migrate v1 tables as a side effect of inspection.
+    with _db() as conn:
+        _init_v1_tables(conn)
     yield
 
 
 app = FastAPI(
     title="SAB Basin API",
-    description="Spark -> pressure -> witness -> canon/compost lifecycle API",
+    description="Inspectable discourse and the separate v1 scoped standing protocol",
     version=SAB_VERSION,
     lifespan=lifespan,
 )
+install_public_runtime(app, PUBLIC_MODE)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -1253,7 +1245,12 @@ async def public_seed_packet_schema() -> FileResponse:
     raise HTTPException(status_code=404, detail="Public seed packet schema not found")
 
 
-from .sab_seeding_api import SabSeedingDeps, create_sab_seeding_router  # noqa: E402
+from .sab_seeding_api import (  # noqa: E402
+    SabSeedingDeps,
+    create_sab_seeding_router,
+    observe_standing_status,
+    _init_v1_tables,
+)
 
 app.include_router(
     create_sab_seeding_router(
@@ -1264,6 +1261,7 @@ app.include_router(
             system_sign=_system_sign,
             utc_now=_utc_now,
             invalidate_web_cache=_invalidate_web_cache,
+            read_only=PUBLIC_MODE == PublicMode.PUBLIC_READONLY,
         )
     )
 )
@@ -1275,28 +1273,59 @@ async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
     agent_id = hashlib.sha256(req.public_key.encode()).hexdigest()[:16]
     created_at = _utc_now()
     with _db() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO web_agents (id, name, public_key, created_at, witness_count, witness_accuracy)
-            VALUES (?, ?, ?, ?, 0, 0.0)
-            """,
-            (agent_id, req.name, req.public_key, created_at),
-        )
-        row = conn.execute("SELECT * FROM web_agents WHERE id = ?", (agent_id,)).fetchone()
-    if row is None:
-        raise HTTPException(status_code=500, detail="failed to register agent")
-    canonical_identity = AgentIdentityV1.from_public_key(
-        display_name=str(row["name"]),
-        public_key=str(row["public_key"]),
-        created_at=datetime.fromisoformat(str(row["created_at"])),
-        evidence_refs=[f"web_agents:{row['id']}"],
-    )
+        # Both registration routes share one key binding. Hex casing, a legacy
+        # request, or knowledge of a public key cannot create a second subject
+        # or replace metadata belonging to an existing participant.
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT * FROM web_agents WHERE id = ? OR lower(public_key) = ?",
+            (agent_id, req.public_key),
+        ).fetchall()
+        if len(rows) > 1:
+            raise HTTPException(status_code=409, detail="public key has conflicting existing identities")
+        row = rows[0] if rows else None
+        if row is not None:
+            if str(row["public_key"]).lower() != req.public_key or str(row["name"]) != req.name:
+                raise HTTPException(status_code=409, detail="registration cannot update an existing identity")
+            agent_id = str(row["id"])
+        identities = []
+        if _table_exists(conn, "sab_agent_identities_v1"):
+            identities = conn.execute(
+                "SELECT * FROM sab_agent_identities_v1 WHERE subject_id = ? OR lower(public_key) = ?",
+                (agent_id, req.public_key),
+            ).fetchall()
+        if identities:
+            if (
+                len(identities) != 1
+                or row is None
+                or str(identities[0]["subject_id"]) != agent_id
+                or str(identities[0]["public_key"]).lower() != req.public_key
+                or str(identities[0]["display_name"]) != req.name
+            ):
+                raise HTTPException(status_code=409, detail="public key has conflicting existing identities")
+            identity = json.loads(str(identities[0]["identity_json"]))
+        else:
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO web_agents (id, name, public_key, created_at, witness_count, witness_accuracy)
+                    VALUES (?, ?, ?, ?, 0, 0.0)
+                    """,
+                    (agent_id, req.name, req.public_key, created_at),
+                )
+                row = conn.execute("SELECT * FROM web_agents WHERE id = ?", (agent_id,)).fetchone()
+            identity = AgentIdentityV1.from_public_key(
+                display_name=str(row["name"]),
+                public_key=str(row["public_key"]),
+                created_at=datetime.fromisoformat(str(row["created_at"])),
+                evidence_refs=[f"web_agents:{row['id']}"],
+            ).model_dump(mode="json", by_alias=True)
     return {
         "id": str(row["id"]),
         "name": str(row["name"]),
         "public_key": str(row["public_key"]),
         "created_at": str(row["created_at"]),
-        "identity": canonical_identity.model_dump(mode="json", by_alias=True),
+        "identity": identity,
     }
 
 
@@ -1779,9 +1808,9 @@ async def witness_sign(req: WitnessSignRequest) -> Dict[str, Any]:
             (req.witness_id,),
         )
 
-        if req.action in ("affirm", "canon_affirm"):
-            _promote_if_quorum(conn, req.spark_id)
-        elif req.action == "compost":
+        # Endorsements are observations only; they never grant standing, even
+        # when several keys or repeated requests agree.
+        if req.action == "compost":
             conn.execute("UPDATE sparks SET status = 'compost' WHERE id = ?", (req.spark_id,))
             compost_signature = _system_sign(
                 {
@@ -1801,12 +1830,14 @@ async def witness_sign(req: WitnessSignRequest) -> Dict[str, Any]:
             )
 
         status_row = conn.execute("SELECT status FROM sparks WHERE id = ?", (req.spark_id,)).fetchone()
-        spark_status = str(status_row["status"]) if status_row else "unknown"
+        legacy_status = str(status_row["status"]) if status_row else "unknown"
         _invalidate_web_cache()
 
         return {
             "spark_id": req.spark_id,
-            "spark_status": spark_status,
+            "spark_status": _discourse_status(legacy_status),
+            "legacy_status": legacy_status,
+            "authority": _discourse_authority(),
             "entry": entry,
         }
 
@@ -1833,11 +1864,11 @@ def _load_feed(conn: sqlite3.Connection, *, status_value: str, limit: int, gate_
     rows = conn.execute(
         """
         SELECT * FROM sparks
-        WHERE status = ?
+        WHERE status = ? OR (? = 'spark' AND status = 'canon')
         ORDER BY created_at DESC
         LIMIT ?
         """,
-        (status_value, limit),
+        (status_value, status_value, limit),
     ).fetchall()
     items = [_serialize_spark_row(row) for row in rows]
 
@@ -1857,7 +1888,12 @@ def _render_template(
     *,
     status_code: int = 200,
 ) -> HTMLResponse:
-    payload = {"request": request, **context}
+    payload = {
+        "request": request,
+        **context,
+        "public_readonly": PUBLIC_MODE == PublicMode.PUBLIC_READONLY,
+        "public_mode": PUBLIC_MODE.value,
+    }
     return templates.TemplateResponse(request, template_name, payload, status_code=status_code)
 
 
@@ -2067,8 +2103,9 @@ def _frontier_store_stats() -> Dict[str, Any]:
 
         init_db()
         with _db() as conn:
-            init_sab_seeding_storage(conn)
-            _init_v1_tables(conn)
+            if not public_read_request():
+                init_sab_seeding_storage(conn)
+                _init_v1_tables(conn)
             seed_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_seed_packets_v1").fetchone()["c"])
             challenge_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_challenge_packets_v1").fetchone()["c"])
             pending_challenges = int(
@@ -2078,15 +2115,23 @@ def _frontier_store_stats() -> Dict[str, Any]:
             )
             witness_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_witness_events_v1").fetchone()["c"])
             standing_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_standing_leases_v1").fetchone()["c"])
+            observed_at = datetime.now(timezone.utc)
+            conn.create_function(
+                "sab_standing_status", 2,
+                lambda stored, expiry: observe_standing_status(stored, expiry, observed_at=observed_at)["status"],
+            )
             active_standing = int(
-                conn.execute("SELECT COUNT(*) AS c FROM sab_standing_leases_v1 WHERE status = 'active'").fetchone()[
+                conn.execute(
+                    "SELECT COUNT(*) AS c FROM sab_standing_leases_v1 "
+                    "WHERE sab_standing_status(status, expiry) = 'active'",
+                ).fetchone()[
                     "c"
                 ]
             )
     except (OSError, sqlite3.Error) as exc:
         return {
             "available": False,
-            "error": str(exc),
+            "error": "Standing records are unavailable",
             "seeds": 0,
             "challenges": 0,
             "pending_challenges": 0,
@@ -2112,8 +2157,9 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
 
         init_db()
         with _db() as conn:
-            init_sab_seeding_storage(conn)
-            _init_v1_tables(conn)
+            if not public_read_request():
+                init_sab_seeding_storage(conn)
+                _init_v1_tables(conn)
             rows = conn.execute(
                 """
                 SELECT seed_id, state, packet_json, packet_hash, spark_projection_id,
@@ -2164,7 +2210,7 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
                 ).fetchone()
                 standing_row = conn.execute(
                     """
-                    SELECT status
+                    SELECT status, expiry
                     FROM sab_standing_leases_v1
                     WHERE subject_seed_id = ?
                     ORDER BY id DESC
@@ -2172,7 +2218,10 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
                     """,
                     (seed_id,),
                 ).fetchone()
-                standing_status = f"standing:{standing_row['status']}" if standing_row else "none"
+                standing_status = "none"
+                if standing_row:
+                    observed = observe_standing_status(standing_row["status"], standing_row["expiry"])
+                    standing_status = f"standing:{observed['status']}"
                 cards.append(
                     _frontier_card_from_packet_payload(
                         packet,
@@ -2341,7 +2390,12 @@ async def feed_canon(
     init_db()
     with _db() as conn:
         items = _load_feed(conn, status_value="canon", limit=limit, gate_name=gate)
-    return {"status": "canon", "sorted_by_gate": gate, "items": items}
+    return {
+        "status": "legacy_endorsements",
+        "authority": _discourse_authority(),
+        "sorted_by_gate": gate,
+        "items": items,
+    }
 
 
 @app.get("/api/feed/compost")
@@ -2398,14 +2452,16 @@ async def node_status() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "version": SAB_VERSION,
-        "db_path": str(SPARK_DB),
+        "public_mode": PUBLIC_MODE.value,
         "system_verify_key": SYSTEM_VERIFY_KEY_HEX,
         "gate_count": len(ALL_GATES),
-        "canon_quorum": CANON_QUORUM,
+        "authority": _discourse_authority(),
+        "legacy_canon_promotion": "disabled",
         "totals": {
             "sparks": total,
-            "spark_status": spark_count,
-            "canon": canon_count,
+            "spark_status": spark_count + canon_count,
+            "canon": 0,
+            "legacy_endorsements": canon_count,
             "compost": compost_count,
             "pending_challenges": challenge_pending,
         },
@@ -2423,7 +2479,7 @@ async def health() -> Dict[str, Any]:
         "status": status_payload["status"],
         "version": status_payload["version"],
         "surface": "agora.app",
-        "db_path": status_payload["db_path"],
+        "public_mode": PUBLIC_MODE.value,
         "timestamp": status_payload["timestamp"],
     }
 
@@ -2482,7 +2538,7 @@ async def web_home(
         "web_feed.html",
         {
             **feed_context,
-            "title": "SAB Feed",
+            "title": "Endorsement archive" if mode == "canon" else "SAB Feed",
             "mode": mode,
             "path_name": "/",
             "session": session,
@@ -2509,7 +2565,7 @@ async def web_canon(
         "web_feed.html",
         {
             **feed_context,
-            "title": "Canon",
+            "title": "Endorsement archive",
             "mode": "canon",
             "path_name": "/canon",
             "session": _read_web_session(request),
@@ -2927,14 +2983,6 @@ async def web_agent_profile(request: Request, agent_id: str) -> HTMLResponse:
             ).fetchone()["c"]
         )
 
-    canon_rate = (canon_count / submitted_count) if submitted_count else None
-    challenge_survival = (challenged_survived / challenged_total) if challenged_total else None
-    witness_accuracy = (attestation_on_canon / attestation_total) if attestation_total else None
-    reliability = [
-        {"label": "Canonization Rate", "value": canon_rate},
-        {"label": "Challenge Survival", "value": challenge_survival},
-        {"label": "Witness Accuracy", "value": witness_accuracy},
-    ]
     return _render_template(
         request,
         "web_agent_profile.html",
@@ -2950,7 +2998,6 @@ async def web_agent_profile(request: Request, agent_id: str) -> HTMLResponse:
                 "attestation_total": attestation_total,
                 "attestation_on_canon": attestation_on_canon,
             },
-            "reliability": reliability,
             "session": _read_web_session(request),
         },
     )

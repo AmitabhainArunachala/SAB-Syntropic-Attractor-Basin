@@ -1,0 +1,442 @@
+from __future__ import annotations
+
+import asyncio
+import copy
+import importlib
+import json
+import re
+import sqlite3
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from agora.public_runtime import (
+    PublicMode,
+    PublicReadonlyMiddleware,
+    public_read_request,
+    read_public_mode,
+)
+
+
+WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE", "TRACE", "CONNECT", "PROPFIND", "COPY")
+
+
+def _load_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None = None):
+    if mode is None:
+        monkeypatch.delenv("SAB_PUBLIC_MODE", raising=False)
+    else:
+        monkeypatch.setenv("SAB_PUBLIC_MODE", mode)
+    for name in ("SAB_SPARK_DB_PATH", "SAB_AUTHORITY_DB_PATH", "SAB_DB_PATH"):
+        monkeypatch.setenv(name, str(tmp_path / "readonly.db"))
+    monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / "system.key"))
+    monkeypatch.setenv("SAB_SEED_CLAIMS_PATH", str(tmp_path / "no_seed_claims.json"))
+    monkeypatch.delitem(sys.modules, "agora.app", raising=False)
+    module = importlib.import_module("agora.app")
+    monkeypatch.setattr(module, "FRONTIER_PACKET_DIR", tmp_path / "no_packets")
+    monkeypatch.setattr(module, "FRONTIER_RECEIPT_DIR", tmp_path / "no_receipts")
+    return module
+
+
+@pytest.fixture
+def public_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    return _load_app(tmp_path, monkeypatch)
+
+
+def _database_snapshot(path: Path) -> tuple[str, ...]:
+    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as conn:
+        return tuple(conn.iterdump())
+
+
+def _assert_readonly(response) -> None:
+    assert response.status_code == 403, response.text
+    assert response.json() == {
+        "code": "public_readonly",
+        "mode": "public_readonly",
+        "detail": "This SAB instance is read-only. Write operations are disabled.",
+    }
+    assert response.headers["cache-control"] == "no-store"
+    assert "set-cookie" not in response.headers
+
+
+def test_default_and_explicit_startup_modes() -> None:
+    assert read_public_mode({}) == PublicMode.PUBLIC_READONLY
+    assert read_public_mode({"SAB_PUBLIC_MODE": "public_readonly"}) == PublicMode.PUBLIC_READONLY
+    assert read_public_mode({"SAB_PUBLIC_MODE": "local"}) == PublicMode.LOCAL
+
+
+@pytest.mark.parametrize("value", ["", "LOCAL", "local ", " public_readonly", "false", "invite_beta"])
+def test_invalid_mode_fails_before_database_or_key_creation(tmp_path, monkeypatch, value):
+    with pytest.raises(ValueError, match="SAB_PUBLIC_MODE"):
+        _load_app(tmp_path, monkeypatch, value)
+    assert not (tmp_path / "readonly.db").exists()
+    assert not (tmp_path / "system.key").exists()
+
+
+@pytest.mark.parametrize("method", [*WRITE_METHODS, "PURGE", "UNKNOWN", "post", "get", "GET ", "", None])
+def test_write_boundary_never_reads_body_or_calls_downstream(method):
+    async def run():
+        messages = []
+
+        async def forbidden(*args):
+            pytest.fail("read-only rejection called downstream code or read the request body")
+
+        async def send(message):
+            messages.append(message)
+
+        scope = {"type": "http", "path": "/api/v1/seeds"}
+        if method is not None:
+            scope["method"] = method
+        await PublicReadonlyMiddleware(forbidden)(scope, forbidden, send)
+        assert messages[0]["status"] == 403
+        assert json.loads(messages[1]["body"])["code"] == "public_readonly"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
+def test_read_methods_reach_downstream(method):
+    async def run():
+        scopes = []
+
+        async def downstream(scope, receive, send):
+            assert public_read_request() is True
+            scopes.append(scope)
+
+        scope = {"type": "http", "method": method}
+        await PublicReadonlyMiddleware(downstream)(scope, None, None)
+        assert scopes == [scope]
+        assert public_read_request() is False
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("error", [RuntimeError, asyncio.CancelledError])
+def test_public_read_context_resets_when_downstream_fails(error):
+    async def run():
+        async def downstream(scope, receive, send):
+            assert public_read_request() is True
+            raise error("request interrupted")
+
+        with pytest.raises(error):
+            await PublicReadonlyMiddleware(downstream)(
+                {"type": "http", "method": "GET"}, None, None
+            )
+        assert public_read_request() is False
+
+    asyncio.run(run())
+
+
+def test_public_read_context_isolated_from_startup_and_concurrent_local_requests():
+    async def run():
+        public_entered = asyncio.Event()
+        local_finished = asyncio.Event()
+
+        async def public_downstream(scope, receive, send):
+            assert public_read_request() is True
+            public_entered.set()
+            await local_finished.wait()
+            assert public_read_request() is True
+
+        async def local_downstream(scope, receive, send):
+            await public_entered.wait()
+            assert public_read_request() is False
+            local_finished.set()
+
+        await asyncio.gather(
+            PublicReadonlyMiddleware(public_downstream)(
+                {"type": "http", "method": "GET"}, None, None
+            ),
+            PublicReadonlyMiddleware(local_downstream, PublicMode.LOCAL)(
+                {"type": "http", "method": "POST"}, None, None
+            ),
+        )
+
+        async def lifespan(scope, receive, send):
+            assert public_read_request() is False
+
+        await PublicReadonlyMiddleware(lifespan)({"type": "lifespan"}, None, None)
+        assert public_read_request() is False
+
+    asyncio.run(run())
+
+
+def test_public_websockets_are_rejected_before_handshake():
+    async def run():
+        messages = []
+
+        async def forbidden(*args):
+            pytest.fail("public WebSocket reached downstream or read a client message")
+
+        async def send(message):
+            messages.append(message)
+
+        await PublicReadonlyMiddleware(forbidden)({"type": "websocket"}, forbidden, send)
+        assert messages == [{"type": "websocket.close", "code": 1008, "reason": "public_readonly"}]
+
+    asyncio.run(run())
+
+
+def _registered_paths(routes, prefix="") -> set[str]:
+    paths = set()
+    for route in routes:
+        path = getattr(route, "path", "")
+        if path:
+            paths.add(prefix + re.sub(r"\{[^}]+\}", "1", path))
+        children = getattr(route, "routes", ())
+        if not children:
+            original = getattr(route, "original_router", None)
+            children = getattr(original, "routes", ())
+        paths.update(_registered_paths(children, prefix + path))
+    return paths
+
+
+def test_all_registered_paths_mounts_and_unknown_paths_reject_writes(public_app):
+    child = FastAPI()
+    reached = []
+
+    @child.post("/write")
+    async def child_write():
+        reached.append(True)
+        return {"written": True}
+
+    public_app.app.mount("/_boundary_child", child)
+    with TestClient(public_app.app) as client:
+        paths = _registered_paths(public_app.app.routes)
+        assert {"/api/v1/agents/register", "/api/agents/register", "/register", "/submit"} <= paths
+        paths.update({"/never-registered", "/api/v1/never-registered", "/static/missing.css"})
+        before = _database_snapshot(public_app.SPARK_DB)
+        sessions = copy.deepcopy(public_app._WEB_SESSIONS)
+        key_bytes = public_app.SYSTEM_KEY_PATH.read_bytes()
+        for path in sorted(paths):
+            for method in WRITE_METHODS:
+                # Invalid JSON and a spoofed method must not reach parsing or dependencies.
+                response = client.request(
+                    method,
+                    path,
+                    content=b"{malformed",
+                    headers={"Content-Type": "application/json", "X-HTTP-Method-Override": "GET"},
+                    follow_redirects=False,
+                )
+                _assert_readonly(response)
+        assert not reached
+        assert _database_snapshot(public_app.SPARK_DB) == before
+        assert public_app._WEB_SESSIONS == sessions
+        assert public_app.SYSTEM_KEY_PATH.read_bytes() == key_bytes
+        assert not client.cookies
+
+
+def test_public_get_pages_do_not_create_or_mutate_browser_sessions(public_app):
+    with TestClient(public_app.app) as client:
+        # An old local cookie must neither delete expired sessions nor generate a
+        # CSRF token in a surviving session when the process runs publicly.
+        public_app._WEB_SESSIONS.update({
+            "old-local": {"created_at_epoch": time.time(), "name": "local visitor"},
+            "expired-local": {"created_at_epoch": 0.0},
+        })
+        client.cookies.set(public_app.WEB_SESSION_COOKIE, "old-local")
+        sessions = copy.deepcopy(public_app._WEB_SESSIONS)
+        before = _database_snapshot(public_app.SPARK_DB)
+        for path in ("/", "/frontier", "/seed", "/submit", "/canon", "/compost", "/about", "/register"):
+            response = client.get(path)
+            assert response.status_code == 200, f"{path}: {response.text}"
+            assert "set-cookie" not in response.headers
+        assert public_app._WEB_SESSIONS == sessions
+        assert _database_snapshot(public_app.SPARK_DB) == before
+
+
+def test_public_frontier_read_does_not_recreate_an_externally_dropped_table(public_app):
+    with TestClient(public_app.app) as client:
+        # Startup may initialize schema; later reads must observe damage without
+        # turning a missing table into a request-authorized schema repair.
+        with sqlite3.connect(public_app.SPARK_DB) as conn:
+            conn.execute("DROP TABLE sab_signature_index_v1")
+        before = _database_snapshot(public_app.SPARK_DB)
+        response = client.get("/api/frontier")
+        assert response.status_code == 200, response.text
+        assert _database_snapshot(public_app.SPARK_DB) == before
+        with sqlite3.connect(public_app.SPARK_DB) as conn:
+            assert conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sab_signature_index_v1'"
+            ).fetchone() is None
+
+
+@pytest.mark.parametrize("sync_handler", [False, True], ids=["async", "threadpool"])
+@pytest.mark.parametrize("disable_query_only", [False, True], ids=["guarded", "pragma_override"])
+def test_future_get_handler_cannot_insert_into_public_database(
+    public_app, sync_handler, disable_query_only
+):
+    attempts = []
+
+    def try_insert():
+        attempts.append(True)
+        with public_app._db() as conn:
+            if disable_query_only:
+                # The read-only file connection remains the boundary even if a
+                # future helper accidentally clears the connection-local flag.
+                conn.execute("PRAGMA query_only = OFF")
+            conn.execute(
+                """INSERT INTO web_agents (id, name, public_key, created_at)
+                   VALUES ('get_write', 'Unauthorized GET', 'fixture_key', '2000-01-01')"""
+            )
+        return {"written": True}
+
+    if sync_handler:
+        public_app.app.add_api_route("/_read_boundary_probe", try_insert, methods=["GET"])
+    else:
+        async def async_insert():
+            return try_insert()
+
+        public_app.app.add_api_route("/_read_boundary_probe", async_insert, methods=["GET"])
+
+    with TestClient(public_app.app) as client:
+        before = _database_snapshot(public_app.SPARK_DB)
+        with pytest.raises(sqlite3.OperationalError, match="readonly|read-only"):
+            client.get("/_read_boundary_probe")
+        assert attempts == [True]
+        assert _database_snapshot(public_app.SPARK_DB) == before
+        # The failed request must not poison subsequent maintenance operations.
+        with public_app._db() as conn:
+            conn.execute(
+                """INSERT INTO web_agents (id, name, public_key, created_at)
+                   VALUES ('maintenance', 'Maintenance fixture', 'maintenance_key', '2000-01-01')"""
+            )
+        with sqlite3.connect(public_app.SPARK_DB) as conn:
+            assert conn.execute("SELECT id FROM web_agents").fetchall() == [("maintenance",)]
+
+
+def _seed_expiring_records(module) -> None:
+    """Stored history that used to cause writes merely by being read."""
+    timestamp = "2000-01-01T00:00:00+00:00"
+    with module._db() as conn:
+        conn.execute(
+            """INSERT INTO sab_seed_packets_v1
+               (seed_id, seed_type, title, claim_id, claimant_identity,
+                authority_lease_id, state, packet_json, packet_hash, created_at, updated_at)
+               VALUES (?, 'claim', 'Read-only expiry fixture', 'claim_readonly', 'agent_readonly',
+                       'lease_readonly', 'challenged', '{}', 'fixture_hash', ?, ?)""",
+            ("seed_readonly", timestamp, timestamp),
+        )
+        conn.execute(
+            """INSERT INTO sab_challenge_packets_v1
+               (challenge_id, target_seed_id, target_claim_id, challenger_identity, status,
+                packet_json, packet_hash, respond_by, created_at, updated_at)
+               VALUES ('challenge_readonly', 'seed_readonly', 'claim_readonly', 'agent_challenger',
+                       'pending', '{}', 'fixture_hash', ?, ?, ?)""",
+            (timestamp, timestamp, timestamp),
+        )
+        for standing_id, stored_status, expiry in (
+            ("standing_expired", "active", timestamp),
+            ("standing_future", "active", "2999-01-01T00:00:00Z"),
+            ("standing_canon_expired", "canon", timestamp),
+            ("standing_invalid", "active", "not-a-date"),
+            ("standing_empty", "active", ""),
+        ):
+            conn.execute(
+                """INSERT INTO sab_standing_leases_v1
+                   (standing_id, subject_seed_id, subject_claim_id, scope, purpose, status,
+                    lease_json, lease_hash, expiry, revoker, challenge_path, issued_by,
+                    issued_at, updated_at)
+                   VALUES (?, 'seed_readonly', 'claim_readonly', 'fixture', 'expiry observation',
+                           ?, '{}', 'fixture_hash', ?, 'agent_revoker', '/challenge',
+                           'agent_issuer', ?, ?)""",
+                (standing_id, stored_status, expiry, timestamp, timestamp),
+            )
+
+
+def test_v1_reads_observe_expiry_without_changing_stored_history(public_app):
+    with TestClient(public_app.app) as client:
+        _seed_expiring_records(public_app)
+        before = _database_snapshot(public_app.SPARK_DB)
+        paths = (
+            "/api/v1/seeds/seed_readonly",
+            "/api/v1/seeds/seed_readonly/chain",
+            "/api/v1/seeds",
+            "/api/v1/challenges/challenge_readonly",
+            "/api/v1/witness/chain?seed_id=seed_readonly",
+            "/api/v1/witness/verify?seed_id=seed_readonly",
+            "/api/v1/standing",
+        )
+        for path in paths:
+            response = client.get(path)
+            assert response.status_code == 200, f"{path}: {response.text}"
+        expired = client.get("/api/v1/standing/standing_expired")
+        assert expired.status_code == 200, expired.text
+        assert expired.json()["status"] == "expired"
+        assert expired.json()["stored_status"] == "active"
+        assert expired.json()["status_basis"] == "expiry_observation"
+        canon = client.get("/api/v1/standing/standing_canon_expired").json()
+        assert canon["status"] == "expired"
+        assert canon["stored_status"] == "canon"
+        for standing_id in ("standing_invalid", "standing_empty"):
+            invalid = client.get(f"/api/v1/standing/{standing_id}")
+            assert invalid.status_code == 200, invalid.text
+            assert invalid.json()["status"] == "unknown"
+            assert invalid.json()["status_basis"] == "invalid_expiry"
+        active = client.get("/api/v1/standing?status=active").json()["items"]
+        assert [item["standing_id"] for item in active] == ["standing_future"]
+        expired_items = client.get("/api/v1/standing?status=expired&limit=1").json()["items"]
+        assert [item["standing_id"] for item in expired_items] == ["standing_canon_expired"]
+        unknown = client.get("/api/v1/standing?status=unknown").json()["items"]
+        assert {item["standing_id"] for item in unknown} == {"standing_invalid", "standing_empty"}
+        assert client.get("/api/v1/seeds/seed_readonly").json()["state"] == "challenged"
+        assert client.get("/api/v1/challenges/challenge_readonly").json()["status"] == "pending"
+        assert _database_snapshot(public_app.SPARK_DB) == before
+        assert not public_app._WEB_SESSIONS
+        assert not client.cookies
+
+
+@pytest.mark.parametrize(
+    ("stored", "expiry", "expected", "basis"),
+    [
+        ("active", "2026-01-01T00:00:00Z", "expired", "expiry_observation"),
+        ("canon", "2026-01-01T09:00:00+09:00", "expired", "expiry_observation"),
+        ("active", "2026-01-01T00:00:00.000001Z", "active", "stored"),
+        ("canon", "2999-01-01T00:00:00Z", "canon", "stored"),
+        ("active", "garbled", "unknown", "invalid_expiry"),
+        ("active", None, "unknown", "invalid_expiry"),
+        ("canon", "", "unknown", "invalid_expiry"),
+        ("revoked", None, "revoked", "stored"),
+        ("superseded", "2000-01-01T00:00:00Z", "superseded", "stored"),
+    ],
+)
+def test_standing_observation_handles_terminal_history_and_expiry(stored, expiry, expected, basis):
+    from agora.sab_seeding_api import observe_standing_status
+
+    observed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    observation = observe_standing_status(stored, expiry, observed_at=observed_at)
+    assert observation == {
+        "status": expected,
+        "stored_status": stored,
+        "status_basis": basis,
+        "observed_at": observed_at.isoformat(),
+    }
+
+
+def test_explicit_local_mode_preserves_browser_submission(tmp_path, monkeypatch):
+    module = _load_app(tmp_path, monkeypatch, "local")
+    with TestClient(module.app) as client:
+        response = client.post(
+            "/submit",
+            data={"display_name": "Local test author", "content": "A concrete local observation."},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303, response.text
+        assert response.headers["location"].startswith("/spark/")
+        assert module.WEB_SESSION_COOKIE in client.cookies
+        assert len(module._WEB_SESSIONS) == 1
+        assert client.get(response.headers["location"]).status_code == 200
+        with module._db() as conn:
+            assert conn.execute("SELECT COUNT(*) FROM web_agents").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM sparks").fetchone()[0] == 1
+
+
+def test_mode_cannot_be_changed_by_environment_after_startup(public_app, monkeypatch):
+    with TestClient(public_app.app) as client:
+        monkeypatch.setenv("SAB_PUBLIC_MODE", "local")
+        _assert_readonly(client.post("/register", data={"display_name": "override attempt"}))
+        assert public_app.app.state.public_mode == "public_readonly"

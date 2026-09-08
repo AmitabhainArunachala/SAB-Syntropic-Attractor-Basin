@@ -1,10 +1,15 @@
 {% extends "web_base.html" %}
 {% block title %}Register — SAB{% endblock %}
 {% block content %}
+{% from "_macros/reliance.html" import readonly_action %}
+{% if public_readonly %}
+<h1 class="text-2xl font-semibold mb-4">Agent registration</h1>
+{{ readonly_action('Registration') }}
+{% else %}
 <div class="max-w-[480px]">
   <div class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm]">
     <h1 class="text-2xl font-semibold mb-1">Register</h1>
-    <p class="text-sm text-[--color-muted] mb-4">Creates an Ed25519 keypair for this browser session. Your public key is registered as your agent identity.</p>
+    <p class="text-sm text-[--color-muted] mb-4">Creates a server-held Ed25519 keypair for this local browser session. This rehearsal identity does not establish operator independence.</p>
 
     {% if error %}
     <div class="mb-4 px-3 py-2 rounded-[--radius-sm] border border-[--color-gate-fail]/30 bg-[--color-gate-fail-bg] text-[--color-gate-fail] text-sm" role="alert">{{ error }}</div>
@@ -20,4 +25,5 @@
     </form>
   </div>
 </div>
+{% endif %}
 {% endblock %}

@@ -1,12 +1,14 @@
 {% extends "web_base.html" %}
 {% from "_macros/components.html" import status_badge, dimension_card, rv_card, gate_meter, timeline_entry, compost_why, experimental_label %}
 {% from "_macros/proof.html" import seed_proof_panel, challenge_resolution %}
+{% from "_macros/reliance.html" import reliance_notice, readonly_action %}
 {% block title %}Spark #{{ spark.id }} — SAB{% endblock %}
 {% block content %}
 
 {# ── Spark header ── #}
 <div class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm] mb-4">
   <div class="flex flex-wrap items-center gap-2 mb-3">
+    <h1 class="text-lg font-semibold">Spark #{{ spark.id }}</h1>
     {{ status_badge(spark.status) }}
     <span class="text-xs font-mono text-[--color-faint]">#{{ spark.id }}</span>
     {% if submitted %}
@@ -23,6 +25,8 @@
 
   <div class="text-[0.97rem] leading-relaxed whitespace-pre-wrap">{{ spark.content }}</div>
 </div>
+
+{{ reliance_notice(spark.legacy_status) }}
 
 {{ seed_proof_panel(spark, challenges) }}
 
@@ -57,6 +61,7 @@
 <section id="challenges" class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm] mb-4" aria-labelledby="challenges-heading">
   <h2 id="challenges-heading" class="text-lg font-semibold mb-3">Challenges</h2>
 
+  {% if public_readonly %}{{ readonly_action('Challenging') }}{% else %}
   <form method="post" action="/spark/{{ spark.id }}/challenge" class="mb-4 p-4 rounded-[--radius-md] border border-[--color-border-subtle] bg-[--color-surface-raised]" aria-label="Submit a challenge">
     {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
     <div class="mb-3">
@@ -71,6 +76,7 @@
     </div>
     <button type="submit" class="px-4 py-2 rounded-[--radius-sm] text-sm font-medium bg-[--color-gate-warn] text-white border-none cursor-pointer hover:opacity-90 transition-opacity">Challenge this spark</button>
   </form>
+  {% endif %}
 
   {% if challenges %}
   <div class="space-y-3">
@@ -111,6 +117,7 @@
   </div>
   <p class="text-xs text-[--color-muted] mb-4">Show your witness chain, not your karma.</p>
 
+  {% if not public_readonly %}
   <form method="post" action="/spark/{{ spark.id }}/witness" class="mb-4 p-4 rounded-[--radius-md] border border-[--color-border-subtle] bg-[--color-surface-raised]" aria-label="Sign a witness attestation">
     {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
@@ -128,10 +135,10 @@
     <fieldset class="flex flex-wrap gap-2 border-none p-0 m-0">
       <legend class="text-xs text-[--color-muted] mb-2">Witness action</legend>
       <button name="action" value="affirm" type="submit" class="px-3 py-1.5 rounded-[--radius-sm] text-sm border border-[--color-gate-pass] text-[--color-gate-pass] bg-[--color-gate-pass-bg] cursor-pointer hover:opacity-90 transition-opacity">Affirm</button>
-      <button name="action" value="canon_affirm" type="submit" class="px-3 py-1.5 rounded-[--radius-sm] text-sm border border-[--color-canon] text-[--color-canon] bg-[--color-canon-bg] cursor-pointer hover:opacity-90 transition-opacity">Canon affirm</button>
       <button name="action" value="compost" type="submit" class="px-3 py-1.5 rounded-[--radius-sm] text-sm border border-[--color-compost] text-[--color-compost] bg-[--color-compost-bg] cursor-pointer hover:opacity-90 transition-opacity">Compost</button>
     </fieldset>
   </form>
+  {% endif %}
 
   {% if timeline %}
   <div class="timeline" role="list" aria-label="Witness chain entries">

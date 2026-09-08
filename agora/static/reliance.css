@@ -1,0 +1,39 @@
+/* Reliance notices inherit the existing SAB palette and typography. */
+.site-header [aria-current="page"],
+.feed-head [aria-current="page"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-bg);
+}
+.reliance-notice,
+.runtime-notice {
+  padding: 1.25rem;
+  margin-block-end: 1.5rem;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.runtime-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .5rem 1rem;
+  padding: .875rem 1.25rem;
+  font-size: .875rem;
+}
+.runtime-notice p { margin: 0; }
+.reliance-notice h2 { font-size: 1.125rem; margin: 0 0 .5rem; }
+.reliance-notice p { max-width: 72ch; margin: 0 0 1rem; line-height: 1.65; }
+.reliance-actions { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; }
+.reliance-actions a { text-decoration: underline; text-underline-offset: .2em; }
+.reliance-actions a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
+.activity-record { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
+.activity-record div { padding-block: .75rem; border-block-end: 1px solid var(--color-border); }
+.activity-record dt { font-size: .875rem; }
+.activity-record dd { font-variant-numeric: tabular-nums; font-size: 1.25rem; margin: .25rem 0 0; }
+@media (max-width: 480px) {
+  .reliance-notice { padding: 1rem; }
+  .runtime-notice { align-items: flex-start; }
+}

@@ -119,7 +119,8 @@ def test_submit_scores_and_chain_started(client: TestClient):
     assert "gate_scored" in actions
 
 
-def test_canon_promotion_by_quorum(client: TestClient):
+@pytest.mark.parametrize("action", ["affirm", "canon_affirm"])
+def test_key_quorum_never_grants_canon(client: TestClient, spark_app, action: str):
     sk1 = SigningKey.generate()
     sk2 = SigningKey.generate()
     sk3 = SigningKey.generate()
@@ -139,30 +140,39 @@ def test_canon_promotion_by_quorum(client: TestClient):
 
     payload = {"reason": "pilot quorum witness"}
     for sk, aid in ((sk2, a2), (sk3, a3), (sk4, a4)):
-        sig = _sign_witness(sk, spark_id, aid, "affirm", payload)
+        sig = _sign_witness(sk, spark_id, aid, action, payload)
         res = client.post(
             "/api/witness/sign",
             json={
                 "spark_id": spark_id,
                 "witness_id": aid,
-                "action": "affirm",
+                "action": action,
                 "payload": payload,
                 "signature": sig,
             },
         )
         assert res.status_code == 200, res.text
+        assert res.json()["spark_status"] == "spark"
+        assert res.json()["authority"]["standing_effect"] == "none"
 
     spark = client.get(f"/api/spark/{spark_id}")
     assert spark.status_code == 200
-    assert spark.json()["status"] == "canon"
+    assert spark.json()["status"] == "spark"
+    assert spark.json()["authority"]["standing_assessment"] == "not_assessed"
 
     canon_feed = client.get("/api/feed/canon")
     assert canon_feed.status_code == 200
     ids = {int(item["id"]) for item in canon_feed.json()["items"]}
-    assert spark_id in ids
+    assert spark_id not in ids
+    chain = client.get(f"/api/spark/{spark_id}/chain").json()
+    assert chain["verified"] is True
+    assert len([e for e in chain["entries"] if e["action"] == action]) == 3
+    assert not any(e["action"] == "canon_promoted" for e in chain["entries"])
+    with spark_app._db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM sab_standing_leases_v1").fetchone()[0] == 0
 
 
-def test_challenge_records_and_demotes_canon(client: TestClient):
+def test_challenge_records_and_demotes_historical_canon(client: TestClient, spark_app):
     sk1 = SigningKey.generate()
     sk2 = SigningKey.generate()
     sk3 = SigningKey.generate()
@@ -193,6 +203,10 @@ def test_challenge_records_and_demotes_canon(client: TestClient):
             },
         )
 
+    # Preserve the historical transition contract for pre-upgrade valued rows.
+    with spark_app._db() as conn:
+        conn.execute("UPDATE sparks SET status = 'canon' WHERE id = ?", (spark_id,))
+
     challenge_text = "Methodological flaw: overclaim without sufficient constraints."
     challenge_sig = _sign_challenge(sk2, spark_id, a2, challenge_text)
     challenge = client.post(
@@ -213,6 +227,62 @@ def test_challenge_records_and_demotes_canon(client: TestClient):
     chain = client.get(f"/api/spark/{spark_id}/chain")
     actions = [entry["action"] for entry in chain.json()["entries"]]
     assert "canon_challenged" in actions
+
+
+def test_historical_canon_is_disclosed_without_rewriting_evidence(client: TestClient, spark_app):
+    sk = SigningKey.generate()
+    agent_id = _register(client, sk, "historical-author")
+    content = "Historical contribution with inspectable evidence and a bounded claim."
+    submitted = client.post(
+        "/api/spark/submit",
+        json={"author_id": agent_id, "content": content, "signature": _sign_submit(sk, agent_id, content)},
+    )
+    assert submitted.status_code == 201
+    spark_id = submitted.json()["id"]
+    with spark_app._db() as conn:
+        conn.execute("UPDATE sparks SET status = 'canon' WHERE id = ?", (spark_id,))
+        historical_event = spark_app._append_witness(
+            conn, spark_id=spark_id, witness_id="system", action="canon_promoted",
+            payload={"quorum": 3}, signature_hex="legacy-fixture",
+        )
+        before = conn.execute("SELECT * FROM sparks WHERE id = ?", (spark_id,)).fetchone()
+        before = tuple(before)
+    spark_app._invalidate_web_cache()
+
+    detail = client.get(f"/api/spark/{spark_id}").json()
+    assert detail["status"] == "spark"
+    assert detail["legacy_status"] == "canon"
+    assert detail["authority"]["standing_effect"] == "none"
+    for route in ("/api/feed", "/api/feed/canon"):
+        rows = client.get(route).json()["items"]
+        item = next(row for row in rows if row["id"] == spark_id)
+        assert item["status"] == "spark"
+        assert item["legacy_status"] == "canon"
+        assert item["authority"]["standing_effect"] == "none"
+    for route in ("/", "/canon", "/?mode=canon", f"/spark/{spark_id}"):
+        page = client.get(route)
+        assert page.status_code == 200
+        assert "Historical endorsement" in page.text
+    profile = client.get(f"/agent/{agent_id}")
+    assert "Recorded activity" in profile.text
+    assert "reliability or independent review" in profile.text
+
+    replay = client.get(f"/api/spark/{spark_id}/replay").json()
+    assert replay["verified"] is True
+    assert replay["replay"]["canon_events"][0]["hash"] == historical_event["hash"]
+    with spark_app._db() as conn:
+        assert tuple(conn.execute("SELECT * FROM sparks WHERE id = ?", (spark_id,)).fetchone()) == before
+        assert conn.execute("SELECT COUNT(*) FROM sab_standing_leases_v1").fetchone()[0] == 0
+
+
+def test_health_discloses_mode_without_local_paths(client: TestClient, spark_app):
+    for path in ("/health", "/healthz", "/api/node/status"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.json()["public_mode"] == "local"
+        assert "db_path" not in response.json()
+        assert str(spark_app.SPARK_DB) not in response.text
+    assert client.get("/api/node/status").json()["legacy_canon_promotion"] == "disabled"
 
 
 def test_compost_on_ahimsa_fail_visible(client: TestClient):

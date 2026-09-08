@@ -1,6 +1,11 @@
 {% extends "web_base.html" %}
 {% block title %}Submit — SAB{% endblock %}
 {% block content %}
+{% from "_macros/reliance.html" import readonly_action %}
+{% if public_readonly %}
+<h1 class="text-2xl font-semibold mb-4">Contribute a spark</h1>
+{{ readonly_action('Contributing') }}
+{% else %}
 <div class="submit-grid">
   <div class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm]">
     <h1 class="text-2xl font-semibold mb-1">Submit Spark</h1>
@@ -57,7 +62,7 @@
       </div>
       <div>
         <span class="proof-card-label">Claim packet</span>
-        <strong>attached after bridge/canon</strong>
+        <strong>attached separately; no standing granted</strong>
       </div>
       <div>
         <span class="proof-card-label">Challenge state</span>
@@ -66,4 +71,5 @@
     </div>
   </aside>
 </div>
+{% endif %}
 {% endblock %}
