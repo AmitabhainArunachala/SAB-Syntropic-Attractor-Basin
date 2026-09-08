@@ -1515,7 +1515,7 @@ async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
             identity = AgentIdentityV1.from_public_key(
                 display_name=str(row["name"]),
                 public_key=str(row["public_key"]),
-                created_at=datetime.fromisoformat(str(row["created_at"])),
+                created_at=datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00")),
                 evidence_refs=[f"web_agents:{row['id']}"],
             ).model_dump(mode="json", by_alias=True)
         key_control = KEY_CONTROL.binding_status(conn, str(row["id"])) if KEY_CONTROL is not None else {"status": "unproven"}
@@ -1561,7 +1561,7 @@ async def submit_spark(req: SparkSubmitRequest) -> Dict[str, Any]:
             ).fetchall()
         ]
 
-        created_at = datetime.fromisoformat(str(agent_row["created_at"]))
+        created_at = datetime.fromisoformat(str(agent_row["created_at"]).replace("Z", "+00:00"))
         age_hours = max(0.0, (datetime.now(timezone.utc) - created_at.replace(tzinfo=timezone.utc)).total_seconds() / 3600.0)
         gate_context = {
             "author_posts_last_hour": counts["hour"],
@@ -1818,7 +1818,7 @@ async def sublate_challenge(
                 """
             ).fetchall()
         ]
-        created_at = datetime.fromisoformat(str(corrector_row["created_at"]))
+        created_at = datetime.fromisoformat(str(corrector_row["created_at"]).replace("Z", "+00:00"))
         age_hours = max(
             0.0,
             (datetime.now(timezone.utc) - created_at.replace(tzinfo=timezone.utc)).total_seconds() / 3600.0,

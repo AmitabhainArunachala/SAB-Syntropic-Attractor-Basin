@@ -795,8 +795,10 @@ class KeyControlService:
                 or message["challenge_id"] != row["challenge_id"]
                 or message["subject_id"] != row["subject_id"]
                 or message["action"] != row["action"]
-                or _finite(row["expires_monotonic"]) - _finite(row["issued_monotonic"])
-                != self.ttl_seconds
+                # Reproduce issuance's floating-point addition exactly. The
+                # inverse subtraction can round to a value adjacent to the TTL.
+                or _finite(row["expires_monotonic"])
+                != _finite(row["issued_monotonic"]) + self.ttl_seconds
             ):
                 raise _inconsistent()
             self._check_expiry(message, row, now, mono)

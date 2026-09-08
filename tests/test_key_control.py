@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -952,3 +953,66 @@ def test_locked_storage_reports_stable_error_without_partial_writes(service, tmp
 def conn_count(conn, table):
     assert table == "web_agents"
     return conn.execute("SELECT count(*) FROM web_agents").fetchone()[0]
+
+
+@pytest.mark.parametrize("origin", [63.123456789, 100.123456789, 120.123456789, 200.1])
+def test_fractional_monotonic_origin_accepts_its_exact_stored_deadline(conn, origin):
+    clock = Clock()
+    clock.mono = origin
+    service = kc.KeyControlService(ORIGIN, utc_now=clock.utc, monotonic=clock.monotonic)
+    result = enroll(service, conn)
+    assert result["binding"]["status"] == "active"
+    assert (
+        service.require_active_binding(conn, result["identity"]["subject_id"])
+        == registration()["public_key"]
+    )
+
+
+@pytest.mark.parametrize("origin", [63.0, 100.0, 120.0, 200.0])
+def test_dual_signature_rotation_after_fractional_monotonic_advance(conn, origin):
+    clock = Clock()
+    clock.mono = origin
+    service = kc.KeyControlService(ORIGIN, utc_now=clock.utc, monotonic=clock.monotonic)
+    first = enroll(service, conn)
+    clock.advance(0.125)
+    enroll(service, conn, key(3))
+    clock.advance(0.123456789)
+    challenge = service.issue(
+        conn,
+        {
+            "action": "rotate",
+            "subject_id": first["identity"]["subject_id"],
+            "registration": registration(key(2)),
+        },
+    )
+    result = service.verify(conn, sign(challenge, successor=key(2)))
+    assert result["binding"]["status"] == "active"
+    assert result["previous_binding"]["status"] == "superseded"
+    assert result["authority_effect"] == result["standing_effect"] == "none"
+
+
+@pytest.mark.parametrize("direction", [-math.inf, math.inf])
+def test_one_ulp_change_to_monotonic_deadline_is_still_corruption(conn, direction):
+    clock = Clock()
+    clock.mono = 63.123456789
+    service = kc.KeyControlService(ORIGIN, utc_now=clock.utc, monotonic=clock.monotonic)
+    challenge = service.issue(conn, {"action": "register", "registration": registration()})
+    deadline = conn.execute(
+        "SELECT expires_monotonic FROM sab_key_control_challenges_v1"
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE sab_key_control_challenges_v1 SET expires_monotonic=?",
+        (math.nextafter(deadline, direction),),
+    )
+    conn.commit()
+    assert_failure("key_control_inconsistent", lambda: service.verify(conn, sign(challenge)), conn)
+
+
+@pytest.mark.parametrize("origin", [63.123456789, 100.123456789, 120.123456789, 200.1])
+def test_fractional_monotonic_deadline_remains_inclusively_expired(conn, origin):
+    clock = Clock()
+    clock.mono = origin
+    service = kc.KeyControlService(ORIGIN, utc_now=clock.utc, monotonic=clock.monotonic)
+    challenge = service.issue(conn, {"action": "register", "registration": registration()})
+    clock.advance(120)
+    assert_failure("challenge_expired", lambda: service.verify(conn, sign(challenge)), conn)
