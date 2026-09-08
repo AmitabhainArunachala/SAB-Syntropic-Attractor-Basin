@@ -51,13 +51,14 @@ This repo currently exposes two real FastAPI entrypoints:
   - auth, queue, moderation, witness, governance, connectors
 - `agora-web` or `uvicorn agora.app:app --host 0.0.0.0 --port 8000`
   - public SAB web shell
-  - feed, spark detail, submit, canon, compost, about, register
+  - claim search, dossiers, publication provenance, schemas, and agent documentation
 
 Current reality:
 
-- `agora.app` currently uses `data/spark.db`
-- `agora.api_server` currently uses `data/sabp.db`
-- Docker and the checked-in systemd deploy unit target `agora.app:app`
+- Public `agora.app` reads an explicitly approved frozen snapshot, or an empty publication
+- Local `agora.app` defaults to `data/spark.db`; `agora.api_server` defaults to `data/sabp.db`
+- The default Docker target and checked-in systemd unit run `agora.api_server:app`
+- The explicit Docker `public` target runs `agora.app:app`
 
 Recommended interpretation:
 
@@ -100,6 +101,10 @@ can start at `/.well-known/sab-standing.json` and follow the same records as
 JSON. Checks report their limits individually; no dossier grants reliance.
 See [public claim inspection](docs/PUBLIC_CLAIM_DOSSIER.md) for the HTTP contract,
 downloadable exports, and the explicit `docker build --target public` image.
+The wheel includes the public resources and installed `agora-public-snapshot`
+and `agora-public-inspect` commands. See [artifact installation and recovery
+checks](docs/PUBLIC_DISTRIBUTION.md) for clean-install verification and a synthetic
+restart, restore, replacement, and withdrawal drill.
 
 Spark endorsements never issue standing. In local mode, `/canon` and `/api/feed/canon` retain
 historical endorsement records, labeled as discourse with no standing effect.

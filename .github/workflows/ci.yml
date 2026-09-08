@@ -102,6 +102,53 @@ jobs:
         PY
         safety check -r requirements.txt -r requirements-dev.txt
 
+  distribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Build wheel and rebuild from source distribution
+      run: |
+        set -euo pipefail
+        python -m pip install build
+        python -m build --sdist --wheel --outdir "$RUNNER_TEMP/sab-dist"
+        python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/sab-sdist-wheel" "$RUNNER_TEMP/sab-dist/"*.tar.gz
+    - name: Inspect installed artifacts and rehearse public recovery
+      run: |
+        set -euo pipefail
+        cd "$RUNNER_TEMP"
+        for kind in direct sdist; do
+          if [ "$kind" = direct ]; then
+            wheels=("$RUNNER_TEMP/sab-dist/"*.whl)
+          else
+            wheels=("$RUNNER_TEMP/sab-sdist-wheel/"*.whl)
+          fi
+          wheel="${wheels[0]}"
+          venv="$RUNNER_TEMP/sab-installed-$kind"
+          python -m venv "$venv"
+          "$venv/bin/python" -m pip install "$wheel"
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/check_installed_public.py" \
+            --source "$GITHUB_WORKSPACE" --wheel "$wheel" --output "$RUNNER_TEMP/sab-inspection-$kind"
+          wheel_sha=$(sha256sum "$wheel" | cut -d ' ' -f 1)
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_public_recovery.py" \
+            --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-recovery-$kind"
+        done
+    - name: Retain synthetic artifact verification receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: public-distribution-${{ matrix.python-version }}
+        path: |
+          ${{ runner.temp }}/sab-inspection-*/receipt.json
+          ${{ runner.temp }}/sab-recovery-*/receipt.json
+          ${{ runner.temp }}/sab-recovery-*/*.log
+
   lint:
     runs-on: ubuntu-latest
     steps:

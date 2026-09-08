@@ -65,7 +65,7 @@ again does not import later revocations; a newly reviewed deployment is required
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 SAB_PUBLIC_MODE=public_readonly uvicorn agora.app:app --host 127.0.0.1 --port 8000
-python scripts/check_public_inspection.py http://127.0.0.1:8000
+agora-public-inspect http://127.0.0.1:8000
 ```
 
 The smoke command follows discovery, reads advertised resources, checks a

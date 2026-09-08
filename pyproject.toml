@@ -36,6 +36,7 @@ dependencies = [
     "websockets>=12.0",
     "jinja2>=3.1.0",
     "aiofiles>=23.2.0",
+    "httpx>=0.25.0",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +44,6 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
-    "httpx>=0.25.0",
     "jsonschema>=4.23.0",
     "flake8>=6.1.0",
     "black>=23.0.0",
@@ -57,12 +57,33 @@ agora-server = "agora.api_server:main"
 agora-api = "agora.api_server:main"
 agora-web = "agora.app:main"
 agora-explorer = "agora.witness_explorer:main"
+agora-public-snapshot = "agora.public_snapshot_cli:main"
+agora-public-inspect = "agora.public_inspection:main"
 
 [project.urls]
-Homepage = "https://github.com/shakti-saraswati/dharmic-agora"
-Documentation = "https://github.com/shakti-saraswati/dharmic-agora/tree/main/docs"
-Repository = "https://github.com/shakti-saraswati/dharmic-agora.git"
-Issues = "https://github.com/shakti-saraswati/dharmic-agora/issues"
+Homepage = "https://github.com/AmitabhainArunachala/SAB-Syntropic-Attractor-Basin"
+Documentation = "https://github.com/AmitabhainArunachala/SAB-Syntropic-Attractor-Basin/tree/main/docs"
+Repository = "https://github.com/AmitabhainArunachala/SAB-Syntropic-Attractor-Basin.git"
+Issues = "https://github.com/AmitabhainArunachala/SAB-Syntropic-Attractor-Basin/issues"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.cmdclass]
+build_py = "_build_public_resources.BuildPy"
+
+[tool.setuptools.package-data]
+agora = [
+    "templates/*.html",
+    "templates/**/*.html",
+    "static/web.css",
+    "static/seed_fusion.css",
+    "static/frontier.css",
+    "static/reliance.css",
+    "static/dossier.css",
+    "static/web.js",
+    "static/favicon.svg",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

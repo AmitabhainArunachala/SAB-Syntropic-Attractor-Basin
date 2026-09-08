@@ -57,18 +57,20 @@ review values, private reviewer notes, consent rationale, and source paths.
 The offline CLI keeps review separate from export:
 
 ```sh
-python scripts/export_public_snapshot.py plan \
+agora-public-snapshot plan \
   --source /absolute/quiescent-source.sqlite3 \
   --seed-id EXACT_SELECTED_SEED_ID --observed-at ACTUAL_OBSERVATION_ISO8601 \
   --review-out /absolute/private-review/new-review.json
 # Complete the per-record review and retain its permission/consent evidence privately.
-python scripts/export_public_snapshot.py export \
+agora-public-snapshot export \
   --source /absolute/quiescent-source.sqlite3 \
   --review /absolute/private-review/completed-review.json \
   --bundle /absolute/new-approved-bundle
 ```
 
 Keep local reviews and exported runtime artifacts under `~/.dharma/`. The CLI
+is installed with the wheel; `python scripts/export_public_snapshot.py` remains
+the equivalent checkout wrapper. It
 requires a quiescent standalone source and refuses WAL/SHM/journal sidecars;
 do not delete them to force export. Use a consistent offline source or the
 library's caller-owned SQLite read transaction. Export destinations are
@@ -109,7 +111,7 @@ For an empty public process:
 ```sh
 PYTHONDONTWRITEBYTECODE=1 SAB_PUBLIC_MODE=public_readonly \
   uvicorn agora.app:app --host 127.0.0.1 --port 8000
-python scripts/check_public_inspection.py http://127.0.0.1:8000
+agora-public-inspect http://127.0.0.1:8000
 ```
 
 For a reviewed bundle, set the two publication variables before startup. The
@@ -130,6 +132,18 @@ operator review. The example does not publish a real claim or authorize a
 public TLS deployment. The smoke report distinguishes configured/populated
 inspection from an empty instance.
 
+Acceptance of a configured publication must compare the independently retained
+approved pin, rather than only the server's own advertised digest:
+
+```sh
+agora-public-inspect http://127.0.0.1:8000 \
+  --expected-manifest-sha256 REVIEWED_MANIFEST_SHA256
+```
+
+The command rejects a different or unconfigured publication before its write
+rejection probe. Without this argument it reports a discovery/transport smoke
+check with `independent_pin_checked: false`.
+
 To replace a publication, review a new complete closure, export to a new
 directory, check the new pin in an isolated instance, and restart with that
 bundle/pin pair. Compare `/publication` with the expected digest and repeat the
@@ -142,7 +156,11 @@ owned and actionable. Do not roll back to a snapshot that republishes withdrawn
 data or predates a relevant revocation; use an empty instance until a replacement
 is reviewed. Already downloaded copies are outside this server's control.
 
+The [distribution and recovery drill](PUBLIC_DISTRIBUTION.md) exercises installed
+wheels and fresh processes against synthetic approved publications. It also
+checks restoration after withdrawal using only the empty withdrawal bundle.
+
 Independent public-origin operation, a current reliance verifier, trusted-time
-and revocation freshness policy, wheel packaging, and public TLS deployment
+and revocation freshness policy, image-version rollback, and public TLS deployment
 remain separate acceptance work. Passing snapshot tests is not stage-100 or
 world-best evidence.

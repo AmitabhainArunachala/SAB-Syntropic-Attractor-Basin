@@ -22,9 +22,9 @@ from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from jinja2 import PackageLoader
 from pydantic import BaseModel, Field, field_validator
 
 from .admission_policy import FAST_LANE_AUTO
@@ -35,6 +35,12 @@ from .sab_seeding_storage import init_sab_seeding_storage
 from .sab_identity import AgentIdentityV1
 from .public_runtime import PublicMode, install_public_runtime, public_read_request, read_public_mode
 from .public_snapshot import load_public_snapshot
+from .public_resources import (
+    PublicResourceError,
+    STATIC_MEDIA_TYPES,
+    read_public_resource,
+    read_public_static,
+)
 from .witness_service import (
     PUBLICATION_WITNESS_DOMAIN,
     attach_witness_meta,
@@ -113,6 +119,9 @@ if PUBLIC_MODE == PublicMode.LOCAL:
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# Preserve Starlette's globals and the filters installed below, while reading
+# installed templates from the package without extraction or cwd lookup.
+templates.env.loader = PackageLoader("agora", "templates")
 
 
 def _evidence_url(value: Any) -> Optional[str]:
@@ -1245,18 +1254,31 @@ PUBLIC_READ_PATHS = (
     r"/api/v1/standing(?:/[^/]+)?",
 )
 install_public_runtime(app, PUBLIC_MODE, public_read_paths=PUBLIC_READ_PATHS)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-def _public_agent_doc(name: str) -> FileResponse:
-    path = REPO_ROOT / "site" / name
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"Public agent doc not found: {name}")
-    return FileResponse(path, media_type="text/markdown; charset=utf-8")
+@app.api_route("/static/{path:path}", methods=["GET", "HEAD"], name="static", include_in_schema=False)
+async def public_static_asset(path: str) -> Response:
+    try:
+        content = read_public_static(path)
+    except PublicResourceError:
+        raise HTTPException(status_code=404, detail="Public static resource unavailable") from None
+    return Response(content, media_type=STATIC_MEDIA_TYPES[path])
+
+
+def _public_document(group: str, name: str, media_type: str) -> Response:
+    try:
+        content = read_public_resource(group, name)
+    except PublicResourceError:
+        raise HTTPException(status_code=404, detail="Public resource unavailable") from None
+    return Response(content, media_type=media_type)
+
+
+def _public_agent_doc(name: str) -> Response:
+    return _public_document("docs", name, "text/markdown; charset=utf-8")
 
 
 @app.get("/skill.md", include_in_schema=False)
-async def public_skill_md() -> FileResponse:
+async def public_skill_md() -> Response:
     return _public_agent_doc("skill.md")
 
 
@@ -1320,50 +1342,38 @@ async def public_publication_manifest() -> Response:
 
 
 @app.get("/schemas/sab.public_snapshot.v1.schema.json", include_in_schema=False)
-async def public_snapshot_schema() -> FileResponse:
-    path = REPO_ROOT / "nodes" / "schemas" / "sab.public_snapshot.v1.schema.json"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Public snapshot schema unavailable")
-    return FileResponse(path, media_type="application/schema+json")
+async def public_snapshot_schema() -> Response:
+    return _public_document("schemas", "sab.public_snapshot.v1.schema.json", "application/schema+json")
 
 
 @app.get("/schemas/sab.claim_dossier.v1.schema.json", include_in_schema=False)
-async def public_claim_dossier_schema() -> FileResponse:
-    path = REPO_ROOT / "nodes" / "schemas" / "sab.claim_dossier.v1.schema.json"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Claim dossier schema unavailable")
-    return FileResponse(path, media_type="application/schema+json")
+async def public_claim_dossier_schema() -> Response:
+    return _public_document("schemas", "sab.claim_dossier.v1.schema.json", "application/schema+json")
 
 
 @app.get("/seed.md", include_in_schema=False)
-async def public_seed_md() -> FileResponse:
+async def public_seed_md() -> Response:
     return _public_agent_doc("seed.md")
 
 
 @app.get("/auth.md", include_in_schema=False)
-async def public_auth_md() -> FileResponse:
+async def public_auth_md() -> Response:
     return _public_agent_doc("auth.md")
 
 
 @app.get("/heartbeat.md", include_in_schema=False)
-async def public_heartbeat_md() -> FileResponse:
+async def public_heartbeat_md() -> Response:
     return _public_agent_doc("heartbeat.md")
 
 
 @app.get("/rules.md", include_in_schema=False)
-async def public_rules_md() -> FileResponse:
+async def public_rules_md() -> Response:
     return _public_agent_doc("rules.md")
 
 
 @app.get("/schemas/sab.seed_packet.v1.schema.json", include_in_schema=False)
-async def public_seed_packet_schema() -> FileResponse:
-    for path in (
-        REPO_ROOT / "nodes" / "schemas" / "sab.seed_packet.v1.schema.json",
-        REPO_ROOT / "site" / "schemas" / "sab.seed_packet.v1.schema.json",
-    ):
-        if path.is_file():
-            return FileResponse(path, media_type="application/schema+json")
-    raise HTTPException(status_code=404, detail="Public seed packet schema not found")
+async def public_seed_packet_schema() -> Response:
+    return _public_document("schemas", "sab.seed_packet.v1.schema.json", "application/schema+json")
 
 
 from .sab_seeding_api import (  # noqa: E402

@@ -1,4 +1,6 @@
 **
+!pyproject.toml
+!_build_public_resources.py
 !Dockerfile
 !requirements.txt
 !agora/
