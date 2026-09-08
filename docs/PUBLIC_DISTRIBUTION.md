@@ -1,7 +1,7 @@
 # Installed public artifacts and recovery
 
 The `dharmic-agora` wheel supplies the public app, templates, seven static
-assets, five agent documents, three served schemas, and its runtime dependencies.
+assets, five agent documents, four served schemas, and its runtime dependencies.
 It also installs `agora-public-snapshot` for offline publication review/export and
 `agora-public-inspect` for the public HTTP contract. Existing repository scripts
 remain wrappers around those same implementations.
@@ -23,7 +23,7 @@ separate surface. Public inspection never initializes their authority database.
 ## Resource ownership
 
 Canonical Markdown remains in `site/`; canonical served schemas remain in
-`nodes/schemas/`. The build stages only the eight named files into
+`nodes/schemas/`. The build stages only the nine named files into
 `agora/_public_resources/`. These generated copies live in build output, with
 no second source tree to edit. `MANIFEST.in` carries the canonical inputs and
 build helper into source distributions, so rebuilding a wheel preserves them.
@@ -52,7 +52,8 @@ The check verifies that imports come from the installed environment, installed
 application files match the exact wheel, and all served resource bytes match
 canonical sources. It exercises empty HTML, discovery, schemas, readiness,
 unapproved-route rejection, write rejection, and the installed offline CLI.
-Package files must remain unchanged; private database/key sentinel paths must
+Publication status and freshness metadata are checked as historical observations,
+with currentness unestablished. Package files must remain unchanged; private database/key sentinel paths must
 remain absent. `-I -B` excludes checkout/PYTHONPATH imports and bytecode writes.
 
 ## Synthetic process recovery drill
@@ -86,3 +87,8 @@ independent operators, trusted time, revocation freshness, or broader C7/stage
 acceptance. A valid old manifest cannot by itself reveal a later withdrawal;
 operators must retain recovery eligibility and must not republish withdrawn
 data. Public TLS deployment still requires explicit approval.
+
+See [the freshness contract](PUBLIC_FRESHNESS.md) for the local age limit, clock
+uncertainty, historical standing projections, and optional inspector age admission.
+The recovery drill keeps its synthetic dates fixed and does not refresh them to
+make a local age assessment pass.

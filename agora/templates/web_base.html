@@ -25,7 +25,7 @@
     <header class="site-header flex flex-wrap gap-3 items-center justify-between mb-6">
       <nav class="flex flex-wrap gap-2 items-center" aria-label="Primary navigation">
         <a href="/" class="text-lg font-semibold text-[--color-ink] hover:no-underline mr-2" aria-label="SAB home">SAB</a>
-        {% set nav_items = [('/', 'Proof dossier'), ('/claims', 'Claims'), ('/frontier', 'Frontier'), ('/feed', 'Discussion'), ('/about', 'Protocol')] %}
+        {% set nav_items = [('/', 'Proof dossier'), ('/claims', 'Claims'), ('/frontier', 'Frontier'), ('/feed', 'Discussion'), ('/about', 'Protocol'), ('/status', 'Status')] %}
         {% for href, label in nav_items %}
         {% if not public_readonly or href != '/feed' %}
         <a class="px-3 py-1.5 rounded-full text-sm border border-[--color-border-subtle] bg-[--color-surface] hover:border-[--color-accent] hover:text-[--color-accent] hover:no-underline transition-colors" href="{{ href }}"{% if path_name is defined and path_name == href %} aria-current="page"{% endif %}>{{ label }}</a>
@@ -54,7 +54,20 @@
 
     <main id="main-content">
       {% if public_readonly %}
-      <div class="runtime-notice" role="note"><strong>Open for inspection</strong><p>{% if publication.configured %}Published snapshot observed at <time datetime="{{ publication.observed_at }}">{{ publication_observed_label }}</time>. <a href="/publication">Publication details</a>.{% else %}No public snapshot is configured. There are no published claims to inspect yet.{% endif %} Public contributions are paused.</p></div>
+      {% set observation = publication.publication_observation %}
+      {% set age_state = observation.local_age_policy.status %}
+      <div class="runtime-notice publication-notice" data-publication-age="{{ age_state }}" role="note">
+        <strong>{% if age_state == 'stale' %}This publication is out of date{% elif age_state == 'future_observation' %}Publication time needs review{% elif age_state == 'clock_uncertain' %}Time checks are uncertain{% elif publication.configured %}Historical inspection{% else %}Open for inspection{% endif %}</strong>
+        <p>{% if publication.configured %}
+          Snapshot observed at <time datetime="{{ publication.observed_at }}">{{ publication_observed_label }}</time>.
+          {% if age_state == 'stale' %}It exceeds this site's declared age limit. Treat these records as history.
+          {% elif age_state == 'future_observation' %}Its observation time is ahead of this server's clock beyond the allowed tolerance.
+          {% elif age_state == 'clock_uncertain' %}Clock changes prevent a dependable age or deadline assessment.
+          {% else %}Its declared age is within the local limit; currentness is unverified.{% endif %}
+          Later corrections and revocations have not been checked. <a href="/status">Publication details</a>.
+          {% else %}No public snapshot is configured. There are no published claims to inspect yet.{% endif %}
+          Public contributions are paused.</p>
+      </div>
       {% else %}
       <div class="runtime-notice" role="note"><strong>Local rehearsal</strong><p>Writing is enabled for this instance. Participation does not establish independent review.</p></div>
       {% endif %}

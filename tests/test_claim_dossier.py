@@ -188,7 +188,16 @@ def _check(dossier, check_id):
 
 
 def _inspection_app(conn):
+    from agora.public_freshness import FreshnessPolicy, PublicationFreshnessObserver
+
     path = Path(conn.execute("PRAGMA database_list").fetchone()[2])
+    # This is an explicitly synthetic clock/source descriptor for route tests,
+    # not a production publication or evidence of current standing.
+    observer = PublicationFreshnessObserver(
+        {"configured": True, "observed_at": NOW.isoformat(),
+         "manifest_sha256": "0" * 64, "fixture": "synthetic dossier route source"},
+        FreshnessPolicy(), utc_now=lambda: NOW, monotonic=lambda: 0.0,
+    )
 
     @contextmanager
     def database():
@@ -213,6 +222,7 @@ def _inspection_app(conn):
                 utc_now=forbidden,
                 invalidate_web_cache=forbidden,
                 read_only=True,
+                read_observation=observer.observe,
             )
         )
     )

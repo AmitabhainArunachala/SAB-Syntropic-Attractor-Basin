@@ -68,7 +68,12 @@ def main() -> None:
         ),
         *(
             f"agora/_public_resources/schemas/sab.{name}.v1.schema.json"
-            for name in ("seed_packet", "claim_dossier", "public_snapshot")
+            for name in (
+                "seed_packet",
+                "claim_dossier",
+                "public_snapshot",
+                "public_read_observation",
+            )
         ),
         *(
             f"agora/static/{name}"
@@ -126,7 +131,12 @@ def main() -> None:
             / "nodes"
             / "schemas"
             / f"sab.{name}.v1.schema.json"
-            for name in ("seed_packet", "claim_dossier", "public_snapshot")
+            for name in (
+                "seed_packet",
+                "claim_dossier",
+                "public_snapshot",
+                "public_read_observation",
+            )
         }
     )
     resources.update(
@@ -155,12 +165,20 @@ def main() -> None:
                 or "set-cookie" in response.headers
             ):
                 raise RuntimeError(f"{path}: public caching/cookie contract failed")
+            if path not in {"/api/feed", "/api/cache/stats", "/api/v1/agents/me/home"} and (
+                response.headers.get("sab-currentness") != "unestablished"
+                or response.headers.get("sab-publication-age-status") != "not_configured"
+            ):
+                raise RuntimeError(
+                    f"{path}: empty installation freshness headers are missing or invalid"
+                )
             return response
 
         for path in (
             "/",
             "/claims",
             "/about",
+            "/status",
             "/health",
             "/readyz",
             "/openapi.json",
@@ -176,6 +194,21 @@ def main() -> None:
         publication = read("/publication").json()
         if publication["configured"] or publication["status"] != "not_configured":
             raise RuntimeError("unconfigured installation inferred a publication")
+        observation = publication["publication_observation"]
+        if (
+            observation["schema"] != "sab.public_read_observation.v1"
+            or observation["currentness"]["status"] != "unestablished"
+            or observation["clock"]["externally_verified"] is not False
+            or observation["historical_integrity"] != "not_configured"
+            or observation["local_age_policy"]["status"] != "not_configured"
+        ):
+            raise RuntimeError("unconfigured installation inferred integrity or currentness")
+        readiness = read("/readyz").json()
+        if (
+            readiness["readiness_scope"] != "historical_inspection"
+            or readiness["current_use_eligible"] is not False
+        ):
+            raise RuntimeError("historical readiness inferred current-use eligibility")
         if read("/api/v1/claims").json()["total"] != 0:
             raise RuntimeError("unconfigured installation exposed claims")
         read("/publication/manifest", 404)
@@ -232,6 +265,7 @@ def main() -> None:
         "runtime_dependencies_only": True,
         "package_unchanged": True,
         "private_runtime_paths_absent": True,
+        "publication_observation": observation,
         "scope": "Non-editable installed wheel, empty public app and offline CLI",
     }
     (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")

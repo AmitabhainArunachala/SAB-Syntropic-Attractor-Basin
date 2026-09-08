@@ -24,6 +24,10 @@ Given this instance's origin, all links below are relative to that same origin:
    Read `links.publication` for the source observation time and manifest SHA-256.
    `configured: false` means no claims have been published on this instance.
    `links.publication_manifest` returns the exact pinned publication manifest.
+   Inspect `publication_observation`: its age assessment uses guarded local UTC;
+   `currentness.status` remains `unestablished` even within the age limit. Human
+   explanations are at `links.status`; the observation schema is at
+   `links.publication_observation_schema`.
 2. Fetch `GET /api/v1/claims?q=<search>&limit=20&offset=0`. Search covers submitted
    title, claim text, and identifiers. Optional `state` filters stored claim
    state; it does not filter verified reliance. Follow item links rather than
@@ -38,11 +42,17 @@ Given this instance's origin, all links below are relative to that same origin:
 5. Inspect unresolved challenges, scope, purpose, allowed/forbidden reliance,
    and each lease's observed status and expiry. A response or elapsed challenge
    deadline alone does not establish finality. Never infer missing permission.
+   Public `active`/`canon` stored states project to `unknown` current standing.
+   A locally elapsed expiry has an explicit time basis; it does not verify the
+   lease. Age, clock, and currentness headers accompany every allowed public read.
 6. Export the dossier using `links.download`. Preserve `identity.seed_id` and
    `identity.packet_hash` with any reproduction result. Share `links.html` with
    a human; it renders the same projection. Dossier `observed_at` describes this
    read; `/publication` describes the frozen source. Re-fetching the same
    publication does not include later revocations or establish current validity.
+   Retain `publication_observation.manifest_sha256` with the export. Treat stale,
+   future, or uncertain time as unsuitable for current-use decisions; even a
+   recent historical publication requires separate currentness verification.
 
 The public source admits explicitly reviewed complete records and preserves
 their original bytes. Publication approval establishes no truth, identity,

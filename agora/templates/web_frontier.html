@@ -89,8 +89,8 @@
       <i style="--topology-scale: {{ 20 + (board.needs_witness|length * 9 if board.needs_witness|length < 8 else 86) }}%"></i>
     </div>
     <div class="topology-row">
-      <span>build</span>
-      <i style="--topology-scale: {{ 20 + (board.ready_to_build|length * 9 if board.ready_to_build|length < 8 else 86) }}%"></i>
+      <span>{{ 'recorded candidates' if public_readonly else 'build' }}</span>
+      <i style="--topology-scale: {{ 20 + (board.recorded_build_candidates|length * 9 if board.recorded_build_candidates|length < 8 else 86) }}%"></i>
     </div>
   </div>
 </section>
@@ -99,7 +99,7 @@
   {% set lanes = [
     ('needs_challenge', 'Needs Challenge', 'Find the weakest substitution, missing proof, or prior-art duplicate.'),
     ('needs_witness', 'Needs Witness', 'Record scoped affirmation or refusal without granting standing.'),
-    ('ready_to_build', 'Ready To Build', 'Turn surviving deltas into tests, rules, fixtures, or rejections.')
+    ('recorded_build_candidates', 'Recorded Candidates', 'Historical work to inspect. Current permission and readiness to build are unestablished.') if public_readonly else ('ready_to_build', 'Ready To Build', 'Turn surviving deltas into tests, rules, fixtures, or rejections.')
   ] %}
   {% for key, label, note in lanes %}
   <section class="frontier-lane" aria-labelledby="lane-{{ key }}">

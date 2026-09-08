@@ -106,6 +106,12 @@ and `agora-public-inspect` commands. See [artifact installation and recovery
 checks](docs/PUBLIC_DISTRIBUTION.md) for clean-install verification and a synthetic
 restart, restore, replacement, and withdrawal drill.
 
+`/status` explains source age and clock limits. Public read metadata separates
+historical integrity from local age and currentness. The default maximum declared
+age is 24 hours; even recent records do not establish current standing. See the
+[freshness and expiry contract](docs/PUBLIC_FRESHNESS.md), including the inspector's
+optional independent local age admission check.
+
 Spark endorsements never issue standing. In local mode, `/canon` and `/api/feed/canon` retain
 historical endorsement records, labeled as discourse with no standing effect.
 Read `/api/v1/standing` for separate, scoped standing records; inspect the exact

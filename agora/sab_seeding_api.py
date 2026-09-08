@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from .public_freshness import PublicationObservation, current_publication_observation
 from .sab_identity import (
     AgentIdentityV1,
     HIGH_IMPACT_LEVELS,
@@ -117,6 +118,28 @@ class SabSeedingDeps:
     invalidate_web_cache: Callable[[], None]
     read_only: bool = False
     publication_configured: bool = True
+    read_observation: Optional[Callable[[], Optional[PublicationObservation]]] = None
+
+
+def _read_observation(deps: SabSeedingDeps) -> Optional[PublicationObservation]:
+    """Reuse the request's single clock sample; never call mutation dependencies."""
+    if not deps.read_only:
+        return None
+    observation = current_publication_observation()
+    if observation is None and deps.read_observation is not None:
+        observation = deps.read_observation()
+    if observation is None:
+        raise HTTPException(status_code=503, detail="Public publication observation is unavailable")
+    return observation
+
+
+def _publication_response(
+    envelope: Dict[str, Any], observation: Optional[PublicationObservation], **basis: str
+) -> Dict[str, Any]:
+    """Attach provenance to an envelope without editing embedded signed originals."""
+    if observation is None:
+        return envelope
+    return {**envelope, **basis, "publication_observation": observation.to_dict()}
 
 
 @contextmanager
@@ -133,6 +156,8 @@ def _read_v1_db(deps: SabSeedingDeps) -> Iterator[sqlite3.Connection]:
 
 
 def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
+    if deps.read_only and deps.read_observation is None:
+        raise ValueError("Public read-only routes require an explicit read_observation dependency")
     router = APIRouter(prefix="/api/v1", tags=["sab-seeding-v1"])
 
     @router.post("/agents/register", status_code=status.HTTP_201_CREATED)
@@ -395,20 +420,22 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/seeds/{seed_id}")
     async def get_seed(seed_id: str) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             _seed_row(conn, seed_id)
             if not deps.read_only:
                 _sweep_challenge_deadlines(deps, conn, seed_id)
             row = _seed_row(conn, seed_id)
-            return _serialize_seed(conn, row)
+            return _publication_response(_serialize_seed(conn, row), publication, state_basis="stored")
 
     @router.get("/seeds/{seed_id}/chain")
     async def get_seed_chain(seed_id: str) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             _seed_row(conn, seed_id)
             if not deps.read_only:
                 _sweep_challenge_deadlines(deps, conn, seed_id)
-            return _seed_chain(conn, seed_id)
+            return _publication_response(_seed_chain(conn, seed_id), publication)
 
     @router.get("/seeds/{seed_id:path}/dossier")
     async def get_claim_dossier(seed_id: str, download: bool = Query(default=False)) -> JSONResponse:
@@ -416,8 +443,9 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
         # Startup owns initialization. These reads must remain observations in
         # local mode too, so do not use the lifecycle-capable _read_v1_db helper.
+        publication = _read_observation(deps)
         with deps.db() as conn:
-            dossier = load_claim_dossier(conn, seed_id)
+            dossier = load_claim_dossier(conn, seed_id, publication_observation=publication)
         if dossier is None:
             raise HTTPException(status_code=404, detail="seed not found", headers={"Cache-Control": "no-store"})
         headers = {"Cache-Control": "no-store"}
@@ -434,8 +462,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
     ) -> JSONResponse:
         from .claim_dossier import list_claims
 
+        publication = _read_observation(deps)
         with deps.db() as conn:
-            ledger = list_claims(conn, q=q, state=state, limit=limit, offset=offset)
+            ledger = list_claims(conn, q=q, state=state, limit=limit, offset=offset,
+                                 publication_observation=publication)
         return JSONResponse(ledger, headers={"Cache-Control": "no-store"})
 
     @router.get("/claims/record")
@@ -446,8 +476,9 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
     ) -> JSONResponse:
         from .claim_dossier import load_claim_record
 
+        publication = _read_observation(deps)
         with deps.db() as conn:
-            record = load_claim_record(conn, kind, identifier)
+            record = load_claim_record(conn, kind, identifier, publication_observation=publication)
         if record is None:
             raise HTTPException(status_code=404, detail="record not found", headers={"Cache-Control": "no-store"})
         headers = {"Cache-Control": "no-store"}
@@ -463,8 +494,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         claimant: Optional[str] = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
     ) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         if deps.read_only and not deps.publication_configured:
-            return {"items": [], "availability": "not_configured"}
+            return _publication_response({"items": [], "availability": "not_configured"}, publication,
+                                         state_basis="stored")
         with _read_v1_db(deps) as conn:
             clauses: List[str] = []
             params: List[Any] = []
@@ -489,7 +522,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 """,  # nosec B608 - where only contains fixed clauses.
                 (*params, limit),
             ).fetchall()
-            return {"items": [_serialize_seed(conn, row, include_packet=False) for row in rows]}
+            return _publication_response(
+                {"items": [_serialize_seed(conn, row, include_packet=False) for row in rows]},
+                publication, state_basis="stored",
+            )
 
     @router.post("/seeds/{seed_id}/correct")
     async def correct_seed(seed_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
@@ -656,8 +692,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/challenges/{challenge_id}")
     async def get_challenge(challenge_id: str) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
-            return _serialize_challenge(_challenge_row(conn, challenge_id))
+            return _publication_response(_serialize_challenge(_challenge_row(conn, challenge_id)),
+                                         publication, status_basis="stored")
 
     @router.post("/challenges/{challenge_id}/respond", status_code=status.HTTP_201_CREATED)
     async def respond_to_challenge(challenge_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
@@ -757,6 +795,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/witness-events/{event_id}")
     async def get_witness_event(event_id: str) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             row = conn.execute(
                 "SELECT * FROM sab_witness_events_v1 WHERE event_id = ?",
@@ -764,7 +803,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             ).fetchone()
             if row is None:
                 raise HTTPException(status_code=404, detail="witness event not found")
-            return _serialize_witness_event(row)
+            return _publication_response(_serialize_witness_event(row), publication)
 
     @router.get("/witness/chain")
     async def get_witness_chain(
@@ -773,12 +812,13 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         subject_id: Optional[str] = Query(default=None),
         limit: int = Query(default=200, ge=1, le=1000),
     ) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             rows = _witness_rows(conn, seed_id=seed_id, subject_type=subject_type, subject_id=subject_id, limit=limit)
-            return {
+            return _publication_response({
                 "verified": None if deps.read_only and not rows else _verify_witness_rows(rows),
                 "entries": [_serialize_witness_event(row) for row in rows],
-            }
+            }, publication)
 
     @router.get("/witness/verify")
     async def verify_witness_chain(
@@ -786,13 +826,14 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         subject_type: Optional[str] = Query(default=None),
         subject_id: Optional[str] = Query(default=None),
     ) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             rows = _witness_rows(conn, seed_id=seed_id, subject_type=subject_type, subject_id=subject_id, limit=10000)
-            return {
+            return _publication_response({
                 "verified": None if deps.read_only and not rows else _verify_witness_rows(rows),
                 "entry_count": len(rows),
                 "head": str(rows[-1]["event_hash"]) if rows else "genesis",
-            }
+            }, publication)
 
     @router.post("/standing/review", status_code=status.HTTP_201_CREATED)
     async def review_standing(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
@@ -898,16 +939,17 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
 
     @router.get("/standing/{standing_id}")
     async def get_standing(standing_id: str) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             row = _standing_row(conn, standing_id)
-            observation = _observe_standing(row)
+            observation = _observe_standing(row, publication_observation=publication)
             if (
                 not deps.read_only
                 and observation["status_basis"] == "expiry_observation"
                 and observation["stored_status"] != "canon"
             ):
                 return _observe_standing(_expire_standing_if_needed(deps, conn, row))
-            return observation
+            return _publication_response(observation, publication)
 
     @router.get("/standing")
     async def list_standing(
@@ -916,12 +958,13 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         scope: Optional[str] = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
     ) -> Dict[str, Any]:
+        publication = _read_observation(deps)
         if deps.read_only and not deps.publication_configured:
-            return {"items": [], "availability": "not_configured"}
+            return _publication_response({"items": [], "availability": "not_configured"}, publication)
         with _read_v1_db(deps) as conn:
             clauses: List[str] = []
             params: List[Any] = []
-            observed_at = datetime.now(timezone.utc)
+            observed_at = publication.observed_at if publication is not None else datetime.now(timezone.utc)
             if subject:
                 clauses.append("subject_seed_id = ?")
                 params.append(subject)
@@ -932,7 +975,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                     "sab_observed_standing_status",
                     2,
                     lambda stored, expiry: observe_standing_status(
-                        stored, expiry, observed_at=observed_at
+                        stored, expiry, observed_at=observed_at, publication_observation=publication
                     )["status"],
                 )
                 clauses.append("sab_observed_standing_status(status, expiry) = ?")
@@ -953,7 +996,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             ).fetchall()
             items = []
             for row in rows:
-                observation = _observe_standing(row, include_lease=False, observed_at=observed_at)
+                observation = _observe_standing(row, include_lease=False, observed_at=observed_at,
+                                                publication_observation=publication)
                 if (
                     not deps.read_only
                     and observation["status_basis"] == "expiry_observation"
@@ -962,7 +1006,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                     row = _expire_standing_if_needed(deps, conn, row)
                     observation = _observe_standing(row, include_lease=False, observed_at=observed_at)
                 items.append(observation)
-            return {"items": items}
+            return _publication_response({"items": items}, publication)
 
     @router.post("/standing/{standing_id}/challenge")
     async def challenge_standing(standing_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
@@ -2174,12 +2218,16 @@ def observe_standing_status(
     expiry: Any,
     *,
     observed_at: Optional[datetime] = None,
-) -> Dict[str, str]:
+    publication_observation: Optional[PublicationObservation] = None,
+) -> Dict[str, Any]:
     """Observe current lease status without granting authority or changing history.
 
     Canon records remain historical canon after expiry, but their lease cannot
     provide current reliance. Missing or malformed expiry never means active.
     """
+    publication = publication_observation or current_publication_observation()
+    if publication is not None:
+        return publication.standing(stored_status, expiry)
     now = observed_at or datetime.now(timezone.utc)
     observation = {
         "status": stored_status,
@@ -2206,10 +2254,12 @@ def _observe_standing(
     *,
     include_lease: bool = True,
     observed_at: Optional[datetime] = None,
+    publication_observation: Optional[PublicationObservation] = None,
 ) -> Dict[str, Any]:
     """Project elapsed expiry without signing events or changing stored authority."""
     item = _serialize_standing(row, include_lease=include_lease)
-    item.update(observe_standing_status(item["status"], row["expiry"], observed_at=observed_at))
+    item.update(observe_standing_status(item["status"], row["expiry"], observed_at=observed_at,
+                                       publication_observation=publication_observation))
     return item
 
 

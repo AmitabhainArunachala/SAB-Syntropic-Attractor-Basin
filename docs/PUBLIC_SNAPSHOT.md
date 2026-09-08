@@ -160,7 +160,9 @@ The [distribution and recovery drill](PUBLIC_DISTRIBUTION.md) exercises installe
 wheels and fresh processes against synthetic approved publications. It also
 checks restoration after withdrawal using only the empty withdrawal bundle.
 
-Independent public-origin operation, a current reliance verifier, trusted-time
-and revocation freshness policy, image-version rollback, and public TLS deployment
+The [freshness contract](PUBLIC_FRESHNESS.md) adds a bounded local age policy,
+clock uncertainty, and fail-closed current standing without rewriting the bundle.
+Independent public-origin operation, a current reliance verifier, authenticated
+time and current revocation evidence, image-version rollback, and public TLS deployment
 remain separate acceptance work. Passing snapshot tests is not stage-100 or
 world-best evidence.

@@ -24,6 +24,14 @@
   font-size: .875rem;
 }
 .runtime-notice p { margin: 0; }
+.publication-notice { align-items: flex-start; }
+.publication-notice strong { min-width: 10rem; }
+.publication-notice[data-publication-age="stale"],
+.publication-notice[data-publication-age="future_observation"],
+.publication-notice[data-publication-age="clock_uncertain"] {
+  border-color: var(--color-accent);
+  border-inline-start-width: 4px;
+}
 .reliance-notice h2 { font-size: 1.125rem; margin: 0 0 .5rem; }
 .reliance-notice p { max-width: 72ch; margin: 0 0 1rem; line-height: 1.65; }
 .reliance-actions { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; }

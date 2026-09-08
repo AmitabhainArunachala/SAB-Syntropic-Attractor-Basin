@@ -130,6 +130,7 @@
         <div><dt>Purpose</dt><dd>{{ recorded(lease.get('purpose')) }}</dd></div>
         <div><dt>Expiry</dt><dd>{{ recorded(lease.get('expiry'), 'Unknown — expiry not recorded') }}</dd></div>
         <div><dt>Stored status</dt><dd>{{ recorded(lease.get('stored_status')) }}</dd></div>
+        <div><dt>Status basis</dt><dd>{{ recorded(lease.get('status_basis'))|replace('_', ' ') }}</dd></div>
         <div><dt>Allowed reliance</dt><dd>{{ recorded(lease.get('allowed_reliance'), 'Not declared in the lease') }}</dd></div>
         <div><dt>Forbidden reliance</dt><dd>{{ recorded(lease.get('forbidden_reliance'), 'Not declared in the lease') }}</dd></div>
         <div><dt>Policy hash</dt><dd><code>{{ recorded(lease.get('policy_hash')) }}</code></dd></div>

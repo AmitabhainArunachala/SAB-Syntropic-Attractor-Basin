@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 from urllib.parse import quote, urlencode
 
+from .public_freshness import PublicationObservation, current_publication_observation
 from .sab_seeding_api import (
     CHALLENGE_STATUSES,
     FINAL_SEED_STATES,
@@ -27,6 +28,7 @@ from .sab_seeding_api import (
     _verify_witness_rows,
     _without_signature,
     observe_standing_status,
+    _publication_response,
 )
 
 
@@ -148,7 +150,11 @@ def _aggregate(
     )
 
 
-def _time_observation(value: Any, now: datetime) -> dict[str, Any]:
+def _time_observation(
+    value: Any, now: datetime, publication_observation: PublicationObservation | None = None
+) -> dict[str, Any]:
+    if publication_observation is not None:
+        return publication_observation.expiry(value)
     observation = {
         "value": value,
         "observed_at": now.isoformat(),
@@ -373,17 +379,22 @@ def _operators(
 
 
 def load_claim_dossier(
-    conn: sqlite3.Connection, seed_id: str, *, observed_at: datetime | None = None
+    conn: sqlite3.Connection, seed_id: str, *, observed_at: datetime | None = None,
+    publication_observation: PublicationObservation | None = None,
 ) -> dict[str, Any] | None:
     """Return one complete dossier, or None when the exact seed is not stored."""
-    now = observed_at or datetime.now(timezone.utc)
+    publication = publication_observation or current_publication_observation()
+    now = publication.observed_at if publication is not None else observed_at or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     with _read_snapshot(conn):
-        return _load_dossier(conn, seed_id, now)
+        return _load_dossier(conn, seed_id, now, publication)
 
 
-def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict[str, Any] | None:
+def _load_dossier(
+    conn: sqlite3.Connection, seed_id: str, now: datetime,
+    publication: PublicationObservation | None = None,
+) -> dict[str, Any] | None:
     tables = _tables(conn)
     if "sab_seed_packets_v1" not in tables:
         return None
@@ -498,8 +509,9 @@ def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict
                 ),
                 "respond_by": row.get("respond_by"),
                 "prosecute_by": row.get("prosecute_by"),
-                "respond_deadline": _time_observation(row.get("respond_by"), now),
-                "prosecute_deadline": _time_observation(row.get("prosecute_by"), now),
+                "respond_deadline": _time_observation(row.get("respond_by"), now, publication),
+                "prosecute_deadline": _time_observation(row.get("prosecute_by"), now, publication),
+                **({"status_basis": "stored"} if publication is not None else {}),
                 "evidence": _evidence(
                     _object(document).get("evidence"),
                     f"challenge {row.get('challenge_id')}.evidence",
@@ -681,7 +693,8 @@ def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict
         )
         lease = _object(document)
         observation = observe_standing_status(
-            str(row.get("status") or "unknown"), row.get("expiry"), observed_at=now
+            str(row.get("status") or "unknown"), row.get("expiry"), observed_at=now,
+            publication_observation=publication,
         )
         if row.get("status") not in STANDING_STATUSES:
             observation.update(status="unknown", status_basis="invalid_stored_status")
@@ -725,7 +738,7 @@ def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict
                 "forbidden_actions": lease.get("forbidden_actions"),
                 "policy_hash": lease.get("policy_hash"),
                 "issued_under": issued_under,
-                "expiry_observation": _time_observation(row.get("expiry"), now),
+                "expiry_observation": _time_observation(row.get("expiry"), now, publication),
                 "checks": [digest],
                 "events": _history(history, missing),
                 "links": {"standing": link},
@@ -801,7 +814,7 @@ def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict
         "The dossier is an inspection record; reliance remains unestablished.",
     )
 
-    return {
+    return _publication_response({
         "schema": "sab.claim_dossier.v1",
         "observed_at": now.isoformat(),
         "source": {"kind": "sab_v1_store", "snapshot": "single_read_transaction"},
@@ -817,6 +830,7 @@ def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict
         "seed": {
             **{key: value for key, value in seed.items() if key != "packet_json"},
             "stored_state": seed.get("state"),
+            **({"state_basis": "stored"} if publication is not None else {}),
         },
         "claim": {
             **_claim_text_fields(claim),
@@ -869,7 +883,7 @@ def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict
         "finality": {
             "stored_seed_state": seed.get("state"),
             "terminal_state": seed.get("state") in FINAL_SEED_STATES,
-            "challenge_window": _time_observation(seed.get("challenge_window_closes_at"), now),
+            "challenge_window": _time_observation(seed.get("challenge_window_closes_at"), now, publication),
             "unresolved_challenge_ids": unresolved,
             "unknown_challenge_ids": unknown_challenges,
             "meaning": "Stored finality and elapsed windows do not establish truth or permission.",
@@ -877,18 +891,20 @@ def _load_dossier(conn: sqlite3.Connection, seed_id: str, now: datetime) -> dict
         "reliance": {"status": "unestablished", "reasons": reasons, "check": reliance_check},
         "missing_data": list(dict.fromkeys(missing)),
         "links": links,
-    }
+    }, publication)
 
 
 def load_claim_record(
-    conn: sqlite3.Connection, kind: str, identifier: str, *, observed_at: datetime | None = None
+    conn: sqlite3.Connection, kind: str, identifier: str, *, observed_at: datetime | None = None,
+    publication_observation: PublicationObservation | None = None,
 ) -> dict[str, Any] | None:
     """Dereference an exact ID that cannot be represented by legacy path routes.
 
     Record fallbacks are projections from the same read-only dossier; chain
     results carry named checks, without the old endpoint's broad verified flag.
     """
-    now = observed_at or datetime.now(timezone.utc)
+    publication = publication_observation or current_publication_observation()
+    now = publication.observed_at if publication is not None else observed_at or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     with _read_snapshot(conn):
@@ -913,20 +929,20 @@ def load_claim_record(
             if not rows:
                 return None
             seed_id = rows[0]["seed_id"]
-        dossier = _load_dossier(conn, seed_id, now)
+        dossier = _load_dossier(conn, seed_id, now, publication)
         if dossier is None or kind == "dossier":
             return dossier
         if kind == "seed":
-            return {
+            return _publication_response({
                 **dossier["seed"],
                 "schema": "sab.seed_packet.v1",
                 "seed_packet": dossier["original_packet"],
                 "packet_json": dossier["original_packet_json"],
                 "witness_head": dossier["witness"]["head"],
-            }
+            }, publication)
         if kind == "chain":
             witness = dossier["witness"]
-            return {
+            return _publication_response({
                 "seed_id": seed_id,
                 "head": witness["head"],
                 "entries": witness["events"],
@@ -935,17 +951,19 @@ def load_claim_record(
                 "checks": witness["checks"],
                 "total_count": witness["total_count"],
                 "complete": witness["complete"],
-            }
+            }, publication)
         collection, item_key = {
             "challenge": (dossier["challenges"]["items"], "challenge_id"),
             "standing": (dossier["standing"]["items"], "standing_id"),
             "witness_event": (dossier["witness"]["events"], "event_id"),
         }[kind]
-        return next((item for item in collection if item[item_key] == identifier), None)
+        item = next((item for item in collection if item[item_key] == identifier), None)
+        return _publication_response(item, publication) if item is not None else None
 
 
 def list_claims(
-    conn: sqlite3.Connection, *, q: str = "", state: str = "", limit: int = 20, offset: int = 0
+    conn: sqlite3.Connection, *, q: str = "", state: str = "", limit: int = 20, offset: int = 0,
+    publication_observation: PublicationObservation | None = None,
 ) -> dict[str, Any]:
     """Search stored submissions without conflating claim IDs or advancing state.
 
@@ -953,13 +971,14 @@ def list_claims(
     title and stored packet text. Limits apply after filtering; total and
     page share one read snapshot. Dossier content itself is never truncated.
     """
+    publication = publication_observation or current_publication_observation()
     limit = max(1, min(int(limit), 100))
     offset = max(0, int(offset))
     q = str(q or "")
     state = str(state or "")
     with _read_snapshot(conn):
         tables = _tables(conn)
-        result: dict[str, Any] = {
+        result: dict[str, Any] = _publication_response({
             "schema": "sab.claim_ledger.v1",
             "items": [],
             "total": 0,
@@ -971,7 +990,7 @@ def list_claims(
             "availability": "present" if "sab_seed_packets_v1" in tables else "missing",
             "state_basis": "stored",
             "search_basis": "literal Unicode case-insensitive substring of seed ID, claim ID, title or stored packet text",
-        }
+        }, publication)
         if "sab_seed_packets_v1" not in tables:
             return result
         clauses = []

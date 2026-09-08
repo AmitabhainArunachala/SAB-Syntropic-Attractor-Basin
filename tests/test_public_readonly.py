@@ -348,11 +348,17 @@ def _seed_expiring_records(conn) -> None:
 
 def test_v1_reads_observe_expiry_without_changing_stored_history(tmp_path, monkeypatch):
     from publication_fixtures import source_database, configure_publication, import_public_app
+    from agora.public_freshness import FreshnessPolicy, PublicationFreshnessObserver
 
     with source_database() as source:
         _seed_expiring_records(source)
         bundle = configure_publication(source, tmp_path / "bundle", monkeypatch)
     public_app = import_public_app(tmp_path, monkeypatch)
+    observed_at = datetime.fromisoformat(public_app.PUBLIC_SNAPSHOT.status["observed_at"])
+    monkeypatch.setattr(public_app, "PUBLIC_FRESHNESS", PublicationFreshnessObserver(
+        public_app.PUBLIC_SNAPSHOT.status, FreshnessPolicy(),
+        utc_now=lambda: observed_at, monotonic=lambda: 0.0,
+    ))
     bundle_before = {p.name: p.read_bytes() for p in bundle.iterdir()}
     with TestClient(public_app.app) as client:
         before = _database_snapshot(public_app)
@@ -372,7 +378,7 @@ def test_v1_reads_observe_expiry_without_changing_stored_history(tmp_path, monke
         assert expired.status_code == 200, expired.text
         assert expired.json()["status"] == "expired"
         assert expired.json()["stored_status"] == "active"
-        assert expired.json()["status_basis"] == "expiry_observation"
+        assert expired.json()["status_basis"] == "local_expiry_observation"
         canon = client.get("/api/v1/standing/standing_canon_expired").json()
         assert canon["status"] == "expired"
         assert canon["stored_status"] == "canon"
@@ -382,11 +388,15 @@ def test_v1_reads_observe_expiry_without_changing_stored_history(tmp_path, monke
             assert invalid.json()["status"] == "unknown"
             assert invalid.json()["status_basis"] == "invalid_expiry"
         active = client.get("/api/v1/standing?status=active").json()["items"]
-        assert [item["standing_id"] for item in active] == ["standing_future"]
+        assert active == []
+        future = client.get("/api/v1/standing/standing_future").json()
+        assert future["status"] == "unknown"
+        assert future["stored_status"] == "active"
+        assert future["status_basis"] == "currentness_unestablished"
         expired_items = client.get("/api/v1/standing?status=expired&limit=1").json()["items"]
         assert [item["standing_id"] for item in expired_items] == ["standing_canon_expired"]
         unknown = client.get("/api/v1/standing?status=unknown").json()["items"]
-        assert {item["standing_id"] for item in unknown} == {"standing_invalid", "standing_empty"}
+        assert {item["standing_id"] for item in unknown} == {"standing_invalid", "standing_empty", "standing_future"}
         assert client.get("/api/v1/seeds/seed_readonly").json()["state"] == "challenged"
         assert client.get("/api/v1/challenges/challenge_readonly").json()["status"] == "pending"
         assert _database_snapshot(public_app) == before

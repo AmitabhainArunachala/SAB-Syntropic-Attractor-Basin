@@ -14,6 +14,7 @@ SCHEMAS = (
     "sab.seed_packet.v1.schema.json",
     "sab.claim_dossier.v1.schema.json",
     "sab.public_snapshot.v1.schema.json",
+    "sab.public_read_observation.v1.schema.json",
 )
 STATIC = (
     "web.css",

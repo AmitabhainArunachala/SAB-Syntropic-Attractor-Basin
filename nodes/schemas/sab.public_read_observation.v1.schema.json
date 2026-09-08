@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.public_read_observation.v1.schema.json",
+  "title": "SAB Public Read Observation v1",
+  "description": "One request-scoped assessment of historical publication age using guarded local time. This is not authenticated UTC, current revocation knowledge, or permission to rely.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "observed_at",
+    "source_observed_at",
+    "manifest_sha256",
+    "policy",
+    "clock",
+    "local_age_policy",
+    "currentness",
+    "historical_integrity",
+    "warnings",
+    "authority_effect",
+    "standing_effect"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sab.public_read_observation.v1"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_observed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "manifest_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "maximum_age_seconds",
+        "maximum_clock_skew_seconds",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "const": "sab.public_read_freshness.v1"
+        },
+        "maximum_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "maximum_clock_skew_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "externally_verified",
+        "status",
+        "reasons",
+        "effective_time_basis"
+      ],
+      "properties": {
+        "source": {
+          "const": "local_system_utc"
+        },
+        "externally_verified": {
+          "const": false
+        },
+        "status": {
+          "enum": [
+            "stable",
+            "uncertain"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "effective_time_basis": {
+          "type": "string"
+        }
+      }
+    },
+    "local_age_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "age_seconds",
+        "remaining_seconds"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "not_configured",
+            "within_limit",
+            "stale",
+            "future_observation",
+            "clock_uncertain"
+          ]
+        },
+        "age_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "remaining_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 86400
+        }
+      }
+    },
+    "currentness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reasons"
+      ],
+      "properties": {
+        "status": {
+          "const": "unestablished"
+        },
+        "reasons": {
+          "const": [
+            "trusted_utc_unverified",
+            "revocation_currentness_unverified"
+          ]
+        }
+      }
+    },
+    "historical_integrity": {
+      "enum": [
+        "validated",
+        "not_configured"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "authority_effect": {
+      "const": "none"
+    },
+    "standing_effect": {
+      "const": "none"
+    }
+  }
+}

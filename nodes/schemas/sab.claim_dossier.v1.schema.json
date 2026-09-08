@@ -12,6 +12,32 @@
   ],
   "properties": {
     "schema": { "const": "sab.claim_dossier.v1" },
+    "publication_observation": {
+      "type": "object",
+      "required": [
+        "schema",
+        "observed_at",
+        "manifest_sha256",
+        "currentness"
+      ],
+      "properties": {
+        "schema": {
+          "const": "sab.public_read_observation.v1"
+        },
+        "currentness": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "unestablished"
+            }
+          }
+        }
+      },
+      "description": "Present on every public dossier. Validate this observation separately against /schemas/sab.public_read_observation.v1.schema.json. Optional for local database inspection."
+    },
     "observed_at": { "type": "string", "format": "date-time" },
     "source": {
       "type": "object",

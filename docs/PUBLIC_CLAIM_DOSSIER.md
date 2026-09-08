@@ -61,6 +61,14 @@ a dossier-read time, not a promise that the source is current. Check `/publicati
 for the immutable source observation time and exact manifest digest. Fetching
 again does not import later revocations; a newly reviewed deployment is required. No browser session is created by public inspection.
 
+Public envelopes add `publication_observation`, independently described by
+`sab.public_read_observation.v1`. One request observation drives status, expiry,
+and headers. Positive stored standing projects to `unknown` current standing;
+terminal history and the original lease remain visible. `/status` and the
+[freshness contract](PUBLIC_FRESHNESS.md) explain local age, clock uncertainty,
+and the unestablished currentness boundary. Local rehearsal observations retain
+their existing behavior.
+
 ## Run and package
 
 ```sh
