@@ -100,6 +100,49 @@ def test_smoke_without_expected_pin_does_not_claim_independent_check(transport):
     assert result["currentness"] == "unestablished"
     assert result["authorizes_use"] is False
     assert result["authority_effect"] == result["standing_effect"] == "none"
+    assert ("GET", "/schemas/sab.operator_control_review.v1.schema.json") in transport[1]
+    assert ("GET", "/schemas/sab.operator_cohort_issuance.v1.schema.json") in transport[1]
+
+
+@pytest.mark.parametrize("name", ["sab.operator_control_review.v1", "sab.operator_cohort_issuance.v1"])
+@pytest.mark.parametrize("fault", ["identity", "open_envelope", "missing_field", "added_discriminator"])
+def test_signed_envelope_schema_identity_and_closed_fields_are_required(transport, response_changes, name, fault):
+    def change(document):
+        if fault == "identity":
+            document["$id"] = "https://example.invalid/wrong.schema.json"
+        elif fault == "open_envelope":
+            document["additionalProperties"] = True
+        elif fault == "missing_field":
+            document["required"].pop()
+        else:
+            document["properties"]["schema"] = {"const": name}
+    response_changes["/schemas/" + name + ".schema.json"] = _change_json(change)
+    with pytest.raises(RuntimeError, match="schema identity or envelope mismatch"):
+        public_inspection.inspect("https://example.org")
+    assert all(method == "GET" for method, _ in transport[1])
+
+
+@pytest.mark.parametrize("transport", [{"populated": True}], indirect=True)
+@pytest.mark.parametrize("tamper", [{"status": "active"}, {"status": "canon"},
+                                   {"status": []}, {"status": {"verified": True}},
+                                   {"operator_control_eligible": True}, {"current_standing_eligible": True},
+                                   {"reliance_status": "established"}])
+def test_historical_dossier_cannot_claim_current_standing(transport, response_changes, tamper):
+    response_changes["/api/v1/seeds/sab_seed_public_snapshot/dossier"] = _change_json(
+        lambda body: body["standing"]["items"].append({
+            "status": "unknown", "stored_status": "active", "reliance_status": "unestablished", **tamper}))
+    with pytest.raises(RuntimeError, match="current standing"):
+        public_inspection.inspect("https://example.org")
+    assert all(method == "GET" for method, _ in transport[1])
+
+
+def test_operator_control_currentness_limit_cannot_be_removed(transport, response_changes):
+    response_changes["/publication"] = _change_json(
+        lambda body: _response_observation(body)["currentness"]["reasons"].remove(
+            "operator_control_currentness_unverified"))
+    with pytest.raises(RuntimeError, match="currentness"):
+        public_inspection.inspect("https://example.org")
+    assert all(method == "GET" for method, _ in transport[1])
 
 
 @pytest.mark.parametrize("transport", [{"populated": True}, {"source_age": -3600}], indirect=True)

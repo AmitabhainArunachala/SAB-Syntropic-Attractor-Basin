@@ -1,0 +1,332 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.operator_cohort_assessment.v1.schema.json",
+  "title": "sab.operator_cohort_assessment.v1",
+  "description": "Closed reviewed evidence data. Shape and signatures alone do not establish independent control. Only current policy-pinned registry evaluation of the exact assessment, scope, requested participants, complete source findings, graph pairs, active keys and immutable history can establish scoped eligibility. Synthetic review roots do not evidence real operators.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "assessment_id",
+    "policy_id",
+    "policy_sha256",
+    "audience",
+    "seed_id",
+    "claim_sha256",
+    "purpose",
+    "issued_at",
+    "expires_at",
+    "participants",
+    "graph",
+    "evidence",
+    "replaces"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sab.operator_cohort_assessment.v1"
+    },
+    "assessment_id": {
+      "type": "string",
+      "pattern": "^sab_operator_assessment_[0-9a-f]{24,32}$"
+    },
+    "policy_id": {
+      "type": "string",
+      "pattern": "^sab_operator_policy_[A-Za-z0-9_.:-]{3,96}$"
+    },
+    "policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "seed_id": {
+      "type": "string",
+      "pattern": "^sab_seed_[A-Za-z0-9_.:-]{3,128}$"
+    },
+    "claim_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "purpose": {
+      "enum": [
+        "challenge_adjudication",
+        "high_impact_witness",
+        "standing_quorum"
+      ]
+    },
+    "issued_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+      "format": "date-time"
+    },
+    "participants": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subject_id",
+          "public_key",
+          "controller_class_id"
+        ],
+        "properties": {
+          "subject_id": {
+            "type": "string",
+            "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+          },
+          "public_key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "controller_class_id": {
+            "type": "string",
+            "pattern": "^control_[A-Za-z0-9_.:-]{3,96}$"
+          }
+        }
+      }
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "node_id",
+              "kind"
+            ],
+            "properties": {
+              "node_id": {
+                "type": "string",
+                "pattern": "^(?:agent_[A-Za-z0-9_.:-]{2,154}|control_[A-Za-z0-9_.:-]{3,96})$"
+              },
+              "kind": {
+                "enum": [
+                  "administrator",
+                  "controller",
+                  "decision_authority",
+                  "delegate",
+                  "funder",
+                  "participant",
+                  "runtime",
+                  "signing_root"
+                ]
+              }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "target",
+              "relation",
+              "funding_ppm"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "pattern": "^(?:agent_[A-Za-z0-9_.:-]{2,154}|control_[A-Za-z0-9_.:-]{3,96})$"
+              },
+              "target": {
+                "type": "string",
+                "pattern": "^(?:agent_[A-Za-z0-9_.:-]{2,154}|control_[A-Za-z0-9_.:-]{3,96})$"
+              },
+              "relation": {
+                "enum": [
+                  "administered_by",
+                  "conflicts_with",
+                  "controlled_by",
+                  "decided_by",
+                  "delegates_to",
+                  "funded_by",
+                  "operated_by",
+                  "signs_with"
+                ]
+              },
+              "funding_ppm": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 1000000
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "relation": {
+                      "const": "funded_by"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "funding_ppm": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000000
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "funding_ppm": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "category",
+          "source_class",
+          "source_ref",
+          "observed_at",
+          "valid_until",
+          "subject_ids",
+          "document",
+          "document_sha256"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^evidence_[A-Za-z0-9_.:-]{3,96}$"
+          },
+          "category": {
+            "enum": [
+              "administrator_access",
+              "conflicts",
+              "controller_resolution",
+              "delegation_decision_rights",
+              "funding",
+              "runtime_control",
+              "signing_custody"
+            ]
+          },
+          "source_class": {
+            "enum": [
+              "conflict_record",
+              "custody_inspection",
+              "delegation_record",
+              "financial_record",
+              "organizational_record",
+              "self_report"
+            ]
+          },
+          "source_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "observed_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+            "format": "date-time"
+          },
+          "valid_until": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+            "format": "date-time"
+          },
+          "subject_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+            }
+          },
+          "document": {
+            "type": "object",
+            "minProperties": 1
+          },
+          "document_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "replaces": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assessment_id",
+            "assessment_sha256",
+            "challenge_ids"
+          ],
+          "properties": {
+            "assessment_id": {
+              "type": "string",
+              "pattern": "^sab_operator_assessment_[0-9a-f]{24,32}$"
+            },
+            "assessment_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "challenge_ids": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^sab_operator_challenge_[0-9a-f]{24,32}$"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

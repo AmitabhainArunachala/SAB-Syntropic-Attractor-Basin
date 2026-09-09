@@ -61,6 +61,7 @@ agora-public-snapshot = "agora.public_snapshot_cli:main"
 agora-public-inspect = "agora.public_inspection:main"
 agora-key-control = "agora.key_control_client:main"
 agora-authority = "agora.authority_client:main"
+agora-operator-control = "agora.operator_control_client:main"
 
 [project.urls]
 Homepage = "https://github.com/AmitabhainArunachala/SAB-Syntropic-Attractor-Basin"

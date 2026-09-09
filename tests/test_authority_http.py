@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import importlib
+import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -11,11 +13,38 @@ from nacl.signing import SigningKey
 
 from authority_fixtures import canonical, hash_json, reference_for
 from keycontrol_fixtures import enroll_identity, prove_control
+from operator_control_fixtures import adjudication_assessment
 from test_sab_seeding_api import (
-    web_app, client, _seed_packet, _sign_seed, _submit_seed, _challenge_packet,
+    _seed_packet, _sign_seed, _submit_seed, _challenge_packet,
     _submit_challenge, _sign_challenge_action, _sign_witness, _standing_lease,
     _sign_standing_review, _sign_standing_action, _now,
 )
+
+
+@pytest.fixture
+def web_app(tmp_path, monkeypatch):
+    from authority_fixtures import provision_authority_policy
+    from operator_control_fixtures import provision_operator_policy
+
+    authority = provision_authority_policy(tmp_path, monkeypatch)
+    control = provision_operator_policy(tmp_path, monkeypatch)
+    monkeypatch.setenv("SAB_SPARK_DB_PATH", str(tmp_path / "authority_http.db"))
+    monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / "synthetic_system.key"))
+    for name in list(sys.modules):
+        if name == "agora" or name.startswith("agora."):
+            del sys.modules[name]
+    module = importlib.import_module("agora.app")
+    module.authority_test_fixture = authority
+    module.operator_control_test_fixture = control
+    return module
+
+
+@pytest.fixture
+def client(web_app):
+    with TestClient(web_app.app) as test_client:
+        web_app.authority_test_fixture.enroll(test_client)
+        web_app.operator_control_test_fixture.enroll(test_client)
+        yield test_client
 
 
 def actor(client, name="authority participant"):
@@ -69,12 +98,14 @@ def setup_standing(client):
     _submit_challenge(client, challenger_key, challenger_id=challenger, seed_id=seed_id,
                       claim_id=seed["claim_id"], challenge_id="sab_challenge_authority_standing")
     created = _now()
-    reason = "Resolved within explicit test scope"
+    reason = {"value": "Resolved within explicit test scope",
+              "operator_control_assessment": adjudication_assessment(
+                  client, seed_id, "sab_challenge_authority_standing", reviewer)}
     response = client.post("/api/v1/challenges/sab_challenge_authority_standing/reject", json={
         "actor_identity": reviewer, "created_at": created, "reason": reason,
         "signature": _sign_challenge_action(reviewer_key, action="reject",
                        challenge_id="sab_challenge_authority_standing", actor_identity=reviewer,
-                       payload={"value": reason}, created_at=created),
+                       payload=reason, created_at=created),
     })
     assert response.status_code == 201, response.text
     previous = client.get(f"/api/v1/seeds/{seed_id}/chain").json()["head"]
@@ -783,7 +814,8 @@ def test_final_challenge_adjudication_replay_cannot_append_history(client, web_a
     reviewer, key = actor(client)
     client.authority.issue(client, reviewer, seed_id, ["adjudicate_challenge"])
     created = _now()
-    reason = {"value": "A final scoped adjudication"}
+    reason = {"value": "A final scoped adjudication",
+              "operator_control_assessment": adjudication_assessment(client, seed_id, challenge_id, reviewer)}
     command = {"actor_identity": reviewer, "created_at": created, "reason": reason,
                "signature": _sign_challenge_action(key, action=action, challenge_id=challenge_id,
                                                      actor_identity=reviewer, payload=reason, created_at=created)}

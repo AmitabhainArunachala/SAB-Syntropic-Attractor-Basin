@@ -8,8 +8,8 @@ and §2.3 (finality state machine):
   canon unreachable from a single signature.
 - B5: challenge window enforced as law; unresolved challenges resolve by deadline
   (pending -> sustained_by_default -> compost; responded -> lapsed).
-- B6: standing issues as provisional unless the independence gate passes;
-  with three disclosed operators the gate becomes mechanically passable.
+- B6: standing remains provisional when independent control has not been
+  established; disclosed operator labels cannot satisfy the quorum.
 """
 from __future__ import annotations
 
@@ -110,6 +110,7 @@ def _submit_seed(
     *,
     challenge_window: str = "P7D",
     forbidden_witnesses: Optional[list[str]] = None,
+    impact: Optional[str] = None,
 ) -> dict[str, Any]:
     created_at = _iso(_now())
     packet: dict[str, Any] = {
@@ -132,6 +133,8 @@ def _submit_seed(
         },
         "created_at": created_at,
     }
+    if impact is not None:
+        packet["witness_plan"]["impact"] = impact
     message = {
         "kind": "sab_seed_submit",
         "seed_packet_sha256": _sha256_obj(packet),
@@ -537,16 +540,17 @@ def test_b6_single_operator_standing_capped_at_provisional(client: TestClient) -
     for agent, label in ((claimant, "b6-claimant"), (challenger, "b6-challenger"), (witness, "b6-witness")):
         _register(client, agent, label, "operator_one")
     seed_id = "sab_seed_b6_single"
-    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge'])
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge', 'advance_deadlines'])
     client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge'])
     client.authority.issue(client, witness.subject_id, seed_id, ['adjudicate_challenge', 'submit_witness_event', 'request_standing_review'])
     _submit_seed(client, claimant, seed_id)
     challenge_id = "sab_challenge_b6_single"
-    _submit_challenge(client, challenger, seed_id, challenge_id)
+    _submit_challenge(client, challenger, seed_id, challenge_id, prosecute_by=_iso(_now() - timedelta(hours=1)))
     responded = _challenge_action(client, claimant, challenge_id, "respond", {"value": "narrowed"})
     assert responded.status_code == 201, responded.text
     rejected = _challenge_action(client, witness, challenge_id, "reject", {"value": "narrowing suffices within this rehearsal"})
-    assert rejected.status_code == 201, rejected.text
+    assert rejected.status_code == 403, rejected.text
+    _advance(client, claimant, seed_id)
     affirm = _witness_event(client, witness, seed_id, "affirm", {"attestation": "same-operator affirm"})
     assert affirm.status_code == 201, affirm.text
 
@@ -555,28 +559,30 @@ def test_b6_single_operator_standing_capped_at_provisional(client: TestClient) -
     body = review.json()
     assert body["status"] == "provisional"
     assert body["issued_under"]["tier"] == "provisional"
-    assert body["issued_under"]["rehearsal_flag"] == "single_operator_rehearsal"
+    assert body["issued_under"]["rehearsal_flag"] == "unestablished_operator_control"
 
 
-def test_b6_gate_passes_with_three_disclosed_operators(client: TestClient) -> None:
+def test_b6_disclosed_operator_labels_cannot_grant_independent_standing(client: TestClient) -> None:
     claimant, challenger, witness_b, witness_c = _Agent(), _Agent(), _Agent(), _Agent()
     _register(client, claimant, "b6-multi-claimant", "operator_one")
     _register(client, challenger, "b6-multi-challenger", "operator_two")
     _register(client, witness_b, "b6-multi-witness-b", "operator_two")
     _register(client, witness_c, "b6-multi-witness-c", "operator_three")
     seed_id = "sab_seed_b6_multi"
-    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge'])
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge', 'advance_deadlines'])
     client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge'])
     client.authority.issue(client, witness_b.subject_id, seed_id, ['submit_witness_event'])
     client.authority.issue(client, witness_c.subject_id, seed_id, ['adjudicate_challenge', 'submit_witness_event', 'request_standing_review', 'canonize_standing'])
     _submit_seed(client, claimant, seed_id)
     challenge_id = "sab_challenge_b6_multi"
-    _submit_challenge(client, challenger, seed_id, challenge_id)
+    _submit_challenge(client, challenger, seed_id, challenge_id, prosecute_by=_iso(_now() - timedelta(hours=1)))
     responded = _challenge_action(client, claimant, challenge_id, "respond", {"value": "narrowed"})
     assert responded.status_code == 201, responded.text
-    # witness_c is cross-operator vs both parties, so may adjudicate.
+    # This is a local rehearsal; distinct declared labels prove no independent
+    # control and cannot promote the resulting standing.
     rejected = _challenge_action(client, witness_c, challenge_id, "reject", {"value": "narrowing suffices"})
-    assert rejected.status_code == 201, rejected.text
+    assert rejected.status_code == 403, rejected.text
+    _advance(client, claimant, seed_id)
 
     for witness in (witness_b, witness_c):
         affirm = _witness_event(client, witness, seed_id, "affirm", {"attestation": "cross-operator affirm"})
@@ -585,9 +591,8 @@ def test_b6_gate_passes_with_three_disclosed_operators(client: TestClient) -> No
     review = _review_standing(client, witness_c, seed_id, "sab_standing_b6_multi")
     assert review.status_code == 201, review.text
     body = review.json()
-    assert body["status"] == "active"
-    assert body["issued_under"]["tier"] == "active"
-    assert body["issued_under"]["rehearsal_flag"] == "multi_operator"
+    assert body["status"] == "provisional"
+    assert body["issued_under"]["tier"] == "provisional"
 
     # Canon still requires cross_operator_attested evidence, which cannot be
     # self-declared, so single-signature canon remains unreachable.

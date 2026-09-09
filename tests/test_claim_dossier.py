@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -360,7 +361,8 @@ def test_payload_digest_is_checked_separately_from_self_consistent_event_hash(co
         ("active", "", "unknown", "invalid_expiry"),
         ("revoked", FUTURE, "revoked", "stored"),
         ("provisional", FUTURE, "provisional", "stored"),
-        ("active", FUTURE, "active", "stored"),
+        ("active", FUTURE, "unknown", "operator_control_unestablished"),
+        ("canon", FUTURE, "unknown", "operator_control_unestablished"),
     ],
 )
 def test_standing_uses_shared_expiry_observation_without_promoting_permission(
@@ -379,6 +381,29 @@ def test_standing_uses_shared_expiry_observation_without_promoting_permission(
     )
     assert item["observed_at"] == NOW.isoformat()
     assert item["reliance_status"] == "unestablished"
+    assert tuple(conn.iterdump()) == before
+
+
+@pytest.mark.parametrize("tamper", [{"status": "active"}, {"status": "canon"},
+                                   {"operator_control_eligible": True}, {"current_standing_eligible": True},
+                                   {"reliance_status": "established"}])
+def test_dossier_schema_rejects_current_promotion_but_retains_recorded_status(conn, tamper):
+    from jsonschema import Draft202012Validator, ValidationError
+    from agora.public_resources import read_public_resource
+
+    _seed(conn)
+    original = _standing(conn, status="canon")
+    conn.commit()
+    before = tuple(conn.iterdump())
+    dossier = load_claim_dossier(conn, SEED, observed_at=NOW)
+    validator = Draft202012Validator(json.loads(read_public_resource("schemas", "sab.claim_dossier.v1.schema.json")))
+    validator.validate(dossier)
+    assert dossier["standing"]["items"][0]["stored_status"] == "canon"
+    assert dossier["standing"]["items"][0]["standing_lease"] == original
+    changed = copy.deepcopy(dossier)
+    changed["standing"]["items"][0].update(tamper)
+    with pytest.raises(ValidationError):
+        validator.validate(changed)
     assert tuple(conn.iterdump()) == before
 
 

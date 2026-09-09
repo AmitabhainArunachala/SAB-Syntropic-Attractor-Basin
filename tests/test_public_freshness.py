@@ -421,6 +421,8 @@ def test_valid_age_and_future_expiry_never_promote_standing(stored):
     assert result["status_basis"] == "currentness_unestablished"
     assert result["currentness"] == "unestablished"
     assert result["expiry_observation"]["state"] == "not_elapsed"
+    if stored in {"active", "canon"}:
+        assert result["reason"] == "snapshot_does_not_establish_current_operator_control"
 
 
 def test_elapsed_standing_is_only_a_local_expiry_observation():
@@ -485,7 +487,8 @@ def test_observations_are_immutable_and_json_outputs_are_defensive():
     assert second["policy"]["maximum_age_seconds"] == 86400
     assert second["currentness"] == {
         "status": "unestablished",
-        "reasons": ["trusted_utc_unverified", "revocation_currentness_unverified"],
+        "reasons": ["trusted_utc_unverified", "revocation_currentness_unverified",
+                    "operator_control_currentness_unverified"],
     }
     assert second["authority_effect"] == second["standing_effect"] == "none"
     json.dumps(second, allow_nan=False)

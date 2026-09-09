@@ -78,7 +78,8 @@
                 "revalidate_standing",
                 "canonize_standing",
                 "advance_deadlines",
-                "challenge_authority"
+                "challenge_authority",
+                "challenge_operator_control"
               ]
             },
             "minItems": 1,

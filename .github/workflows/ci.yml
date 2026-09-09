@@ -144,7 +144,7 @@ jobs:
         python -m pip install build
         python -m build --sdist --wheel --outdir "$RUNNER_TEMP/sab-dist"
         python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/sab-sdist-wheel" "$RUNNER_TEMP/sab-dist/"*.tar.gz
-    - name: Inspect installed artifacts and rehearse public recovery, key control and authority
+    - name: Inspect installed artifacts and rehearse recovery, keys, authority and operator control
       run: |
         set -euo pipefail
         cd "$RUNNER_TEMP"
@@ -167,6 +167,8 @@ jobs:
             --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-key-control-$kind"
           "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_authority.py" \
             --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-authority-$kind"
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_operator_control.py" \
+            --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-operator-control-$kind"
           if [ "${{ matrix.python-version }}" = '3.10' ]; then
             # Installed public inspection above used runtime dependencies only.
             # Browser schema verification explicitly adds this development tool.
@@ -191,6 +193,8 @@ jobs:
           ${{ runner.temp }}/sab-key-control-*/*.log
           ${{ runner.temp }}/sab-authority-*/receipt.json
           ${{ runner.temp }}/sab-authority-*/*.log
+          ${{ runner.temp }}/sab-operator-control-*/receipt.json
+          ${{ runner.temp }}/sab-operator-control-*/*.log
 
     - name: Retain public browser verification receipts and screenshots
       if: always() && matrix.python-version == '3.10'

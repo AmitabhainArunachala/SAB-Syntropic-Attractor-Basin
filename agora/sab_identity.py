@@ -518,7 +518,7 @@ INDEPENDENCE_GRADE_TIERS = {
 
 STANDING_TIER_REQUIREMENTS = {
     "provisional": {"min_witnesses": 1, "min_grade": "self", "min_distinct_operators": 1},
-    "active": {"min_witnesses": 2, "min_grade": "cross_operator_unverified", "min_distinct_operators": 2},
+    "active": {"min_witnesses": 2, "min_grade": "cross_operator_attested", "min_distinct_operators": 2},
     "canon": {"min_witnesses": 3, "min_grade": "cross_operator_attested", "min_distinct_operators": 3},
 }
 
@@ -546,13 +546,17 @@ def quorum_tier(
 ) -> str:
     """Highest standing tier this witness set supports (grade, operator_id) pairs.
 
-    Fails closed: ungradable input or too few disclosed operators collapses
-    to `provisional` (the Independence Law cap, SAB_MASTER_VISION_V1 §6).
+    The caller must supply current control-evidence grades and the number of
+    independently controlled participants actually counted for this claim.
+    Self-declared labels and unrelated registrations never establish that
+    basis. Ungradable or unverified input collapses to `provisional`.
     """
     for tier in ("canon", "active"):
         if system_operator_count < MIN_INDEPENDENT_OPERATORS_FOR_STANDING:
             break
         requirement = STANDING_TIER_REQUIREMENTS[tier]
+        if system_operator_count < int(requirement["min_distinct_operators"]) + 1:
+            continue
         min_tier = INDEPENDENCE_GRADE_TIERS[str(requirement["min_grade"])]
         counted = [
             (grade, operator_id)
@@ -591,6 +595,10 @@ def validate_witness_independence(
         if same_operator(claimant_identity, witness_identity):
             warnings.append("same_operator_low_impact")
         return WitnessPolicyDecision(ok=True, errors=errors, warnings=warnings)
+
+    # Identity declarations are insufficient for an authoritative high-impact
+    # act. The command boundary must evaluate a current typed control cohort.
+    errors.append("reviewed_operator_control_evidence_required")
 
     if policy.forbid_self_witness_for_high_impact and claimant_identity.subject_id == witness_identity.subject_id:
         errors.append("self_witness_forbidden_for_high_impact")

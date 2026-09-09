@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import secrets
 import sqlite3
 from contextlib import AbstractContextManager, contextmanager
@@ -18,17 +19,17 @@ from pydantic import ValidationError
 from .public_freshness import PublicationObservation, current_publication_observation
 from .key_control import KeyControlError, KeyControlService
 from .authority import AuthorityError, AuthorityService
+from .operator_control import OperatorControlError, OperatorControlRegistry
 from .sab_identity import (
     AgentIdentityV1,
     HIGH_IMPACT_LEVELS,
-    INDEPENDENCE_GRADE_TIERS,
-    MIN_INDEPENDENT_OPERATORS_FOR_STANDING,
     OperatorBacking,
     identity_operator_id,
     independence_grade,
     quorum_tier,
     subject_id_from_public_key,
     validate_witness_independence,
+    verify_ed25519_signature,
 )
 
 
@@ -110,6 +111,7 @@ WITNESSING_EVENT_TYPES = {"affirm", "refuse"}
 
 CHALLENGE_RESPOND_WINDOW = timedelta(days=7)
 CHALLENGE_PROSECUTE_WINDOW = timedelta(days=7)
+CONTROL_DECISION_LIMIT = 10000
 
 # Historical actor signatures accepted uppercase and the six ASCII whitespace
 # characters accepted by bytes.fromhex. Index their byte identity without
@@ -133,6 +135,7 @@ class SabSeedingDeps:
     read_observation: Optional[Callable[[], Optional[PublicationObservation]]] = None
     key_control: Optional[KeyControlService] = None
     authority: Optional[AuthorityService] = None
+    operator_control: Optional[OperatorControlRegistry] = None
 
 
 def _read_observation(deps: SabSeedingDeps) -> Optional[PublicationObservation]:
@@ -162,6 +165,8 @@ def _read_v1_db(deps: SabSeedingDeps) -> Iterator[sqlite3.Connection]:
     if deps.read_only and not deps.publication_configured:
         raise HTTPException(status_code=503, detail="No public snapshot is configured")
     with deps.db() as conn:
+        if not conn.in_transaction:
+            conn.execute("BEGIN")
         yield conn
 
 
@@ -395,7 +400,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                     return key_control_problem("public_readonly", "Public inspection does not accept commands.", 403)
                 try:
                     return await handler(request)
-                except AuthorityError as exc:
+                except (AuthorityError, OperatorControlError, KeyControlError) as exc:
                     return key_control_problem(exc.code, exc.detail, exc.status)
             return guarded
 
@@ -753,6 +758,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             seed_packet = _extract_object(payload, "seed_packet", "packet")
             signature_hex = _extract_signature(seed_packet, payload)
             packet_for_hash = _without_signature(seed_packet)
+            _witness_impact(packet_for_hash)
 
             seed_id = _required_str(packet_for_hash, "seed_id")
             claimant_identity = _claimant_identity(packet_for_hash, seed_packet)
@@ -846,7 +852,9 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         with _read_v1_db(deps) as conn:
             _seed_row(conn, seed_id)
             row = _seed_row(conn, seed_id)
-            return _publication_response(_serialize_seed(conn, row), publication, state_basis="stored")
+            return _publication_response({**_serialize_seed(conn, row),
+                                          "operator_control_context": _observe_operator_context(conn, row)},
+                                         publication, state_basis="stored")
 
     @router.get("/seeds/{seed_id}/chain")
     async def get_seed_chain(seed_id: str) -> Dict[str, Any]:
@@ -1014,7 +1022,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 actor_identity=actor_identity,
                 event_type="correction",
                 to_state="corrected",
-                payload={"correction_hash": correction_hash, "correction": correction_payload, "authority": authority},
+                payload={"correction_hash": correction_hash, "correction": correction_payload, "authority": authority,
+                         "signed_command": message},
                 signature_hex=signature_hex,
             )
             deps.invalidate_web_cache()
@@ -1160,6 +1169,10 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
     async def sustain_challenge(challenge_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         return _resolve_challenge_action(deps, challenge_id, payload, action="sustain", challenge_status="sustained", seed_state="compost")
 
+    @router.post("/challenges/{challenge_id}/revalidate", status_code=status.HTTP_201_CREATED)
+    async def revalidate_adjudication(challenge_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        return _revalidate_adjudication(deps, challenge_id, payload)
+
     @router.post("/challenges/{challenge_id}/reject", status_code=status.HTTP_201_CREATED)
     async def reject_challenge(challenge_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         return _resolve_challenge_action(
@@ -1219,7 +1232,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             _record_signature_use(conn, signature_hex, _hash_json(message), actor_identity)
             independence: Optional[Dict[str, Any]] = None
             if seed is not None and event_type in WITNESSING_EVENT_TYPES:
-                independence = _enforce_witness_policy(conn, seed=seed, actor_identity=actor_identity)
+                independence = _enforce_witness_policy(deps, conn, seed=seed, actor_identity=actor_identity,
+                                                       payload=event_payload, authority=authority)
             event = _append_witness_event(
                 conn,
                 event_type=event_type,
@@ -1339,6 +1353,9 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             deps.verify_agent_signature(conn, reviewer_identity, _canonical_bytes(message), signature_hex)
             authority = _authorize_actor(deps, conn, actor=reviewer_identity, action="request_standing_review",
                                          seed_id=subject_seed_id)
+            if lease_for_hash.get("operator_control_basis") is not None:
+                if _parse_datetime(lease_for_hash["issued_at"]) > deps.key_control.observe_time():
+                    raise HTTPException(status_code=400, detail="Reviewed standing cannot precede its signed issue time")
             _sweep_challenge_deadlines(deps, conn, subject_seed_id, authority=authority)
             seed = _seed_row(conn, subject_seed_id)
             if _pending_challenge_count(conn, subject_seed_id) > 0:
@@ -1353,7 +1370,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 (standing_id,),
             ).fetchone():
                 raise HTTPException(status_code=409, detail="standing already exists")
-            issued_under = _independence_gate(conn, seed)
+            issued_under = _independence_gate(deps, conn, seed, basis=lease_for_hash.get("operator_control_basis"),
+                                              reviewer=reviewer_identity, authority=authority)
             issued_status = "active" if issued_under["tier"] in {"active", "canon"} else "provisional"
             now = deps.utc_now()
             conn.execute(
@@ -1391,7 +1409,8 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 actor_identity=reviewer_identity,
                 event_type="standing_issued",
                 to_status=issued_status,
-                payload={"standing_lease_hash": standing_lease_hash, "issued_under": issued_under, "authority": authority},
+                payload={"standing_lease_hash": standing_lease_hash, "issued_under": issued_under, "authority": authority,
+                         "signed_command": message},
                 signature_hex=signature_hex,
             )
             _record_seed_transition(
@@ -1413,7 +1432,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
         publication = _read_observation(deps)
         with _read_v1_db(deps) as conn:
             row = _standing_row(conn, standing_id)
-            observation = _observe_standing(row, publication_observation=publication)
+            observation = _observe_standing(row, deps=deps, conn=conn, publication_observation=publication)
             return _publication_response(observation, publication)
 
     @router.get("/standing")
@@ -1438,12 +1457,12 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
                 # list filtering and individual reads, before applying LIMIT.
                 conn.create_function(
                     "sab_observed_standing_status",
-                    2,
-                    lambda stored, expiry: observe_standing_status(
-                        stored, expiry, observed_at=observed_at, publication_observation=publication
-                    )["status"],
+                    1,
+                    lambda standing_id: _observe_standing(
+                        _standing_row(conn, standing_id), deps=deps, conn=conn, include_lease=False,
+                        observed_at=observed_at, publication_observation=publication)["status"],
                 )
-                clauses.append("sab_observed_standing_status(status, expiry) = ?")
+                clauses.append("sab_observed_standing_status(standing_id) = ?")
                 params.append(status_filter)
             if scope:
                 clauses.append("scope = ?")
@@ -1462,7 +1481,7 @@ def create_sab_seeding_router(deps: SabSeedingDeps) -> APIRouter:
             items = []
             for row in rows:
                 observation = _observe_standing(row, include_lease=False, observed_at=observed_at,
-                                                publication_observation=publication)
+                                                publication_observation=publication, deps=deps, conn=conn)
                 items.append(observation)
             return _publication_response({"items": items}, publication)
 
@@ -1796,133 +1815,386 @@ def _identity_model(conn: sqlite3.Connection, actor_identity: str) -> Optional[A
         return None
 
 
-def _system_operator_count(conn: sqlite3.Connection) -> int:
-    rows = conn.execute("SELECT DISTINCT operator_id FROM sab_agent_identities_v1").fetchall()
-    operators = {str(row["operator_id"]).strip().lower() for row in rows}
-    return len({operator for operator in operators if operator and operator != "unknown"})
+def _control_required(detail: str = "Current reviewed operator-control evidence is required."):
+    return OperatorControlError("operator_control_required", 403, detail)
 
 
-def _seed_witness_grades(conn: sqlite3.Connection, seed: sqlite3.Row) -> List[Dict[str, Any]]:
-    claimant_model = _identity_model(conn, str(seed["claimant_identity"]))
-    grades: List[Dict[str, Any]] = []
-    rows = conn.execute(
-        """
-        SELECT DISTINCT actor_identity
-        FROM sab_witness_events_v1
-        WHERE subject_seed_id = ? AND event_type = 'affirm'
-        """,
-        (str(seed["seed_id"]),),
-    ).fetchall()
-    for row in rows:
-        actor = str(row["actor_identity"])
-        witness_model = _identity_model(conn, actor)
-        if claimant_model is None or witness_model is None:
-            grades.append({"witness_identity": actor, "grade": "undisclosed", "operator_id": "unknown"})
-            continue
-        grades.append(
-            {
-                "witness_identity": actor,
-                "grade": independence_grade(witness_model, claimant_model),
-                "operator_id": identity_operator_id(witness_model),
-            }
-        )
-    return grades
+def _control_event_payload(row: sqlite3.Row) -> Dict[str, Any]:
+    """Check exact recorded bytes before a signed event can become a premise."""
+    material = {key: row[key] for key in (
+        "event_id", "chain_scope", "event_type", "actor_identity", "subject_type", "subject_id",
+        "subject_seed_id", "timestamp", "payload_hash", "payload_json", "signature", "prev_hash",
+    )}
+    try:
+        payload = json.loads(row["payload_json"])
+        if "authority_json" in row.keys() and row["authority_json"]:
+            material["authority"] = json.loads(row["authority_json"])
+        if (not isinstance(payload, dict) or _hash_json(payload) != row["payload_hash"]
+                or _hash_json(material) != row["event_hash"]):
+            raise _control_required()
+        return payload
+    except (ValueError, TypeError, KeyError):
+        raise _control_required() from None
 
 
-def _independence_gate(conn: sqlite3.Connection, seed: sqlite3.Row) -> Dict[str, Any]:
-    witnesses = _seed_witness_grades(conn, seed)
-    system_operator_count = _system_operator_count(conn)
-    tier = quorum_tier(
-        witnesses=[(str(item["grade"]), str(item["operator_id"])) for item in witnesses],
-        system_operator_count=system_operator_count,
+def _operator_control_context(conn: sqlite3.Connection, seed: sqlite3.Row) -> Dict[str, Any]:
+    """A bounded revision of original claim bytes and ordered claim changes.
+
+    Affirmations and decisions do not change the revision they inspect. This is
+    an integrity scope, not an assertion that the claim or an event is true.
+    """
+    try:
+        packet = json.loads(seed["packet_json"])
+        digest = _hash_json(_without_signature(packet))
+        if digest != seed["packet_hash"]:
+            raise _control_required()
+        changes = conn.execute(
+            "SELECT * FROM sab_witness_events_v1 WHERE subject_seed_id=? "
+            "AND event_type IN ('response', 'correction') ORDER BY id LIMIT 10001",
+            (seed["seed_id"],),
+        ).fetchall()
+        if len(changes) > 10000:
+            raise _control_required()
+        for row in changes:
+            _control_event_payload(row)
+        basis = {"schema": "sab.operator_claim_revision.v1", "seed_id": seed["seed_id"],
+                 "original_packet_sha256": digest,
+                 "claim_change_event_sha256": [row["event_hash"] for row in changes]}
+        return {**basis, "schema": "sab.operator_control_context.v1", "claim_sha256": _hash_json(basis),
+                "effects": []}
+    except (ValueError, TypeError, KeyError):
+        raise _control_required() from None
+
+
+def _control_verify(deps, conn, actor, message, signature):
+    # Read observers must not use the mutation verifier, which opens IMMEDIATE.
+    if deps.key_control is None:
+        raise _control_required()
+    subject = _actor_subject(conn, actor)
+    key = deps.key_control.require_active_binding(conn, subject)
+    if not verify_ed25519_signature(key, _canonical_bytes(message), signature):
+        raise _control_required("The cited control premise lacks its original actor signature.")
+    return subject
+
+
+def _observe_operator_context(conn, seed):
+    try:
+        return _operator_control_context(conn, seed)
+    except (OperatorControlError, ValueError, TypeError, KeyError):
+        return {"schema": "sab.operator_control_context.v1", "seed_id": seed["seed_id"],
+                "claim_sha256": None, "availability": "unestablished", "effects": []}
+
+
+def _control_grant_roles(deps, conn, reference, actor, action, seed_id):
+    if deps.authority is None or not isinstance(reference, dict):
+        raise _control_required()
+    lease_id = reference.get("lease_id", reference.get("lease_ref"))
+    grant = deps.authority.get(conn, lease_id)
+    lease = grant["lease"]
+    if (grant["status"] != "active" or lease["subject_id"] != _actor_subject(conn, actor)
+            or lease["target_seed_id"] != seed_id or action not in lease["allowed_actions"]
+            or action in lease["forbidden_actions"]
+            or ("lease_sha256" in reference and reference["lease_sha256"] != grant["lease_sha256"])):
+        raise _control_required("A cited role no longer has its exact scoped permission.")
+    # When a packet includes a five-field signed declaration, check all of it.
+    declaration = {"lease_ref": lease["lease_id"], "scope": lease["scope"],
+                   "expires_at": lease["expires_at"], "revoker": lease["revoker_id"],
+                   "challenge_path": lease["challenge_path"]}
+    if any(reference[key] != value for key, value in declaration.items() if key in reference):
+        raise _control_required()
+    return [("permission_issuer", lease["issuer_id"]),
+            ("issuance_witness", grant["issuance_witness"]["witness_id"])]
+
+
+def _control_role_subjects(deps, conn, roles):
+    """Check role collisions before deduplication; auxiliary roles never count."""
+    subjects, keys = {}, {}
+    for role, actor in roles:
+        subject = _actor_subject(conn, actor)
+        if deps.key_control is None:
+            raise _control_required()
+        key = deps.key_control.require_active_binding(conn, subject)
+        if ((subject in subjects and subjects[subject] != role)
+                or (key in keys and keys[key] != (role, subject))):
+            raise _control_required("Claimant, challenger, witness, adjudicator and issuer roles must be separate.")
+        subjects[subject], keys[key] = role, (role, subject)
+    if len(subjects) > 16:
+        raise _control_required("The reviewed cohort exceeds its bounded participant capacity.")
+    return tuple(sorted(subjects))
+
+
+def _control_evaluate(deps, conn, seed, selector, purpose, roles):
+    if (deps.operator_control is None or not isinstance(selector, dict)
+            or set(selector) != {"assessment_id", "assessment_sha256"}):
+        raise _control_required()
+    subjects = _control_role_subjects(deps, conn, roles)
+    evaluation = deps.operator_control.evaluate(
+        conn, assessment_id=selector["assessment_id"], assessment_sha256=selector["assessment_sha256"],
+        seed_id=str(seed["seed_id"]), claim_sha256=_operator_control_context(conn, seed)["claim_sha256"],
+        purpose=purpose, participant_subject_ids=subjects,
     )
-    distinct_operators = {
-        str(item["operator_id"])
-        for item in witnesses
-        if str(item["operator_id"]).strip().lower() not in {"", "unknown"}
-    }
-    return {
-        "tier": tier,
-        "witnesses": witnesses,
-        "distinct_operator_count": len(distinct_operators),
-        "system_operator_count": system_operator_count,
-        "operator_count_basis": "self_declared",
-        "rehearsal_flag": "single_operator_rehearsal"
-        if system_operator_count < MIN_INDEPENDENT_OPERATORS_FOR_STANDING
-        else "multi_operator",
-    }
+    if not evaluation.eligible or evaluation.grade != "verified":
+        raise _control_required()
+    return evaluation
 
 
-def _enforce_witness_policy(
-    conn: sqlite3.Connection,
-    *,
-    seed: sqlite3.Row,
-    actor_identity: str,
-) -> Dict[str, Any]:
+def _seed_control_roles(deps, conn, seed):
+    packet = json.loads(seed["packet_json"])
+    unsigned = _without_signature(packet)
+    context = _operator_control_context(conn, seed)
+    actor = str(seed["claimant_identity"])
+    message = _seed_submit_message(seed_packet_hash=context["original_packet_sha256"], claimant_identity=actor,
+                                   authority_lease_id=str(seed["authority_lease_id"]),
+                                   created_at=str(unsigned["created_at"]))
+    _control_verify(deps, conn, actor, message, _extract_signature(packet))
+    roles = [("claimant", actor), *_control_grant_roles(
+        deps, conn, unsigned.get("authority_lease"), actor, "submit_seed", str(seed["seed_id"]))]
+    changes = conn.execute("SELECT * FROM sab_witness_events_v1 WHERE subject_seed_id=? "
+                           "AND event_type IN ('response','correction') ORDER BY id LIMIT 10001",
+                           (seed["seed_id"],)).fetchall()
+    for change in changes:
+        body = _control_event_payload(change)
+        if _actor_subject(conn, change["actor_identity"]) != _actor_subject(conn, actor):
+            raise _control_required("A claim change must preserve the claimant's signed command.")
+        command = body.get("signed_command")
+        if isinstance(command, dict):
+            if command.get("kind") == "sab_seed_correct":
+                correction = body.get("correction")
+                expected = {"kind": "sab_seed_correct", "target_seed_id": seed["seed_id"],
+                            "actor_identity": change["actor_identity"], "correction_sha256": _hash_json(
+                                correction if isinstance(correction, dict) else {"value": correction}),
+                            "created_at": command.get("created_at")}
+            elif command.get("kind") == "sab_challenge_response":
+                if not isinstance(body.get("payload"), dict) or set(body["payload"]) != {"value"}:
+                    raise _control_required()
+                expected = _challenge_response_message(challenge_id=body.get("challenge_id"),
+                                                        responder_identity=change["actor_identity"],
+                                                        response_body=str(body["payload"]["value"]))
+            else:
+                if not isinstance(body.get("payload"), dict):
+                    raise _control_required()
+                expected = {"kind": "sab_challenge_respond", "challenge_id": body.get("challenge_id"),
+                            "actor_identity": change["actor_identity"], "payload_sha256": _hash_json(body["payload"]),
+                            "created_at": command.get("created_at")}
+            if command != expected:
+                raise _control_required()
+            reference = body.get("authority")
+        else:
+            command = _witness_event_message(event_type=change["event_type"], subject_type=change["subject_type"],
+                                             subject_id=change["subject_id"], payload_hash=change["payload_hash"],
+                                             prev_hash=change["prev_hash"], created_at=change["timestamp"])
+            reference = json.loads(change["authority_json"] or "null")
+        _control_verify(deps, conn, actor, command, change["signature"])
+        roles.extend(_control_grant_roles(deps, conn, reference, actor,
+                                         "respond_challenge" if change["event_type"] == "response" else "correct_seed",
+                                         str(seed["seed_id"])))
+    return roles
+
+
+def _challenge_control_roles(deps, conn, seed, challenge):
+    packet = json.loads(challenge["packet_json"])
+    unsigned = _without_signature(packet)
+    digest = _hash_json(unsigned)
+    if digest != challenge["packet_hash"]:
+        raise _control_required()
+    actor = str(challenge["challenger_identity"])
+    message = _challenge_submit_message(target_seed_id=str(seed["seed_id"]),
+                                        target_claim_id=str(seed["claim_id"]), challenge_packet_hash=digest,
+                                        challenger_identity=actor, created_at=str(unsigned["created_at"]))
+    _control_verify(deps, conn, actor, message, _extract_signature(packet))
+    return [("challenger", actor), *_control_grant_roles(
+        deps, conn, unsigned.get("authority_lease"), actor, "submit_challenge", str(seed["seed_id"]))]
+
+
+def _control_event_refs(conn, references, seed_id):
+    if not isinstance(references, list) or not 1 <= len(references) <= 16:
+        raise _control_required("Cite between one and sixteen exact event references per role.")
+    rows, seen = [], set()
+    for ref in references:
+        if (not isinstance(ref, dict) or set(ref) != {"event_id", "event_sha256"}
+                or not isinstance(ref["event_id"], str)
+                or not isinstance(ref["event_sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", ref["event_sha256"])
+                or ref["event_id"] in seen):
+            raise _control_required()
+        seen.add(ref["event_id"])
+        row = conn.execute("SELECT * FROM sab_witness_events_v1 WHERE event_id=?", (ref["event_id"],)).fetchone()
+        if row is None or row["subject_seed_id"] != seed_id or row["event_hash"] != ref["event_sha256"]:
+            raise _control_required()
+        rows.append((row, _control_event_payload(row)))
+    return rows
+
+
+def _latest_adjudication(conn, seed_id, challenge_id, *, before_id=None):
+    rows = conn.execute(
+        "SELECT w.* FROM sab_witness_events_v1 w JOIN sab_seed_events_v1 s ON s.witness_event_id=w.event_id "
+        "WHERE w.subject_seed_id=? AND w.subject_type='seed' AND w.event_type='challenge' "
+        "AND s.event_type='challenge' AND s.seed_id=w.subject_seed_id AND s.payload_json=w.payload_json "
+        "AND CASE WHEN json_valid(s.payload_json) THEN json_extract(s.payload_json,'$.action') END IN ('reject','revalidate') "
+        "AND w.id < ? ORDER BY w.id DESC LIMIT ?",
+        (seed_id, before_id if before_id is not None else 9223372036854775807, CONTROL_DECISION_LIMIT + 1),
+    ).fetchall()
+    if len(rows) > CONTROL_DECISION_LIMIT:
+        raise _control_required()
+    for row in rows:
+        body = _control_event_payload(row)
+        if body.get("challenge_id") == challenge_id and body.get("action") in {"reject", "revalidate"}:
+            return row
+    raise _control_required("The original challenge decision is unavailable.")
+
+
+def _control_decision_capacity(conn, seed_id):
+    count = conn.execute(
+        "SELECT count(*) FROM sab_seed_events_v1 WHERE seed_id=? AND event_type='challenge' "
+        "AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.action') END IN ('reject','revalidate')",
+        (seed_id,),
+    ).fetchone()[0]
+    if count >= CONTROL_DECISION_LIMIT:
+        raise OperatorControlError("operator_control_decision_capacity", 429,
+                                   "This seed has reached its bounded adjudication history capacity.")
+
+
+def _independence_gate(deps, conn, seed, *, basis=None, reviewer=None, authority=None):
+    """A signed, cited roster is the only input to an independent quorum.
+
+    No-basis legacy experiments remain provisional. Evidence-bearing commands
+    fail closed rather than recording an apparently successful failed review.
+    """
+    if basis is None:
+        return {"tier": "provisional", "witnesses": [], "distinct_operator_count": 0,
+                "system_operator_count": 0, "operator_count_basis": "unestablished",
+                "rehearsal_flag": "unestablished_operator_control"}
+    if (not isinstance(basis, dict)
+            or set(basis) != {"assessment", "witness_events", "adjudication_events"}):
+        raise _control_required("Standing requires a closed signed roster of exact evidence events.")
+    seed_id = str(seed["seed_id"])
+    context = _operator_control_context(conn, seed)
+    roles = _seed_control_roles(deps, conn, seed)
+    witnesses, witness_ids = [], set()
+    for row, body in _control_event_refs(conn, basis["witness_events"], seed_id):
+        if (row["event_type"] != "affirm" or row["subject_type"] != "seed" or row["subject_id"] != seed_id
+                or body.get("operator_control_claim_sha256") != context["claim_sha256"]):
+            raise _control_required("A cited witness must affirm this exact current claim revision.")
+        message = _witness_event_message(event_type="affirm", subject_type="seed", subject_id=seed_id,
+                                         payload_hash=row["payload_hash"], prev_hash=row["prev_hash"],
+                                         created_at=row["timestamp"])
+        subject = _control_verify(deps, conn, row["actor_identity"], message, row["signature"])
+        if subject in witness_ids:
+            raise _control_required("A witness cannot be counted twice.")
+        witness_ids.add(subject)
+        witnesses.append(subject)
+        roles.append(("witness", subject))
+        reference = json.loads(row["authority_json"] or "null")
+        _enforce_witness_policy(deps, conn, seed=seed, actor_identity=subject, payload=body, authority=reference)
+        roles.extend(_control_grant_roles(deps, conn, reference, subject, "submit_witness_event", seed_id))
+    covered = set()
+    for row, body in _control_event_refs(conn, basis["adjudication_events"], seed_id):
+        command = body.get("signed_command")
+        signed_body = body.get("payload")
+        challenge_id = body.get("challenge_id")
+        if (not isinstance(command, dict) or not isinstance(signed_body, dict)
+                or body.get("action") not in {"reject", "revalidate"} or row["event_type"] != "challenge"
+                or row["subject_type"] != "seed" or row["subject_id"] != seed_id or challenge_id in covered):
+            raise _control_required("A cited adjudication must preserve its original signed rejection command.")
+        expected = {"kind": "sab_challenge_" + body["action"], "challenge_id": challenge_id,
+                    "actor_identity": row["actor_identity"], "payload_sha256": _hash_json(signed_body),
+                    "created_at": command.get("created_at")}
+        if command != expected:
+            raise _control_required()
+        latest = _latest_adjudication(conn, seed_id, challenge_id)
+        if latest["event_id"] != row["event_id"]:
+            raise _control_required("Cite the latest explicit adjudication for every challenge.")
+        if body["action"] == "revalidate":
+            prior = _latest_adjudication(conn, seed_id, challenge_id, before_id=row["id"])
+            if signed_body.get("prior_adjudication_event") != {
+                    "event_id": prior["event_id"], "event_sha256": prior["event_hash"]}:
+                raise _control_required()
+        subject = _control_verify(deps, conn, row["actor_identity"], command, row["signature"])
+        challenge = _challenge_row(conn, challenge_id)
+        if challenge["target_seed_id"] != seed_id or challenge["status"] != "rejected":
+            raise _control_required()
+        adjudication = _adjudicator_independence(
+            deps, conn, seed=seed, challenge=challenge, adjudicator=subject,
+            selector=signed_body.get("operator_control_assessment"), authority=body.get("authority"))
+        roles.extend([tuple(item) for item in adjudication["roles"]])
+        covered.add(challenge_id)
+    challenges = conn.execute("SELECT challenge_id, status FROM sab_challenge_packets_v1 "
+                              "WHERE target_seed_id=? ORDER BY id LIMIT 17", (seed_id,)).fetchall()
+    if (not challenges or len(challenges) > 16 or covered != {row["challenge_id"] for row in challenges}
+            or any(row["status"] != "rejected" for row in challenges)):
+        raise _control_required("Every challenge requires a cited current independent resolution; history cannot be omitted.")
+    roles.append(("standing_reviewer", reviewer))
+    roles.extend(_control_grant_roles(deps, conn, authority, reviewer,
+                                     authority.get("action") if isinstance(authority, dict) else "", seed_id))
+    evaluation = _control_evaluate(deps, conn, seed, basis["assessment"], "standing_quorum", roles)
+    classes = dict(zip(evaluation.participant_subject_ids, evaluation.controller_class_ids))
+    counted = [("cross_operator_attested", classes[subject]) for subject in witnesses]
+    # Only the claimant and the cited affirmative witnesses count quorum.
+    counted_classes = {classes[_actor_subject(conn, str(seed["claimant_identity"]))],
+                       *(classes[subject] for subject in witnesses)}
+    tier = quorum_tier(witnesses=counted, system_operator_count=len(counted_classes))
+    return {"tier": tier, "witnesses": [{"witness_identity": subject, "grade": "cross_operator_attested",
+                                        "controller_class_id": classes[subject]} for subject in witnesses],
+            "distinct_operator_count": len({classes[subject] for subject in witnesses}),
+            "system_operator_count": len(counted_classes), "operator_count_basis": "reviewed_current_control_evidence",
+            "operator_control": evaluation.to_observation(), "roles": [list(item) for item in roles],
+            "basis": basis, "claim_sha256": context["claim_sha256"]}
+
+
+def _witness_impact(packet):
+    plan = packet.get("witness_plan", {})
+    if not isinstance(plan, dict):
+        raise HTTPException(status_code=400, detail="witness_plan must be an object")
+    impact = plan.get("impact", "low")
+    if not isinstance(impact, str) or impact not in {"low", *HIGH_IMPACT_LEVELS}:
+        raise HTTPException(status_code=400, detail="witness_plan impact is unsupported")
+    return impact
+
+
+def _enforce_witness_policy(deps, conn, *, seed, actor_identity, payload, authority):
     packet = json.loads(str(seed["packet_json"]))
-    plan = packet.get("witness_plan") if isinstance(packet.get("witness_plan"), dict) else {}
-    forbidden = {str(item).strip() for item in (plan.get("forbidden_witnesses") or []) if str(item).strip()}
+    plan = packet.get("witness_plan", {})
+    impact = _witness_impact(packet)
     actor_subject = _actor_subject(conn, actor_identity)
-    if forbidden & {actor_identity, actor_subject}:
+    forbidden = plan.get("forbidden_witnesses", [])
+    if (not isinstance(forbidden, list) or len(forbidden) > 256
+            or any(not isinstance(item, str) or not item.strip() for item in forbidden)):
+        raise HTTPException(status_code=400, detail="forbidden_witnesses must contain bounded identity references")
+    resolved = set()
+    for item in forbidden:
+        subject = item.strip().removeprefix("sab_identity_")
+        if not re.fullmatch(r"agent_[A-Za-z0-9_.:-]{2,154}", subject):
+            raise HTTPException(status_code=403, detail="Forbidden witnesses require stable subject IDs; display names cannot define this policy")
+        resolved.add(subject)
+    actor_key = conn.execute("SELECT public_key FROM web_agents WHERE id=?", (actor_subject,)).fetchone()
+    forbidden_keys = {row[0] for subject in resolved for row in conn.execute(
+        "SELECT public_key FROM web_agents WHERE id=?", (subject,)).fetchall()}
+    if actor_subject in resolved or (actor_key is not None and actor_key[0] in forbidden_keys):
         raise HTTPException(status_code=403, detail="witness is forbidden by the seed witness_plan")
-    impact = str(plan.get("impact") or "low")
+    if impact in HIGH_IMPACT_LEVELS:
+        context = _operator_control_context(conn, seed)
+        if payload.get("operator_control_claim_sha256") != context["claim_sha256"]:
+            raise _control_required("High-impact witness commands must bind the current claim revision.")
+        roles = [*_seed_control_roles(deps, conn, seed), ("witness", actor_subject),
+                 *_control_grant_roles(deps, conn, authority, actor_subject, "submit_witness_event", str(seed["seed_id"]))]
+        evaluation = _control_evaluate(deps, conn, seed, payload.get("operator_control_assessment"),
+                                       "high_impact_witness", roles)
+        return {"grade": "cross_operator_attested", "impact": impact, "operator_control": evaluation.to_observation()}
     claimant_model = _identity_model(conn, str(seed["claimant_identity"]))
     witness_model = _identity_model(conn, actor_subject)
     if claimant_model is None or witness_model is None:
-        if impact.lower() in HIGH_IMPACT_LEVELS:
-            raise HTTPException(status_code=403, detail="witness independence cannot be established; failing closed")
         return {"grade": "undisclosed", "impact": impact, "warnings": ["independence_ungradable"]}
-    existing_models: List[AgentIdentityV1] = []
-    seen: set = set()
-    for row in conn.execute(
-        """
-        SELECT DISTINCT actor_identity
-        FROM sab_witness_events_v1
-        WHERE subject_seed_id = ? AND event_type = 'affirm'
-        """,
-        (str(seed["seed_id"]),),
-    ).fetchall():
-        prior = _identity_model(conn, str(row["actor_identity"]))
-        if prior is not None and prior.subject_id not in seen:
-            seen.add(prior.subject_id)
-            existing_models.append(prior)
-    decision = validate_witness_independence(
-        claimant_identity=claimant_model,
-        witness_identity=witness_model,
-        impact=impact,
-        existing_witness_identities=existing_models,
-    )
-    if not decision.ok:
-        raise HTTPException(status_code=403, detail="witness independence rejected: " + "; ".join(decision.errors))
-    return {
-        "grade": independence_grade(witness_model, claimant_model),
-        "impact": impact,
-        "warnings": decision.warnings,
-    }
+    decision = validate_witness_independence(claimant_identity=claimant_model, witness_identity=witness_model, impact="low")
+    return {"grade": independence_grade(witness_model, claimant_model), "impact": impact, "warnings": decision.warnings}
 
 
-def _adjudicator_independence(
-    conn: sqlite3.Connection,
-    *,
-    adjudicator: str,
-    claimant: str,
-    challenger: str,
-) -> Dict[str, Any]:
-    system_operator_count = _system_operator_count(conn)
-    if system_operator_count < MIN_INDEPENDENT_OPERATORS_FOR_STANDING:
-        return {"independence": "single_operator_rehearsal", "system_operator_count": system_operator_count}
-    adjudicator_model = _identity_model(conn, adjudicator)
-    grades: Dict[str, str] = {}
-    minimum = INDEPENDENCE_GRADE_TIERS["cross_operator_unverified"]
-    for role, party in (("claimant", claimant), ("challenger", challenger)):
-        party_model = _identity_model(conn, party)
-        grade = "undisclosed"
-        if adjudicator_model is not None and party_model is not None:
-            grade = independence_grade(adjudicator_model, party_model)
-        if INDEPENDENCE_GRADE_TIERS.get(grade, 1) < minimum:
-            raise HTTPException(status_code=403, detail=f"adjudicator is not independent of the {role}")
-        grades[f"vs_{role}"] = grade
-    return {"independence": grades, "system_operator_count": system_operator_count}
+def _adjudicator_independence(deps, conn, *, seed, challenge, adjudicator, selector, authority):
+    roles = [*_seed_control_roles(deps, conn, seed), *_challenge_control_roles(deps, conn, seed, challenge),
+             ("adjudicator", adjudicator),
+             *_control_grant_roles(deps, conn, authority, adjudicator, "adjudicate_challenge", str(seed["seed_id"]))]
+    evaluation = _control_evaluate(deps, conn, seed, selector, "challenge_adjudication", roles)
+    return {"operator_control": evaluation.to_observation(), "roles": [list(item) for item in roles],
+            "claim_sha256": _operator_control_context(conn, seed)["claim_sha256"]}
 
 
 def _seed_transition_allowed(from_state: str, to_state: str) -> bool:
@@ -2631,36 +2903,90 @@ def observe_standing_status(
         return publication.standing(stored_status, expiry)
     now = observed_at or datetime.now(timezone.utc)
     observation = {
-        "status": stored_status,
-        "stored_status": stored_status,
-        "status_basis": "stored",
-        "observed_at": now.isoformat(),
+        "status": stored_status, "stored_status": stored_status, "status_basis": "stored", "observed_at": now.isoformat(),
     }
     if stored_status in {"revoked", "expired", "compost", "superseded"}:
         return observation
     try:
         expires_at = _parse_datetime(str(expiry or ""))
     except (HTTPException, ValueError, OverflowError):
-        observation["status"] = "unknown"
-        observation["status_basis"] = "invalid_expiry"
+        observation.update(status="unknown", status_basis="invalid_expiry")
         return observation
     if expires_at <= now:
-        observation["status"] = "expired"
-        observation["status_basis"] = "expiry_observation"
+        observation.update(status="expired", status_basis="expiry_observation")
+    elif observation["status"] in {"active", "canon"}:
+        # A date or a publication digest cannot validate the control premise.
+        observation.update(status="unknown", status_basis="operator_control_unestablished")
     return observation
 
 
-def _observe_standing(
-    row: sqlite3.Row,
-    *,
-    include_lease: bool = True,
-    observed_at: Optional[datetime] = None,
-    publication_observation: Optional[PublicationObservation] = None,
-) -> Dict[str, Any]:
-    """Project elapsed expiry without signing events or changing stored authority."""
+def _standing_control_premise(deps, conn, row):
+    lease = json.loads(row["lease_json"])
+    unsigned = _without_signature(lease)
+    if (_hash_json(unsigned) != row["lease_hash"] or _standing_expiry(unsigned) != row["expiry"]
+            or unsigned.get("subject_seed_id") != row["subject_seed_id"]
+            or unsigned.get("standing_id") != row["standing_id"]
+            or any(unsigned.get(field) != row[field] for field in (
+                "subject_claim_id", "scope", "purpose", "revoker", "challenge_path", "issued_by", "issued_at"))):
+        raise _control_required()
+    event = conn.execute(
+        "SELECT * FROM sab_witness_events_v1 WHERE subject_type='standing' AND subject_id=? "
+        "AND event_type IN ('standing_issued','canon') ORDER BY id DESC LIMIT 1", (row["standing_id"],),
+    ).fetchone()
+    if event is None:
+        raise _control_required()
+    payload = _control_event_payload(event)
+    command = payload.get("signed_command")
+    if not isinstance(command, dict) or payload.get("to_status") != row["status"]:
+        raise _control_required()
+    actor = str(event["actor_identity"])
+    if command.get("kind") == "sab_standing_review":
+        expected = {"kind": "sab_standing_review", "standing_lease_sha256": row["lease_hash"],
+                    "subject_seed_id": row["subject_seed_id"], "reviewer_identity": actor,
+                    "created_at": unsigned.get("issued_at")}
+        if unsigned.get("issued_by") != actor:
+            raise _control_required()
+        basis, action = unsigned.get("operator_control_basis"), "request_standing_review"
+    elif command.get("kind") == "sab_standing_revalidate":
+        evidence = payload.get("evidence")
+        if not isinstance(evidence, dict):
+            raise _control_required()
+        expected = {"kind": "sab_standing_revalidate", "standing_id": row["standing_id"],
+                    "actor_identity": actor,
+                    "payload_sha256": _hash_json({"reason": payload.get("reason"), "evidence": evidence}),
+                    "created_at": command.get("created_at")}
+        if row["status"] == "canon":
+            expected["promote_to_canon"] = True
+        basis = evidence.get("operator_control_basis")
+        action = "canonize_standing" if row["status"] == "canon" else "revalidate_standing"
+    else:
+        raise _control_required()
+    if command != expected or payload.get("authority", {}).get("action") != action:
+        raise _control_required()
+    _control_verify(deps, conn, actor, command, event["signature"])
+    return _independence_gate(deps, conn, _seed_row(conn, row["subject_seed_id"]), basis=basis,
+                              reviewer=actor, authority=payload.get("authority"))
+
+
+def _observe_standing(row, *, include_lease=True, observed_at=None, publication_observation=None,
+                      deps=None, conn=None):
+    """Read only: preserve originals, and freshly check explicitly bound premises."""
     item = _serialize_standing(row, include_lease=include_lease)
     item.update(observe_standing_status(item["status"], row["expiry"], observed_at=observed_at,
                                        publication_observation=publication_observation))
+    item.update(operator_control_eligible=False, current_standing_eligible=False)
+    if (item["status_basis"] == "operator_control_unestablished" and deps is not None
+            and not deps.read_only and conn is not None):
+        try:
+            basis = _standing_control_premise(deps, conn, row)
+            sufficient = basis["tier"] == "canon" if row["status"] == "canon" else basis["tier"] in {"active", "canon"}
+            if sufficient:
+                item.update(status=row["status"], status_basis="current_reviewed_control_evidence",
+                            operator_control_eligible=True, current_standing_eligible=True,
+                            operator_control=basis["operator_control"])
+        except (OperatorControlError, AuthorityError, KeyControlError, HTTPException,
+                ValueError, TypeError, KeyError, OverflowError):
+            pass
     return item
 
 
@@ -2842,12 +3168,6 @@ def _resolve_challenge_action(
         else:
             if actor_ids & {claimant, challenger, challenger_subject}:
                 raise HTTPException(status_code=403, detail="adjudicator must be neither claimant nor challenger")
-            adjudication_meta = _adjudicator_independence(
-                conn,
-                adjudicator=actor_subject,
-                claimant=claimant,
-                challenger=challenger_subject,
-            )
         created_at = str(payload.get("created_at") or datetime.now(timezone.utc).isoformat()).strip()
         body = payload.get("response") if action == "respond" else payload.get("reason")
         if body is None and action == "respond":
@@ -2877,6 +3197,12 @@ def _resolve_challenge_action(
             deps, conn, actor=actor_identity,
             action="respond_challenge" if action == "respond" else "adjudicate_challenge", seed_id=seed_id,
         )
+        if action != "respond":
+            adjudication_meta = _adjudicator_independence(
+                deps, conn, seed=seed, challenge=challenge, adjudicator=actor_subject,
+                selector=body_payload.get("operator_control_assessment"), authority=authority)
+        if action == "reject":
+            _control_decision_capacity(conn, seed_id)
         _sweep_challenge_deadlines(deps, conn, seed_id, authority=authority)
         challenge = _challenge_row(conn, challenge_id)
         if str(challenge["status"]) not in OPEN_CHALLENGE_STATUSES:
@@ -2901,6 +3227,7 @@ def _resolve_challenge_action(
             "payload_hash": body_hash,
             "payload": body_payload,
             "authority": authority,
+            "signed_command": message,
         }
         if adjudication_meta is not None:
             transition_payload["adjudication"] = adjudication_meta
@@ -2924,6 +3251,46 @@ def _resolve_challenge_action(
             "seed_state": seed_state,
             "witness_head": witness["hash"],
         }
+
+
+def _revalidate_adjudication(deps, challenge_id, payload):
+    """Re-examine an explicit prior decision; never revive a final seed or lease."""
+    _reject_unsigned_authority_selector(payload)
+    with _mutation_v1_db(deps) as conn:
+        challenge = _challenge_row(conn, challenge_id)
+        seed = _seed_row(conn, challenge["target_seed_id"])
+        if challenge["status"] != "rejected" or seed["state"] in FINAL_SEED_STATES:
+            raise HTTPException(status_code=409, detail="This challenge cannot be revalidated")
+        actor = _required_str(payload, "actor_identity")
+        created_at = _required_str(payload, "created_at")
+        reason = payload.get("reason")
+        if not isinstance(reason, dict):
+            raise _control_required("Adjudication revalidation requires a signed evidence object.")
+        signature = _required_str(payload, "signature")
+        message = {"kind": "sab_challenge_revalidate", "challenge_id": challenge_id, "actor_identity": actor,
+                   "payload_sha256": _hash_json(reason), "created_at": created_at}
+        _require_actor_signer(conn, actor, payload)
+        deps.verify_agent_signature(conn, actor, _canonical_bytes(message), signature)
+        authority = _authorize_actor(deps, conn, actor=actor, action="adjudicate_challenge", seed_id=seed["seed_id"])
+        prior = _latest_adjudication(conn, seed["seed_id"], challenge_id)
+        if reason.get("prior_adjudication_event") != {"event_id": prior["event_id"], "event_sha256": prior["event_hash"]}:
+            raise HTTPException(status_code=409, detail="The signed predecessor is not the latest challenge decision")
+        adjudication = _adjudicator_independence(
+            deps, conn, seed=seed, challenge=challenge, adjudicator=_actor_subject(conn, actor),
+            selector=reason.get("operator_control_assessment"), authority=authority)
+        _control_decision_capacity(conn, seed["seed_id"])
+        _record_signature_use(conn, signature, _hash_json(message), actor)
+        event = _record_seed_transition(
+            deps, conn, event_type="challenge", actor_identity=actor, seed_id=seed["seed_id"],
+            to_state=seed["state"], update_state=False, signature_hex=signature,
+            payload={"challenge_id": challenge_id, "action": "revalidate", "payload": reason,
+                     "payload_hash": _hash_json(reason), "signed_command": message,
+                     "authority": authority, "adjudication": adjudication,
+                     "from_state": seed["state"], "to_state": seed["state"]},
+        )
+        deps.invalidate_web_cache()
+        return {"challenge_id": challenge_id, "response_id": event["event_id"], "seed_id": seed["seed_id"],
+                "seed_state": seed["state"], "witness_head": event["hash"], "standing_effect": "none"}
 
 
 def _challenge_count(conn: sqlite3.Connection, seed_id: str) -> int:
@@ -2967,6 +3334,12 @@ def _validate_standing_lease(lease: Dict[str, Any]) -> None:
             raise HTTPException(status_code=400, detail=f"standing lease {key} is required")
     if not _standing_expiry(lease):
         raise HTTPException(status_code=400, detail="standing lease expiry is required")
+    if lease.get("operator_control_basis") is not None:
+        for field in ("standing_id", "subject_seed_id", "subject_claim_id", "scope", "purpose", "revoker",
+                      "challenge_path", "issued_by", "issued_at"):
+            if not isinstance(lease.get(field), str) or not lease[field].strip():
+                raise HTTPException(status_code=400, detail="Reviewed standing requires its original signed text fields")
+        _parse_datetime(lease["issued_at"])
 
 
 def _standing_expiry(lease: Dict[str, Any]) -> str:
@@ -3068,10 +3441,11 @@ def _standing_action(
         if str(standing["status"]) == "expired":
             raise HTTPException(status_code=409, detail="standing is expired")
         _record_signature_use(conn, signature_hex, _hash_json(message), actor_identity)
-        event_payload: Dict[str, Any] = {**action_payload, "authority": authority}
+        event_payload: Dict[str, Any] = {**action_payload, "authority": authority, "signed_command": message}
         if action == "revalidate":
             seed = _seed_row(conn, str(standing["subject_seed_id"]))
-            issued_under = _independence_gate(conn, seed)
+            issued_under = _independence_gate(deps, conn, seed, basis=evidence.get("operator_control_basis"),
+                                              reviewer=actor_identity, authority=authority)
             if to_status == "canon" and issued_under["tier"] != "canon":
                 raise HTTPException(
                     status_code=409,

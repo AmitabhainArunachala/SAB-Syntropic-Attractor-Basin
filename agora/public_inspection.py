@@ -19,6 +19,12 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 OBSERVATION_SCHEMA = "sab.public_read_observation.v1"
 AGE_STATUSES = {"not_configured", "within_limit", "stale", "future_observation", "clock_uncertain"}
+_UNDISCRIMINATED_SCHEMAS = {
+    "sab.operator_control_review.v1": {
+        "reviewer_subject_id", "reviewer_public_key", "assessment_sha256", "observed_at", "findings", "signature",
+    },
+    "sab.operator_cohort_issuance.v1": {"assessment", "reviews"},
+}
 
 
 def _utc_now() -> datetime:
@@ -111,7 +117,8 @@ def _observation(value: object, headers: dict, path: str) -> dict:
     currentness = _object(observation["currentness"], path, {"status", "reasons"})
     if (
         currentness["status"] != "unestablished"
-        or currentness["reasons"] != ["trusted_utc_unverified", "revocation_currentness_unverified"]
+        or currentness["reasons"] != ["trusted_utc_unverified", "revocation_currentness_unverified",
+                                      "operator_control_currentness_unverified"]
         or observation["authority_effect"] != "none"
         or observation["standing_effect"] != "none"
     ):
@@ -334,9 +341,25 @@ def inspect(
     observe("ledger", ledger, ledger_path)
     schemas = document(descriptor["links"]["schemas"])
     for item in schemas["schemas"]:
+        item = _object(item, "schema discovery", {"schema", "url"})
+        name = item["schema"]
+        if not isinstance(name, str) or item["url"] != "/schemas/" + name + ".schema.json":
+            raise RuntimeError("schema identity or envelope mismatch")
         schema_document = document(item["url"])
-        if schema_document["properties"]["schema"]["const"] != item["schema"]:
-            raise RuntimeError(f"schema identity mismatch: {item['url']}")
+        properties = _object(schema_document.get("properties"), item["url"])
+        if schema_document.get("$id") != "https://sab.local" + item["url"]:
+            raise RuntimeError("schema identity or envelope mismatch")
+        if name in _UNDISCRIMINATED_SCHEMAS:
+            # Exact signed envelopes have no extra instance discriminator.
+            required = schema_document.get("required")
+            if (schema_document.get("additionalProperties") is not False
+                    or set(properties) != _UNDISCRIMINATED_SCHEMAS[name]
+                    or not isinstance(required, list) or any(not isinstance(field, str) for field in required)
+                    or len(required) != len(set(required))
+                    or set(required) != _UNDISCRIMINATED_SCHEMAS[name]):
+                raise RuntimeError("schema identity or envelope mismatch")
+        elif _object(properties.get("schema"), item["url"]).get("const") != name:
+            raise RuntimeError("schema identity or envelope mismatch")
     if ledger["items"]:
         item = ledger["items"][0]
         dossier_path = item["links"]["dossier"]
@@ -350,6 +373,17 @@ def inspect(
             or dossier.get("reliance", {}).get("status") != "unestablished"
         ):
             raise RuntimeError("dossier inspection claims authority, standing, or reliance")
+        standing_items = _object(dossier.get("standing"), "dossier standing").get("items")
+        if not isinstance(standing_items, list):
+            raise RuntimeError("historical dossier has no standing observation collection")
+        for standing in standing_items:
+            standing = _object(standing, "dossier standing")
+            if (not isinstance(standing.get("status"), str)
+                    or standing["status"] not in {"unknown", "revoked", "expired", "compost", "superseded"}
+                    or "stored_status" not in standing or standing.get("reliance_status") != "unestablished"
+                    or standing.get("operator_control_eligible", False) is not False
+                    or standing.get("current_standing_eligible", False) is not False):
+                raise RuntimeError("historical dossier claims current standing or operator-control eligibility")
     for label, observation in observations.items():
         if (
             observation["manifest_sha256"] != publication["manifest_sha256"]

@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import pytest
 from fastapi.testclient import TestClient
+from operator_control_fixtures import adjudication_assessment
 
 try:
     from nacl.encoding import HexEncoder as _NaclHexEncoder
@@ -481,7 +482,9 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(key_path))
 
     from authority_fixtures import provision_authority_policy
+    from operator_control_fixtures import provision_operator_policy
     authority = provision_authority_policy(tmp_path, monkeypatch)
+    control = provision_operator_policy(tmp_path, monkeypatch)
     for mod_name in list(sys.modules):
         if mod_name == "agora" or mod_name.startswith("agora."):
             del sys.modules[mod_name]
@@ -489,6 +492,7 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     try:
         module = importlib.import_module("agora.app")
         module.authority_test_fixture = authority
+        module.operator_control_test_fixture = control
         return module
     except ImportError as exc:
         pytest.skip(f"agora.app runtime dependency missing for live API tests: {exc}")
@@ -502,6 +506,7 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def client(sab_app):
     with TestClient(sab_app.app) as test_client:
         sab_app.authority_test_fixture.enroll(test_client)
+        sab_app.operator_control_test_fixture.enroll(test_client)
         yield test_client
 
 
@@ -823,7 +828,9 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
     _v1_register_or_xfail(client, reviewer)
     client.authority.issue(client, reviewer.subject_id, seed_id, ["adjudicate_challenge", "submit_witness_event", "request_standing_review"])
     reviewed_at = _iso(_utc_now())
-    reason = "The recorded correction addresses the local scope objection."
+    reason = {"value": "The recorded correction addresses the local scope objection.",
+              "operator_control_assessment": adjudication_assessment(
+                  client, seed_id, challenge_body["challenge_id"], reviewer.subject_id)}
     resolution = client.post(
         f"/api/v1/challenges/{challenge_body['challenge_id']}/reject",
         json={
@@ -835,7 +842,7 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
                 action="reject",
                 challenge_id=challenge_body["challenge_id"],
                 actor_identity=reviewer.subject_id,
-                payload={"value": reason},
+                payload=reason,
                 created_at=reviewed_at,
             ),
         },

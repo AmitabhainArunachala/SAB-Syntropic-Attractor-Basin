@@ -25,6 +25,12 @@ SCHEMA_SOURCES = {
         "sab.authority_lease.v2.schema.json",
         "sab.authority_issuance_witness.v1.schema.json",
         "sab.authority_revocation.v1.schema.json",
+        "sab.operator_control_policy.v1.schema.json",
+        "sab.operator_cohort_assessment.v1.schema.json",
+        "sab.operator_control_review.v1.schema.json",
+        "sab.operator_control_challenge.v1.schema.json",
+        "sab.operator_control_revocation.v1.schema.json",
+        "sab.operator_cohort_issuance.v1.schema.json",
     )
 }
 STATIC_MEDIA_TYPES = {

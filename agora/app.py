@@ -83,6 +83,17 @@ AUTHORITY = (
     )
     if KEY_CONTROL is not None else None
 )
+from .operator_control import OperatorControlRegistry, load_operator_policy  # noqa: E402
+from .operator_control_api import create_operator_control_router  # noqa: E402
+
+OPERATOR_CONTROL = (
+    OperatorControlRegistry(
+        load_operator_policy(os.environ.get("SAB_OPERATOR_CONTROL_POLICY_PATH"),
+                             os.environ.get("SAB_OPERATOR_CONTROL_POLICY_SHA256")),
+        KEY_CONTROL, AUTHORITY,
+    )
+    if KEY_CONTROL is not None else None
+)
 PUBLIC_FRESHNESS_POLICY = read_freshness_policy() if PUBLIC_MODE == PublicMode.PUBLIC_READONLY else None
 PUBLIC_SNAPSHOT = (
     load_public_snapshot(os.getenv("SAB_PUBLIC_SNAPSHOT"), os.getenv("SAB_PUBLIC_SNAPSHOT_SHA256"))
@@ -1229,6 +1240,7 @@ PUBLIC_READ_PATHS = (
     r"/(?:skill|seed|auth|heartbeat|rules)\.md", r"/openapi\.json", r"/docs(?:/oauth2-redirect)?", r"/redoc",
     r"/schemas/(?:index\.json|sab\.(?:seed_packet|challenge_packet|claim_dossier|public_snapshot|public_read_observation)\.v1\.schema\.json)",
     r"/schemas/sab\.authority_(?:policy\.v1|lease\.v2|issuance_witness\.v1|revocation\.v1)\.schema\.json",
+    r"/schemas/sab\.operator_(?:control_(?:policy|review|challenge|revocation)|cohort_(?:assessment|issuance))\.v1\.schema\.json",
     r"/static/(?:web\.(?:css|js)|favicon\.svg|(?:seed_fusion|frontier|reliance|dossier)\.css)",
     r"/api/v1/claims(?:/record)?", r"/api/v1/seeds(?:/[^/]+(?:/chain)?)?",
     r"/api/v1/seeds/[^\x00]+/dossier", r"/api/v1/challenges/[^/]+",
@@ -1413,6 +1425,7 @@ app.include_router(
             read_observation=_public_read_observation if PUBLIC_FRESHNESS is not None else None,
             key_control=KEY_CONTROL,
             authority=AUTHORITY,
+            operator_control=OPERATOR_CONTROL,
         )
     )
 )
@@ -1420,6 +1433,8 @@ app.include_router(
 
 if BROWSER_SESSIONS is not None:
     app.include_router(create_browser_session_router(BROWSER_SESSIONS, _db))
+if OPERATOR_CONTROL is not None:
+    app.include_router(create_operator_control_router(OPERATOR_CONTROL, _db))
 
 
 @app.post("/api/agents/register", status_code=status.HTTP_201_CREATED)

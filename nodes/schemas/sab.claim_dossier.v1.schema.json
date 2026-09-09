@@ -95,7 +95,12 @@
         "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } }
       }
     },
-    "standing": { "$ref": "#/$defs/collection" },
+    "standing": {
+      "allOf": [{ "$ref": "#/$defs/collection" }],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/standing_observation" } }
+      }
+    },
     "operators": {
       "type": "object",
       "required": ["disclosures", "independently_verified", "independently_verified_count", "independence_status", "check"],
@@ -123,6 +128,25 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "standing_observation": {
+      "type": "object",
+      "required": ["status", "stored_status", "status_basis", "observed_at", "reliance_status"],
+      "description": "Stored status and signed lease/history retain their historical values. This reader performs no current private registry evaluation; active/canon cannot be an effective observation.",
+      "properties": {
+        "status": { "enum": ["unknown", "provisional", "challenged", "revoked", "expired", "compost", "superseded"] },
+        "stored_status": {},
+        "status_basis": {
+          "enum": ["stored", "invalid_stored_status", "invalid_expiry", "expiry_observation",
+                   "operator_control_unestablished", "currentness_unestablished", "clock_uncertain",
+                   "publication_not_configured", "publication_stale", "publication_future_observation",
+                   "local_expiry_observation"]
+        },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "reliance_status": { "const": "unestablished" },
+        "operator_control_eligible": { "const": false },
+        "current_standing_eligible": { "const": false }
+      }
+    },
     "check": {
       "type": "object",
       "required": ["id", "label", "state", "detail"],

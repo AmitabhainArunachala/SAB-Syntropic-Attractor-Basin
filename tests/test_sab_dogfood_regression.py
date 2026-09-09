@@ -4,7 +4,9 @@ Extends the historical API sequence receipted under
 docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/
 against a temporary database: register x3 -> seed -> challenge -> respond
 (scope narrowing) -> explicit adjudication -> witness affirm -> chain verify
--> standing lease review, now under authentic exact seed permissions.
+-> standing lease review, now under authentic exact seed permissions and an
+explicitly synthetic control review for adjudication. This runner owns every
+fixture key; no actual cross-operator independence follows.
 
 D1 (registration/canonical identity round trip) and D2
 (witness_plan.forbidden_witnesses enforcement) are locked as real regression
@@ -21,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from operator_control_fixtures import adjudication_assessment
 
 nacl_signing = pytest.importorskip("nacl.signing")
 from nacl.encoding import HexEncoder  # noqa: E402
@@ -62,12 +65,15 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(tmp_path / "dogfood_regression.db"))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / ".dogfood_system_ed25519.key"))
     from authority_fixtures import provision_authority_policy
+    from operator_control_fixtures import provision_operator_policy
     authority = provision_authority_policy(tmp_path, monkeypatch)
+    control = provision_operator_policy(tmp_path, monkeypatch)
     for mod_name in list(sys.modules):
         if mod_name == "agora" or mod_name.startswith("agora."):
             del sys.modules[mod_name]
     module = importlib.import_module("agora.app")
     module.authority_test_fixture = authority
+    module.operator_control_test_fixture = control
     return module
 
 
@@ -75,6 +81,7 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def client(sab_app):
     with TestClient(sab_app.app) as test_client:
         sab_app.authority_test_fixture.enroll(test_client)
+        sab_app.operator_control_test_fixture.enroll(test_client)
         yield test_client
 
 
@@ -237,7 +244,9 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
     assert respond.status_code == 201, respond.text
     assert respond.json()["seed_state"] == "corrected"
 
-    adjudication = {"value": "The scoped correction resolves the challenged breadth in this rehearsal"}
+    adjudication = {"value": "The scoped correction resolves the challenged breadth in this rehearsal",
+                    "operator_control_assessment": adjudication_assessment(
+                        client, seed_id, challenge_id, witness.subject_id)}
     reviewed_at = _iso(_now())
     adjudication_message = {"kind": "sab_challenge_reject", "challenge_id": challenge_id,
                            "actor_identity": witness.subject_id, "payload_sha256": _sha256_obj(adjudication),
@@ -294,9 +303,9 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
         json={"standing_lease": lease, "reviewer_identity": witness.subject_id, "created_at": issued_at},
     )
     assert standing.status_code == 201, standing.text
-    # Independence Law cap (SAB_MASTER_VISION_V1 §6): one operator => provisional.
+    # No complete signed standing basis: the adjudication review cannot promote it.
     assert standing.json()["status"] == "provisional"
-    assert standing.json()["issued_under"]["rehearsal_flag"] == "single_operator_rehearsal"
+    assert standing.json()["issued_under"]["rehearsal_flag"] == "unestablished_operator_control"
 
     final_seed = client.get(f"/api/v1/seeds/{seed_id}").json()
     assert final_seed["state"] == "standing_active"

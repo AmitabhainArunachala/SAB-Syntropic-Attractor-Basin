@@ -418,8 +418,8 @@ def test_v1_reads_observe_expiry_without_changing_stored_history(tmp_path, monke
     [
         ("active", "2026-01-01T00:00:00Z", "expired", "expiry_observation"),
         ("canon", "2026-01-01T09:00:00+09:00", "expired", "expiry_observation"),
-        ("active", "2026-01-01T00:00:00.000001Z", "active", "stored"),
-        ("canon", "2999-01-01T00:00:00Z", "canon", "stored"),
+        ("active", "2026-01-01T00:00:00.000001Z", "unknown", "operator_control_unestablished"),
+        ("canon", "2999-01-01T00:00:00Z", "unknown", "operator_control_unestablished"),
         ("active", "garbled", "unknown", "invalid_expiry"),
         ("active", None, "unknown", "invalid_expiry"),
         ("canon", "", "unknown", "invalid_expiry"),

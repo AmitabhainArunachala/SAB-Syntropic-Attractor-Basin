@@ -34,7 +34,10 @@ _TIME_PATTERN = re.compile(
 )
 _TERMINAL_STANDING = frozenset({"revoked", "expired", "compost", "superseded"})
 _KNOWN_STANDING = _TERMINAL_STANDING | {"provisional", "active", "challenged", "canon"}
-_CURRENTNESS_REASONS = ("trusted_utc_unverified", "revocation_currentness_unverified")
+_CURRENTNESS_REASONS = (
+    "trusted_utc_unverified", "revocation_currentness_unverified",
+    "operator_control_currentness_unverified",
+)
 
 
 def _bounded_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
@@ -249,6 +252,8 @@ class PublicationObservation:
                 status_basis="local_expiry_observation",
                 reason="expiry_elapsed_on_unverified_local_clock",
             )
+        elif stored_status in {"active", "canon"}:
+            result["reason"] = "snapshot_does_not_establish_current_operator_control"
         return result
 
 
@@ -366,6 +371,7 @@ class PublicationFreshnessObserver:
             warnings = [
                 "The source observation time is operator supplied; local UTC is not externally verified.",
                 "Current revocation status is not established by this frozen snapshot.",
+                "Operator labels and signed assessment snapshots do not establish current independent control.",
                 "Passing a local age policy does not establish currentness or permission to rely.",
             ]
             if not self._configured:

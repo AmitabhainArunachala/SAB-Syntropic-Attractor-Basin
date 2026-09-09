@@ -37,6 +37,7 @@ ACTION_VOCABULARY = frozenset({
     "respond_challenge", "adjudicate_challenge", "submit_witness_event",
     "request_standing_review", "challenge_standing", "revoke_standing",
     "revalidate_standing", "canonize_standing", "advance_deadlines", "challenge_authority",
+    "challenge_operator_control",
 })
 SUBJECT_PATTERN = r"agent_[A-Za-z0-9_.:-]{2,154}"
 LEASE_ID_PATTERN = r"sab_lease_[A-Za-z0-9_.:-]{3,128}"

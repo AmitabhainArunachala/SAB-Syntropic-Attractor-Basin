@@ -173,6 +173,7 @@ def test_public_status_detail_filter_and_dossier_share_one_observation(
         metadata = listing["publication_observation"]
         assert metadata["local_age_policy"]["status"] == age
         assert metadata["currentness"]["status"] == "unestablished"
+        assert "operator_control_currentness_unverified" in metadata["currentness"]["reasons"]
         assert metadata["clock"]["externally_verified"] is False
         assert {row["observed_at"] for row in listing["items"]} == {metadata["observed_at"]}
         items = {row["standing_id"]: row for row in listing["items"]}
@@ -183,6 +184,8 @@ def test_public_status_detail_filter_and_dossier_share_one_observation(
             assert detail["status_basis"] == items[identifier]["status_basis"]
             assert detail["stored_status"] == stored_status
             assert detail["standing_lease"] == publication.leases[identifier]
+            assert detail["operator_control_eligible"] is False
+            assert detail["current_standing_eligible"] is False
         for identifier in ("future_active", "future_canon"):
             assert items[identifier]["status"] == "unknown"
             assert items[identifier]["status_basis"] == basis

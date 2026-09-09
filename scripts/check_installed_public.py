@@ -23,6 +23,12 @@ PUBLIC_SCHEMA_NAMES = (
     "sab.public_snapshot.v1.schema.json", "sab.public_read_observation.v1.schema.json",
     "sab.authority_policy.v1.schema.json", "sab.authority_lease.v2.schema.json",
     "sab.authority_issuance_witness.v1.schema.json", "sab.authority_revocation.v1.schema.json",
+    "sab.operator_control_policy.v1.schema.json",
+    "sab.operator_cohort_assessment.v1.schema.json",
+    "sab.operator_control_review.v1.schema.json",
+    "sab.operator_control_challenge.v1.schema.json",
+    "sab.operator_control_revocation.v1.schema.json",
+    "sab.operator_cohort_issuance.v1.schema.json",
 )
 PARTICIPANT_ASSETS = ("participant.css", "participant.js", "participant_crypto.js")
 
@@ -237,6 +243,7 @@ def main() -> None:
         "agora-public-inspect": "agora.public_inspection:main",
         "agora-key-control": "agora.key_control_client:main",
         "agora-authority": "agora.authority_client:main",
+        "agora-operator-control": "agora.operator_control_client:main",
     }.items():
         if entrypoints.get(command) != target:
             raise RuntimeError(f"missing installed command: {command}")

@@ -12,6 +12,7 @@ from typing import Any, Dict, Tuple
 import pytest
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
+from operator_control_fixtures import adjudication_assessment
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -52,10 +53,13 @@ def web_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(db_path))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(key_path))
     from authority_fixtures import provision_authority_policy
+    from operator_control_fixtures import provision_operator_policy
     authority = provision_authority_policy(tmp_path, monkeypatch)
+    control = provision_operator_policy(tmp_path, monkeypatch)
     _reset_agora_modules()
     module = importlib.import_module("agora.app")
     module.authority_test_fixture = authority
+    module.operator_control_test_fixture = control
     return module
 
 
@@ -63,6 +67,7 @@ def web_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def client(web_app):
     with TestClient(web_app.app) as test_client:
         web_app.authority_test_fixture.enroll(test_client)
+        web_app.operator_control_test_fixture.enroll(test_client)
         yield test_client
 
 
@@ -506,7 +511,9 @@ def test_challenge_respond_sustain_reject_and_seed_correct(client: TestClient) -
         claim_id=seed["claim_id"],
         challenge_id="sab_challenge_sustain",
     )
-    reason_payload = {"value": "blocking challenge sustained"}
+    reason_payload = {"value": "blocking challenge sustained",
+                      "operator_control_assessment": adjudication_assessment(
+                          client, "sab_seed_sustain", "sab_challenge_sustain", reviewer)}
     created_at = _now()
     sustain_sig = _sign_challenge_action(
         reviewer_sk,
@@ -521,7 +528,7 @@ def test_challenge_respond_sustain_reject_and_seed_correct(client: TestClient) -
         json={
             "actor_identity": reviewer,
             "created_at": created_at,
-            "reason": reason_payload["value"],
+            "reason": reason_payload,
             "signature": sustain_sig,
         },
     )
@@ -540,12 +547,15 @@ def test_challenge_respond_sustain_reject_and_seed_correct(client: TestClient) -
         challenge_id="sab_challenge_reject",
     )
     created_at = _now()
+    reason_payload = {"value": "challenge does not falsify the scoped claim",
+                      "operator_control_assessment": adjudication_assessment(
+                          client, "sab_seed_reject", "sab_challenge_reject", reviewer)}
     reject_sig = _sign_challenge_action(
         reviewer_sk,
         action="reject",
         challenge_id="sab_challenge_reject",
         actor_identity=reviewer,
-        payload={"value": "challenge does not falsify the scoped claim"},
+        payload=reason_payload,
         created_at=created_at,
     )
     rejected = client.post(
@@ -553,7 +563,7 @@ def test_challenge_respond_sustain_reject_and_seed_correct(client: TestClient) -
         json={
             "actor_identity": reviewer,
             "created_at": created_at,
-            "reason": "challenge does not falsify the scoped claim",
+            "reason": reason_payload,
             "signature": reject_sig,
         },
     )
@@ -587,12 +597,15 @@ def test_witness_and_standing_surfaces_verify_chain(client: TestClient) -> None:
         challenge_id="sab_challenge_standing",
     )
     created_at = _now()
+    reason_payload = {"value": "resolved for standing review",
+                      "operator_control_assessment": adjudication_assessment(
+                          client, "sab_seed_standing", "sab_challenge_standing", reviewer)}
     reject_sig = _sign_challenge_action(
         reviewer_sk,
         action="reject",
         challenge_id="sab_challenge_standing",
         actor_identity=reviewer,
-        payload={"value": "resolved for standing review"},
+        payload=reason_payload,
         created_at=created_at,
     )
     reject = client.post(
@@ -600,7 +613,7 @@ def test_witness_and_standing_surfaces_verify_chain(client: TestClient) -> None:
         json={
             "actor_identity": reviewer,
             "created_at": created_at,
-            "reason": "resolved for standing review",
+            "reason": reason_payload,
             "signature": reject_sig,
         },
     )
@@ -649,7 +662,7 @@ def test_witness_and_standing_surfaces_verify_chain(client: TestClient) -> None:
     )
     review = client.post("/api/v1/standing/review", json=lease)
     assert review.status_code == 201, review.text
-    # Independence Law cap: no disclosed independent operators => provisional.
+    # The signed standing lease carries no complete control basis: provisional.
     assert review.json()["status"] == "provisional"
     assert client.get("/api/v1/seeds/sab_seed_standing").json()["state"] == "standing_active"
 

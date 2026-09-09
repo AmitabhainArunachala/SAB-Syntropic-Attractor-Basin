@@ -20,6 +20,7 @@ ACTIONS = (
     "respond_challenge", "adjudicate_challenge", "submit_witness_event",
     "request_standing_review", "challenge_standing", "revoke_standing",
     "revalidate_standing", "canonize_standing", "advance_deadlines", "challenge_authority",
+    "challenge_operator_control",
 )
 
 

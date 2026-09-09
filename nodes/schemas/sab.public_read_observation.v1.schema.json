@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sab.local/schemas/sab.public_read_observation.v1.schema.json",
   "title": "SAB Public Read Observation v1",
-  "description": "One request-scoped assessment of historical publication age using guarded local time. This is not authenticated UTC, current revocation knowledge, or permission to rely.",
+  "description": "One request-scoped assessment of historical publication age using guarded local time. This is not authenticated UTC, current revocation or operator-control knowledge, or permission to rely.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -153,7 +153,8 @@
         "reasons": {
           "const": [
             "trusted_utc_unverified",
-            "revocation_currentness_unverified"
+            "revocation_currentness_unverified",
+            "operator_control_currentness_unverified"
           ]
         }
       }
