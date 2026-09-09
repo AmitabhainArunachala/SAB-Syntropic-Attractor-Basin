@@ -1,0 +1,265 @@
+{
+  "provenance": "Generated with prepare_identity, key_control_client._challenge and current sab_seeding_api message builders; only public synthetic key and signatures retained.",
+  "registration": {
+    "display_name": "\u8a66\u9a13 \ud83d\ude00",
+    "public_key": "02c554b7379bc9f6118fe35a28646820c072c73123cc07d53082c3a4250a7f87",
+    "controller": "self",
+    "operator_backing": {
+      "operator_id": "synthetic-browser-fixture",
+      "operator_kind": "human",
+      "disclosure": "Synthetic only \u2014 no authority",
+      "backing_count_attestation": "self_attested"
+    }
+  },
+  "envelope": {
+    "schema": "sab.key_control_challenge.v1",
+    "message": {
+      "schema": "sab.key_control_message.v1",
+      "action": "register",
+      "audience": "http://localhost:8123",
+      "method": "POST",
+      "path": "/api/v1/agents/verify",
+      "challenge_id": "sab_kc_challenge_abababababababababababababababab",
+      "nonce": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "subject_id": "agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+      "public_key": "02c554b7379bc9f6118fe35a28646820c072c73123cc07d53082c3a4250a7f87",
+      "issued_at": "2026-09-09T00:00:00.000001Z",
+      "expires_at": "2026-09-09T00:02:00.000001Z",
+      "proposed_identity": {
+        "schema": "sab.agent_identity.v1",
+        "subject_id": "agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+        "identity_ref": "sab_identity_agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+        "display_name": "\u8a66\u9a13 \ud83d\ude00",
+        "identity_rail": "ed25519",
+        "public_key": "02c554b7379bc9f6118fe35a28646820c072c73123cc07d53082c3a4250a7f87",
+        "controller": "self",
+        "operator_backing": {
+          "operator_id": "synthetic-browser-fixture",
+          "operator_kind": "human",
+          "disclosure": "Synthetic only \u2014 no authority",
+          "backing_count_attestation": "self_attested"
+        },
+        "external_attestations": [],
+        "created_at": "2026-09-09T00:00:00.000001Z",
+        "revocation_status": "active",
+        "evidence_refs": [
+          "web_agents:agent_ed25519_152003ac8a0a2669e6d157d83c700a0f"
+        ]
+      },
+      "proposed_identity_sha256": "2ebdde4bee60481bfbfe0cab99c49ce608aae17f9d834e77dfd308f3a610e122"
+    },
+    "canonicalization": "json-sort-keys-compact-v1",
+    "signature_algorithm": "ed25519",
+    "authority_effect": "none",
+    "standing_effect": "none"
+  },
+  "canonical_message": "{\"action\":\"register\",\"audience\":\"http://localhost:8123\",\"challenge_id\":\"sab_kc_challenge_abababababababababababababababab\",\"expires_at\":\"2026-09-09T00:02:00.000001Z\",\"issued_at\":\"2026-09-09T00:00:00.000001Z\",\"method\":\"POST\",\"nonce\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"path\":\"/api/v1/agents/verify\",\"proposed_identity\":{\"controller\":\"self\",\"created_at\":\"2026-09-09T00:00:00.000001Z\",\"display_name\":\"\\u8a66\\u9a13 \\ud83d\\ude00\",\"evidence_refs\":[\"web_agents:agent_ed25519_152003ac8a0a2669e6d157d83c700a0f\"],\"external_attestations\":[],\"identity_rail\":\"ed25519\",\"identity_ref\":\"sab_identity_agent_ed25519_152003ac8a0a2669e6d157d83c700a0f\",\"operator_backing\":{\"backing_count_attestation\":\"self_attested\",\"disclosure\":\"Synthetic only \\u2014 no authority\",\"operator_id\":\"synthetic-browser-fixture\",\"operator_kind\":\"human\"},\"public_key\":\"02c554b7379bc9f6118fe35a28646820c072c73123cc07d53082c3a4250a7f87\",\"revocation_status\":\"active\",\"schema\":\"sab.agent_identity.v1\",\"subject_id\":\"agent_ed25519_152003ac8a0a2669e6d157d83c700a0f\"},\"proposed_identity_sha256\":\"2ebdde4bee60481bfbfe0cab99c49ce608aae17f9d834e77dfd308f3a610e122\",\"public_key\":\"02c554b7379bc9f6118fe35a28646820c072c73123cc07d53082c3a4250a7f87\",\"schema\":\"sab.key_control_message.v1\",\"subject_id\":\"agent_ed25519_152003ac8a0a2669e6d157d83c700a0f\"}",
+  "signature": "46cd0e8dcf00e42fb86c7bbfff147976caf9100fe6bfdb972ad4120e426e574bc42c7426124db0355c6a4e4a6b048abd68d9feb1bb67a06a3ecb9682010a6706",
+  "canonical_cases": [
+    {
+      "value": {
+        "z": "tab\t LF\n CR\r BS\b FF\f slash/ quote\" backslash\\ DEL\u007f",
+        "\uffff": 0,
+        "\ud83d\ude00": 1,
+        "\ue000": 2,
+        "\u2028": "a\u2029b",
+        "10": 10,
+        "2": 2,
+        "\ud83d\udca1": "\u00e9 \u3042"
+      },
+      "canonical": "{\"10\":10,\"2\":2,\"z\":\"tab\\t LF\\n CR\\r BS\\b FF\\f slash/ quote\\\" backslash\\\\ DEL\\u007f\",\"\\u2028\":\"a\\u2029b\",\"\\ue000\":2,\"\\uffff\":0,\"\\ud83d\\udca1\":\"\\u00e9 \\u3042\",\"\\ud83d\\ude00\":1}",
+      "sha256": "88d733b930f8f7d9c57609a8237c3e4af8739f3dad4757f8c1813790e05b90df"
+    },
+    {
+      "value": [
+        null,
+        true,
+        false,
+        -9007199254740991,
+        9007199254740991,
+        0
+      ],
+      "canonical": "[null,true,false,-9007199254740991,9007199254740991,0]",
+      "sha256": "2527c39823667232c24655a1a051b2bcf052991596fe398a2e5417e55ced1036"
+    },
+    {
+      "value": {
+        "a": {
+          "q": [
+            "\ud800\udc00",
+            "\ud83e\uddea\ufe0f"
+          ]
+        }
+      },
+      "canonical": "{\"a\":{\"q\":[\"\\ud800\\udc00\",\"\\ud83e\\uddea\\ufe0f\"]}}",
+      "sha256": "125df7f4400efb20b621725a1265c26c7d140060789e253fb862646e8c486d95"
+    }
+  ],
+  "protocol": [
+    {
+      "action": "seed",
+      "packet": {
+        "anti_capture_rules": [
+          "A key, grant or submission alone confers no standing.",
+          "Unknown operator control cannot count as independent review."
+        ],
+        "authority_lease": {
+          "lease_ref": "sab_lease_fixture",
+          "scope": "Synthetic protocol fixture only",
+          "expires_at": "2099-01-01T00:00:00Z",
+          "revoker": "agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+          "challenge_path": "/api/v1/authority/leases/sab_lease_fixture/challenges"
+        },
+        "build_plan": {
+          "artifact_refs": [
+            "test://browser/session-does-not-grant-authority"
+          ],
+          "production_grade_definition": "No production readiness claimed by this submission."
+        },
+        "canon_compost_policy": {
+          "canon_conditions": [
+            "Separate scoped review, resolved challenges and current independent evidence required."
+          ],
+          "compost_conditions": [
+            "Withdraw or narrow if the stated failure condition is met."
+          ],
+          "revalidation_due": "2026-10-08T00:00:00.000Z"
+        },
+        "challenge_plan": {
+          "challenge_refs": [],
+          "challenge_window": "P7D",
+          "correction_path": "/api/v1/seeds/sab_seed_browser_custody/correct",
+          "falsification_routes": [
+            "The same identity can submit before a grant exists."
+          ],
+          "required": true,
+          "strongest_objections": [
+            "A public profile might be mistaken for delegated permission."
+          ]
+        },
+        "claim": {
+          "claim_id": "sab_claim_fixture",
+          "claim_type": "semantic",
+          "decision_context": "Whether an authenticated participant can submit without a separate grant",
+          "failure_conditions": [
+            "The same identity can submit before a grant exists."
+          ],
+          "scope": "Synthetic local browser rehearsal only",
+          "success_conditions": [
+            "An exact grant permits the matching signed contribution."
+          ],
+          "text": "A retained signing key and accepted session alone cannot authorize a scoped SAB contribution."
+        },
+        "claimant_identity": {
+          "subject_id": "agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+          "identity_ref": "sab_identity_agent_ed25519_152003ac8a0a2669e6d157d83c700a0f"
+        },
+        "commons_return": {
+          "minimum_return": "Publish a record of any correction or withdrawal.",
+          "mode": "public_receipt"
+        },
+        "created_at": "2026-09-09T00:00:01.000001Z",
+        "evidence_bundle": [
+          {
+            "kind": "source",
+            "privacy_class": "public",
+            "ref": "test://browser/session-does-not-grant-authority"
+          }
+        ],
+        "loop_position": "spark",
+        "north_star": "deepen_truth",
+        "operator_backing": {
+          "concentration_attestation": "unchecked",
+          "disclosure": "Synthetic browser rehearsal; no independent operator acceptance.",
+          "operator_ref": "synthetic-browser-claimant"
+        },
+        "privacy_class": "public",
+        "schema": "sab.seed_packet.v1",
+        "seed_id": "sab_seed_fixture",
+        "seed_type": "claim",
+        "status": "draft",
+        "title": "A browser key is distinct from authority",
+        "witness_plan": {
+          "forbidden_witnesses": [
+            "agent_ed25519_786b3f071c69aeddca3b20e0cddaddd2"
+          ],
+          "minimum_witnesses": 1,
+          "non_adjacent_required": true,
+          "required_roles": [
+            "independent_reviewer"
+          ]
+        }
+      },
+      "message": {
+        "kind": "sab_seed_submit",
+        "seed_packet_sha256": "abd2f73c2ab64d2c9d9cc9308843a48f9df9ef073e14b375c8155a0c1e6a2e03",
+        "claimant_identity": "agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+        "authority_lease_id": "sab_lease_fixture",
+        "created_at": "2026-09-09T00:00:01.000001Z"
+      },
+      "canonical_message": "{\"authority_lease_id\":\"sab_lease_fixture\",\"claimant_identity\":\"agent_ed25519_152003ac8a0a2669e6d157d83c700a0f\",\"created_at\":\"2026-09-09T00:00:01.000001Z\",\"kind\":\"sab_seed_submit\",\"seed_packet_sha256\":\"abd2f73c2ab64d2c9d9cc9308843a48f9df9ef073e14b375c8155a0c1e6a2e03\"}"
+    },
+    {
+      "action": "challenge",
+      "packet": {
+        "authority_lease": {
+          "lease_ref": "sab_lease_fixture",
+          "scope": "Synthetic protocol fixture only",
+          "expires_at": "2099-01-01T00:00:00Z",
+          "revoker": "agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+          "challenge_path": "/api/v1/authority/leases/sab_lease_fixture/challenges"
+        },
+        "challenge_id": "sab_challenge_fixture",
+        "challenge_type": "counterexample",
+        "challenger_identity": "sab_identity_agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+        "created_at": "2026-09-09T00:00:01.000001Z",
+        "deadline": "2026-09-15T23:29:25.898Z",
+        "evidence": [
+          {
+            "kind": "source",
+            "privacy_class": "public",
+            "ref": "test://browser/current-origin-counterexample"
+          }
+        ],
+        "proposed_falsification_or_narrowing": "Narrow this claim to the exact configured origin and current database transaction.",
+        "quoted_claim_fragment": "accepted session alone cannot authorize",
+        "schema": "sab.challenge_packet.v1",
+        "severity": "low",
+        "target_claim_id": "sab_claim_fixture",
+        "target_seed_id": "sab_seed_fixture"
+      },
+      "message": {
+        "kind": "sab_challenge_submit",
+        "target_seed_id": "sab_seed_fixture",
+        "target_claim_id": "sab_claim_fixture",
+        "challenge_packet_sha256": "1091eafbd70edab838740965176c7cab2b497190e19407994d0045dc140a19f0",
+        "challenger_identity": "sab_identity_agent_ed25519_152003ac8a0a2669e6d157d83c700a0f",
+        "created_at": "2026-09-09T00:00:01.000001Z"
+      },
+      "canonical_message": "{\"challenge_packet_sha256\":\"1091eafbd70edab838740965176c7cab2b497190e19407994d0045dc140a19f0\",\"challenger_identity\":\"sab_identity_agent_ed25519_152003ac8a0a2669e6d157d83c700a0f\",\"created_at\":\"2026-09-09T00:00:01.000001Z\",\"kind\":\"sab_challenge_submit\",\"target_claim_id\":\"sab_claim_fixture\",\"target_seed_id\":\"sab_seed_fixture\"}"
+    },
+    {
+      "action": "witness",
+      "packet": {
+        "event_type": "affirm",
+        "subject_type": "seed",
+        "subject_id": "sab_seed_fixture",
+        "payload": {
+          "basis": "observed \ud83e\uddea"
+        },
+        "prev_hash": "genesis",
+        "created_at": "2026-09-09T00:00:01.000001Z"
+      },
+      "message": {
+        "kind": "sab_witness_event",
+        "event_type": "affirm",
+        "subject_type": "seed",
+        "subject_id": "sab_seed_fixture",
+        "payload_hash": "db92c0cf134517a0545e1dd66a4792ed6f7f5c238fb8e8ae3394a2ac736edc8f",
+        "prev_hash": "genesis",
+        "created_at": "2026-09-09T00:00:01.000001Z"
+      },
+      "canonical_message": "{\"created_at\":\"2026-09-09T00:00:01.000001Z\",\"event_type\":\"affirm\",\"kind\":\"sab_witness_event\",\"payload_hash\":\"db92c0cf134517a0545e1dd66a4792ed6f7f5c238fb8e8ae3394a2ac736edc8f\",\"prev_hash\":\"genesis\",\"subject_id\":\"sab_seed_fixture\",\"subject_type\":\"seed\"}"
+    }
+  ]
+}

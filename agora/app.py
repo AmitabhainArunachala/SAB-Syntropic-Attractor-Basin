@@ -12,7 +12,6 @@ import hashlib
 import json
 import logging
 import os
-import secrets
 import sqlite3
 import time
 from contextlib import asynccontextmanager, contextmanager
@@ -21,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlencode, urlsplit
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from jinja2 import PackageLoader
@@ -37,6 +36,8 @@ from .public_runtime import PublicMode, install_public_runtime, public_read_requ
 from .public_snapshot import load_public_snapshot
 from .key_control import KeyControlError, KeyControlService
 from .authority import AuthorityService, load_authority_policy
+from .browser_sessions import BrowserSessionError, BrowserSessionService
+from .browser_session_api import BrowserSecurityMiddleware, create_browser_session_router, SESSION_COOKIE
 from .public_freshness import (
     PublicationFreshnessObserver,
     current_publication_observation,
@@ -46,8 +47,10 @@ from .public_resources import (
     PublicResourceError,
     SCHEMA_SOURCES,
     STATIC_MEDIA_TYPES,
+    PARTICIPANT_MEDIA_TYPES,
     read_public_resource,
     read_public_static,
+    read_participant_static,
 )
 from .witness_service import (
     PUBLICATION_WITNESS_DOMAIN,
@@ -69,6 +72,7 @@ KEY_CONTROL = (
     KeyControlService(os.environ.get("SAB_IDENTITY_ORIGIN", "http://127.0.0.1:8000"))
     if PUBLIC_MODE == PublicMode.LOCAL else None
 )
+BROWSER_SESSIONS = BrowserSessionService(KEY_CONTROL) if KEY_CONTROL is not None else None
 AUTHORITY = (
     AuthorityService(
         load_authority_policy(
@@ -135,8 +139,7 @@ LANGUAGE_WOMB_LANE_DIR = Path(
 LANGUAGE_WOMB_SEED_DOC = LANGUAGE_WOMB_LANE_DIR / "LANGUAGE_WOMB_GRAND_CHALLENGE_SEED.md"
 FRONTIER_PACKET_DIR = LANGUAGE_WOMB_LANE_DIR / "contributions" / "packets"
 FRONTIER_RECEIPT_DIR = LANGUAGE_WOMB_LANE_DIR / "contributions" / "receipts"
-WEB_SESSION_COOKIE = "sab_web_session"
-WEB_SESSION_MAX_AGE_SECONDS = int(os.getenv("SAB_WEB_SESSION_MAX_AGE_SECONDS", str(7 * 24 * 3600)))
+WEB_SESSION_COOKIE = SESSION_COOKIE
 WEB_CACHE_TTL_SECONDS = int(os.getenv("SAB_WEB_CACHE_TTL_SECONDS", "15"))
 WEB_AGENT_TABLE = "web_agents"
 SPARK_WITNESS_TABLE = "spark_witness_chain"
@@ -186,42 +189,10 @@ def _evidence_url(value: Any) -> Optional[str]:
 
 templates.env.filters["evidence_url"] = _evidence_url
 
-_WEB_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _WEB_CACHE: Dict[str, Dict[str, Any]] = {}
 _CACHE_STATS: Dict[str, int] = {"hits": 0, "misses": 0, "invalidations": 0}
 
 _log = logging.getLogger("sab.cache")
-
-# ---------------------------------------------------------------------------
-# CSRF protection helpers
-# ---------------------------------------------------------------------------
-
-import hmac as _hmac_mod  # noqa: E402
-
-
-def _csrf_token_for_session(session: Dict[str, Any]) -> str:
-    """Return (or generate) a per-session CSRF token."""
-    token = session.get("csrf_token")
-    if not token:
-        token = secrets.token_urlsafe(32)
-        session["csrf_token"] = token
-    return token
-
-
-def _verify_csrf_form_token(session: Optional[Dict[str, Any]], form_csrf: Optional[str]) -> None:
-    """Raise 403 if the form CSRF token is missing/mismatched.
-
-    New sessions (no cookie yet) are exempt -- there is no prior cookie to
-    hijack.
-    """
-    if session is None:
-        return
-    expected = session.get("csrf_token", "")
-    if not expected:
-        return
-    if not form_csrf or not _hmac_mod.compare_digest(form_csrf, expected):
-        raise HTTPException(status_code=403, detail="CSRF token invalid")
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -446,79 +417,21 @@ def get_cache_stats() -> Dict[str, Any]:
     }
 
 
-def _cleanup_web_sessions() -> None:
-    now = time.time()
-    expired = [
-        token
-        for token, session in _WEB_SESSIONS.items()
-        if float(session.get("created_at_epoch", 0.0)) + WEB_SESSION_MAX_AGE_SECONDS < now
-    ]
-    for token in expired:
-        _WEB_SESSIONS.pop(token, None)
-
-
 def _read_web_session(request: Request) -> Optional[Dict[str, Any]]:
-    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+    if BROWSER_SESSIONS is None:
         return None
-    _cleanup_web_sessions()
-    token = request.cookies.get(WEB_SESSION_COOKIE)
+    token = request.cookies.get(WEB_SESSION_COOKIE, "")
     if not token:
         return None
-    return _WEB_SESSIONS.get(token)
-
-
-def _signing_key_from_session(session: Dict[str, Any]) -> SigningKey:
-    return SigningKey(str(session["private_key_hex"]).encode(), encoder=HexEncoder)
-
-
-def _create_web_session(conn: sqlite3.Connection, display_name: str) -> Dict[str, Any]:
-    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
-        raise HTTPException(status_code=403, detail="Public inspection does not create signing identities")
-    clean_name = (display_name or "").strip()[:80] or "anonymous"
-    signing_key = SigningKey.generate()
-    private_key_hex = signing_key.encode(encoder=HexEncoder).decode()
-    public_key_hex = signing_key.verify_key.encode(encoder=HexEncoder).decode()
-    agent_id = hashlib.sha256(public_key_hex.encode()).hexdigest()[:16]
-    conn.execute(
-        """
-        INSERT OR IGNORE INTO web_agents (id, name, public_key, created_at, witness_count, witness_accuracy)
-        VALUES (?, ?, ?, ?, 0, 0.0)
-        """,
-        (agent_id, clean_name, public_key_hex, _utc_now()),
-    )
-    token = secrets.token_urlsafe(24)
-    session = {
-        "token": token,
-        "agent_id": agent_id,
-        "name": clean_name,
-        "private_key_hex": private_key_hex,
-        "public_key_hex": public_key_hex,
-        "created_at_epoch": time.time(),
-        "csrf_token": secrets.token_urlsafe(32),
-    }
-    _WEB_SESSIONS[token] = session
-    return session
-
-
-def _resolve_or_create_web_session(
-    request: Request,
-    conn: sqlite3.Connection,
-    display_name: str,
-) -> Dict[str, Any]:
-    existing = _read_web_session(request)
-    if existing:
-        return existing
-    return _create_web_session(conn, display_name)
-
-
-def _set_web_session_cookie(response: RedirectResponse, session: Dict[str, Any]) -> None:
-    response.set_cookie(
-        key=WEB_SESSION_COOKIE,
-        value=str(session["token"]),
-        httponly=True,
-        max_age=WEB_SESSION_MAX_AGE_SECONDS,
-        samesite="lax",
-    )
+    try:
+        with _db() as conn:
+            observation = BROWSER_SESSIONS.read(conn, token)
+    except (BrowserSessionError, KeyControlError):
+        return None
+    if observation is None:
+        return None
+    return {"agent_id": observation["subject_id"], "name": observation["display_name"],
+            "public_key": observation["public_key"], "expires_at": observation["expires_at"]}
 
 
 def _load_or_create_system_signing_key(path: Path) -> SigningKey:
@@ -1304,6 +1217,8 @@ app = FastAPI(
     description="Inspectable discourse and the separate v1 scoped standing protocol",
     version=SAB_VERSION,
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
 )
 # Publication is opt-in for routes as well as records. Legacy discussion,
 # profiles, caches and repository packets are outside the public surface.
@@ -1312,7 +1227,7 @@ PUBLIC_READ_PATHS = (
     r"/api/frontier", r"/api/node/status", r"/healthz?", r"/readyz",
     r"/publication(?:/manifest)?", r"/\.well-known/sab-standing\.json",
     r"/(?:skill|seed|auth|heartbeat|rules)\.md", r"/openapi\.json", r"/docs(?:/oauth2-redirect)?", r"/redoc",
-    r"/schemas/(?:index\.json|sab\.(?:seed_packet|claim_dossier|public_snapshot|public_read_observation)\.v1\.schema\.json)",
+    r"/schemas/(?:index\.json|sab\.(?:seed_packet|challenge_packet|claim_dossier|public_snapshot|public_read_observation)\.v1\.schema\.json)",
     r"/schemas/sab\.authority_(?:policy\.v1|lease\.v2|issuance_witness\.v1|revocation\.v1)\.schema\.json",
     r"/static/(?:web\.(?:css|js)|favicon\.svg|(?:seed_fusion|frontier|reliance|dossier)\.css)",
     r"/api/v1/claims(?:/record)?", r"/api/v1/seeds(?:/[^/]+(?:/chain)?)?",
@@ -1320,17 +1235,38 @@ PUBLIC_READ_PATHS = (
     r"/api/v1/witness-events/[^/]+", r"/api/v1/witness/(?:chain|verify)",
     r"/api/v1/standing(?:/[^/]+)?",
 )
+app.add_middleware(BrowserSecurityMiddleware, audience=KEY_CONTROL.audience if KEY_CONTROL else None)
 install_public_runtime(app, PUBLIC_MODE, public_read_paths=PUBLIC_READ_PATHS,
                        observation_provider=_public_read_observation if PUBLIC_FRESHNESS is not None else None)
 
 
 @app.api_route("/static/{path:path}", methods=["GET", "HEAD"], name="static", include_in_schema=False)
 async def public_static_asset(path: str) -> Response:
+    if path in PARTICIPANT_MEDIA_TYPES and PUBLIC_MODE == PublicMode.LOCAL:
+        try:
+            return Response(read_participant_static(path), media_type=PARTICIPANT_MEDIA_TYPES[path])
+        except PublicResourceError:
+            raise HTTPException(status_code=404, detail="Participant static resource unavailable") from None
     try:
         content = read_public_static(path)
     except PublicResourceError:
         raise HTTPException(status_code=404, detail="Public static resource unavailable") from None
     return Response(content, media_type=STATIC_MEDIA_TYPES[path])
+
+
+@app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/redoc", response_class=HTMLResponse, include_in_schema=False)
+async def web_api_reference(request: Request) -> HTMLResponse:
+    """Readable OpenAPI reference without third-party executable dependencies."""
+    methods = {"get", "post", "put", "patch", "delete", "head", "options"}
+    operations = [{"path": path, "method": method.upper(),
+                   "summary": operation.get("summary", ""),
+                   "description": operation.get("description", "")}
+                  for path, item in app.openapi()["paths"].items()
+                  for method, operation in item.items() if method in methods]
+    return _render_template(request, "web_api_reference.html",
+                            {"operations": operations, "session": _read_web_session(request),
+                             "path_name": "/docs"})
 
 
 def _public_document(group: str, name: str, media_type: str) -> Response:
@@ -1480,6 +1416,10 @@ app.include_router(
         )
     )
 )
+
+
+if BROWSER_SESSIONS is not None:
+    app.include_router(create_browser_session_router(BROWSER_SESSIONS, _db))
 
 
 @app.post("/api/agents/register", status_code=status.HTTP_201_CREATED)
@@ -3008,64 +2948,24 @@ async def web_seed(request: Request) -> HTMLResponse:
 @app.get("/submit", response_class=HTMLResponse)
 async def web_submit_get(request: Request) -> HTMLResponse:
     session = _read_web_session(request)
-    csrf = _csrf_token_for_session(session) if session else ""
     return _render_template(
         request,
         "web_submit.html",
-        {"session": session, "error": "", "content": "", "csrf_token": csrf, "path_name": "/submit"},
+        {"session": session, "error": "", "content": "", "path_name": "/submit"},
     )
 
 
-@app.post("/submit", response_class=HTMLResponse)
-async def web_submit_post(
-    request: Request,
-    content: str = Form(...),
-    display_name: str = Form(""),
-    content_type: Literal["text", "code", "link"] = Form("text"),
-    csrf_form: str = Form("", alias="_csrf"),
-) -> HTMLResponse:
-    session = _read_web_session(request)
-    _verify_csrf_form_token(session, csrf_form)
-
-    body = (content or "").strip()
-    if not body:
-        csrf = _csrf_token_for_session(session) if session else ""
-        return _render_template(
-            request,
-            "web_submit.html",
-            {"session": session, "error": "Content is required.", "content": body, "csrf_token": csrf, "path_name": "/submit"},
-            status_code=400,
-        )
-
-    init_db()
-    with _db() as conn:
-        session = _resolve_or_create_web_session(request, conn, display_name)
-
-    signing_key = _signing_key_from_session(session)
-    content_sha256 = _sha256_hex(body.encode())
-    signature = signing_key.sign(_message_for_submit(str(session["agent_id"]), content_sha256)).signature.hex()
-    submit_req = SparkSubmitRequest(
-        content=body,
-        content_type=content_type,
-        author_id=str(session["agent_id"]),
-        signature=signature,
-    )
-    try:
-        spark = await submit_spark(submit_req)
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        csrf = _csrf_token_for_session(session) if session else ""
-        return _render_template(
-            request,
-            "web_submit.html",
-            {"session": session, "error": detail, "content": body, "csrf_token": csrf, "path_name": "/submit"},
-            status_code=exc.status_code,
-        )
-
-    response = RedirectResponse(url=f"/spark/{int(spark['id'])}?submitted=1", status_code=303)
-    if request.cookies.get(WEB_SESSION_COOKIE) != session["token"]:
-        _set_web_session_cookie(response, session)
-    return response
+@app.post("/submit")
+@app.post("/register")
+@app.post("/spark/{spark_id}/challenge")
+@app.post("/spark/{spark_id}/witness")
+async def retired_browser_form() -> JSONResponse:
+    # No Form/body dependencies: an obsolete request cannot create an identity,
+    # sign a participant command or write any record, including malformed input.
+    return JSONResponse({"error": "browser_key_required", "detail":
+                         "Use the participant page to retain your key and sign a scoped command.",
+                         "participant_path": "/register"}, status_code=428,
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/spark/{spark_id}", response_class=HTMLResponse)
@@ -3120,101 +3020,26 @@ async def web_spark_detail(
                 }
             )
 
+        linked = conn.execute(
+            "SELECT seed_id,claim_id FROM sab_seed_packets_v1 WHERE spark_projection_id=? ORDER BY id LIMIT 1",
+            (spark_id,),
+        ).fetchone()
+        linked_seed = dict(linked) if linked else None
+
     session = _read_web_session(request)
-    csrf = _csrf_token_for_session(session) if session else ""
     return _render_template(
         request,
         "web_spark_detail.html",
         {
             "spark": spark,
+            "linked_seed": linked_seed,
             "challenges": challenges,
             "timeline": timeline,
             "submitted": bool(submitted),
             "session": session,
-            "csrf_token": csrf,
             "path_name": "/seed" if spark.get("founding_seed") else "",
         },
     )
-
-
-@app.post("/spark/{spark_id}/challenge", response_class=HTMLResponse)
-async def web_challenge_post(
-    request: Request,
-    spark_id: int,
-    content: str = Form(...),
-    display_name: str = Form(""),
-    csrf_form: str = Form("", alias="_csrf"),
-) -> HTMLResponse:
-    _verify_csrf_form_token(_read_web_session(request), csrf_form)
-
-    body = (content or "").strip()
-    if not body:
-        return RedirectResponse(url=f"/spark/{spark_id}?challenge_error=1", status_code=303)
-
-    init_db()
-    with _db() as conn:
-        session = _resolve_or_create_web_session(request, conn, display_name)
-
-    signing_key = _signing_key_from_session(session)
-    content_sha256 = _sha256_hex(body.encode())
-    signature = signing_key.sign(
-        _message_for_challenge(spark_id, str(session["agent_id"]), content_sha256)
-    ).signature.hex()
-    challenge_req = ChallengeCreateRequest(
-        challenger_id=str(session["agent_id"]),
-        content=body,
-        signature=signature,
-    )
-    try:
-        await challenge_spark(spark_id, challenge_req)
-    except HTTPException:
-        return RedirectResponse(url=f"/spark/{spark_id}?challenge_error=1", status_code=303)
-
-    response = RedirectResponse(url=f"/spark/{spark_id}#challenges", status_code=303)
-    if request.cookies.get(WEB_SESSION_COOKIE) != session["token"]:
-        _set_web_session_cookie(response, session)
-    return response
-
-
-@app.post("/spark/{spark_id}/witness", response_class=HTMLResponse)
-async def web_witness_post(
-    request: Request,
-    spark_id: int,
-    action: Literal["affirm", "canon_affirm", "compost"] = Form("affirm"),
-    note: str = Form(""),
-    display_name: str = Form(""),
-    csrf_form: str = Form("", alias="_csrf"),
-) -> HTMLResponse:
-    _verify_csrf_form_token(_read_web_session(request), csrf_form)
-    init_db()
-    with _db() as conn:
-        session = _resolve_or_create_web_session(request, conn, display_name)
-
-    payload = {
-        "note": (note or "").strip()[:500],
-        "source": "web_surface",
-    }
-    signing_key = _signing_key_from_session(session)
-    payload_sha = _sha256_hex(_canonical_bytes(payload))
-    signature = signing_key.sign(
-        _message_for_witness(spark_id, str(session["agent_id"]), action, payload_sha)
-    ).signature.hex()
-    witness_req = WitnessSignRequest(
-        spark_id=spark_id,
-        witness_id=str(session["agent_id"]),
-        action=action,
-        payload=payload,
-        signature=signature,
-    )
-    try:
-        await witness_sign(witness_req)
-    except HTTPException:
-        return RedirectResponse(url=f"/spark/{spark_id}?witness_error=1", status_code=303)
-
-    response = RedirectResponse(url=f"/spark/{spark_id}#timeline", status_code=303)
-    if request.cookies.get(WEB_SESSION_COOKIE) != session["token"]:
-        _set_web_session_cookie(response, session)
-    return response
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -3224,16 +3049,6 @@ async def web_register_get(request: Request) -> HTMLResponse:
         "web_register.html",
         {"session": _read_web_session(request), "error": "", "path_name": "/register"},
     )
-
-
-@app.post("/register", response_class=HTMLResponse)
-async def web_register_post(request: Request, display_name: str = Form(...)) -> HTMLResponse:
-    init_db()
-    with _db() as conn:
-        session = _create_web_session(conn, display_name)
-    response = RedirectResponse(url=f"/agent/{session['agent_id']}", status_code=303)
-    _set_web_session_cookie(response, session)
-    return response
 
 
 @app.get("/agent/{agent_id}", response_class=HTMLResponse)

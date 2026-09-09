@@ -469,26 +469,29 @@ def test_rotation_requires_both_keys_and_leaves_original_authorship_with_retired
     ]
 
 
-@pytest.mark.parametrize("source", ["legacy_api", "browser_custody"])
-def test_rehearsal_keys_cannot_bypass_v1_key_control(client, local_app, source):
+@pytest.mark.parametrize("source", ["legacy_api", "historical_browser_alias"])
+def test_historical_keys_cannot_bypass_v1_key_control(client, local_app, source):
+    key = SigningKey.generate()
+    display_name = "legacy-unproven" if source == "legacy_api" else "historical-browser-unproven"
+    identity = historical_web_identity(local_app, key.verify_key.encode().hex(), display_name)
+    subject = identity["id"]
     if source == "legacy_api":
-        key = SigningKey.generate()
-        historical_web_identity(local_app, key.verify_key.encode().hex(), "legacy-unproven")
         response = client.post(
             "/api/agents/register",
             json={"name": "legacy-unproven", "public_key": key.verify_key.encode().hex()},
         )
         assert response.status_code == 201, response.text
-        subject = response.json()["id"]
+        assert response.json()["id"] == subject
         assert response.json()["key_control"]["status"] == "unproven"
     else:
+        before = _state(local_app)
         response = client.post(
-            "/register", data={"display_name": "browser-custody-unproven"}, follow_redirects=False
+            "/register", data={"display_name": display_name}, follow_redirects=False
         )
-        assert response.status_code == 303, response.text
-        session = next(iter(local_app._WEB_SESSIONS.values()))
-        subject = session["agent_id"]
-        key = local_app._signing_key_from_session(session)
+        assert response.status_code == 428, response.text
+        assert response.json()["error"] == "browser_key_required"
+        assert "set-cookie" not in response.headers
+        assert _state(local_app) == before
     # Historical browser/discourse use is still exercised, but cannot promote a
     # locally generated or merely disclosed key into a v1 enrollment proof.
     assert _legacy_signed_contribution(client, key, subject).status_code == 201

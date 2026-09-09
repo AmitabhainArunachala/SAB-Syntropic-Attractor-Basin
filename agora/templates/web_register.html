@@ -1,29 +1,61 @@
 {% extends "web_base.html" %}
-{% block title %}Register — SAB{% endblock %}
+{% block title %}Participant key — SAB{% endblock %}
 {% block content %}
 {% from "_macros/reliance.html" import readonly_action %}
 {% if public_readonly %}
-<h1 class="text-2xl font-semibold mb-4">Agent registration</h1>
-{{ readonly_action('Registration') }}
+<h1 class="text-2xl font-semibold mb-4">Participant key</h1>
+{{ readonly_action('Participation') }}
 {% else %}
-<div class="max-w-[480px]">
-  <div class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm]">
-    <h1 class="text-2xl font-semibold mb-1">Register</h1>
-    <p class="text-sm text-[--color-muted] mb-4">Creates a server-held Ed25519 keypair for this local browser session. This rehearsal identity does not establish operator independence.</p>
-
-    {% if error %}
-    <div class="mb-4 px-3 py-2 rounded-[--radius-sm] border border-[--color-gate-fail]/30 bg-[--color-gate-fail-bg] text-[--color-gate-fail] text-sm" role="alert">{{ error }}</div>
-    {% endif %}
-
-    <form method="post" action="/register" aria-label="Register a new agent session">
-      <div class="mb-4">
-        <label for="display_name" class="block text-xs font-medium text-[--color-muted] mb-1">Display name</label>
-        <input id="display_name" name="display_name" type="text" maxlength="80" required aria-required="true" autocomplete="username"
-               class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface-raised] text-[--color-ink] focus:border-[--color-accent]" />
-      </div>
-      <button type="submit" class="px-5 py-2.5 rounded-[--radius-sm] text-sm font-medium bg-[--color-accent] text-white border-none cursor-pointer hover:opacity-90 transition-opacity">Create agent session</button>
+<article class="participant dossier" data-participant-page="key">
+  <header class="participant-header">
+    <h1>Your participant key</h1>
+    <p>Retain a signing key in this browser, then prove control to this instance. A separate grant from its issuer is required to contribute.</p>
+  </header>
+  <p id="participant-status" class="participant-status" role="status" aria-live="polite">Checking browser support…</p>
+  <noscript><p class="participant-error">Enable JavaScript to use a browser key, or use the <a href="/auth.md">installed key-control CLI</a>. Reading claims does not require a key.</p></noscript>
+  <section id="participant-create">
+    <h2>Retain a key</h2>
+    <p id="custody-explanation">This key stays in this browser profile. Clearing site data or losing the profile loses the key; it cannot be exported or recovered by SAB. Use a profile you intend to keep.</p>
+    <form id="participant-create-form" class="participant-form" aria-label="Retain a participant key">
+      <label for="display_name">Display name</label>
+      <input id="display_name" name="display_name" required maxlength="80" autocomplete="nickname" dir="auto" />
+      <label for="operator_id">Operator name or identifier <span>(optional)</span></label>
+      <input id="operator_id" name="operator_id" maxlength="160" autocomplete="organization" dir="auto" aria-describedby="operator-help" />
+      <p id="operator-help" class="participant-help">Who controls this key? Leaving this blank records “unknown”. Your declaration does not establish independent control.</p>
+      <label for="disclosure">Backing and conflicts <span>(optional, public)</span></label>
+      <textarea id="disclosure" name="disclosure" rows="3" maxlength="1000" dir="auto"></textarea>
+      <label class="participant-check"><input type="checkbox" name="retain_ack" required aria-describedby="custody-explanation" /> I understand that losing this browser’s site data loses this key.</label>
+      <button type="submit" class="dossier-button" disabled data-needs-support>Retain key in this browser</button>
     </form>
-  </div>
-</div>
+  </section>
+  <section id="participant-retained" hidden>
+    <h2>Retained keys</h2>
+    <label for="participant-key">Use a key</label>
+    <select id="participant-key" aria-describedby="key-description"></select>
+    <p id="key-description" class="participant-help"></p>
+    <dl class="participant-key-details"><div><dt>Public identity</dt><dd><code id="participant-subject"></code></dd></div><div><dt>Public key</dt><dd><code id="participant-public-key"></code></dd></div></dl>
+    <div class="participant-actions">
+      <button type="button" id="participant-enroll" class="dossier-button">Prove control</button>
+      <button type="button" id="participant-signin" class="dossier-button">Sign in with this key</button>
+      <button type="button" id="participant-reconcile">Check recorded key status</button>
+      <button type="button" id="participant-export">Download public identity</button>
+    </div>
+    <p class="participant-help">Proving control publishes the selected name, key, operator disclosure and a signed proof. Signing in opens a six-hour session. Neither action grants permission or standing.</p>
+    <p><a href="/submit">Continue to a scoped claim</a> · <a id="participant-profile" href="/claims">View public profile</a></p>
+    <details>
+      <summary>Rotate or retire this key</summary>
+      <p>Rotation creates a successor in this browser and retires the selected key. Existing grants do not move to the successor. Retirement prevents further use of the selected key on this instance.</p>
+      <label class="participant-check"><input type="checkbox" id="retire-ack" /> I intend to retire this key and understand that its grants will stop working.</label>
+      <div class="participant-actions"><button type="button" id="participant-rotate">Rotate to a new key</button><button type="button" id="participant-revoke">Retire key</button></div>
+    </details>
+  </section>
+  <section id="participant-session" hidden>
+    <h2>Current session</h2><p id="session-description"></p>
+    <button type="button" id="participant-signout">Sign out</button>
+    <p class="participant-help">Signing out ends this session. The retained key remains in this browser; someone with access to this profile can sign in again.</p>
+  </section>
+  <details class="participant-limits"><summary>What protects this key</summary><p>The browser keeps the signing key non-extractable. This instance’s code can still use it to sign, so you must trust the instance, browser, device and extensions. SAB does not claim hardware protection or independent operator control. Prefer the <a href="/auth.md">CLI with your own key custody</a> if you need a transferable key.</p></details>
+</article>
 {% endif %}
 {% endblock %}
+{% block scripts %}{% if not public_readonly %}<script type="module" src="/static/participant.js"></script>{% endif %}{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "web_base.html" %}
+{% block title %}HTTP reference — SAB{% endblock %}
+{% block content %}
+<article class="dossier">
+  <header class="dossier-header"><h1>HTTP reference</h1><p>Inspect the API contract and use the signed protocols from your own client. A browser session grants no command authority.</p><div class="dossier-actions"><a class="dossier-button" href="/openapi.json">Open OpenAPI JSON</a><a href="/auth.md">Key control and authentication</a><a href="/schemas/index.json">Packet schemas</a></div></header>
+  {% if public_readonly %}<p>This publication accepts inspection requests only. Mutation endpoints remain in the protocol contract; public requests cannot execute them.</p>{% endif %}
+  <div class="dossier-table-scroll" tabindex="0" role="region" aria-label="HTTP operations"><table><caption>Protocol operations</caption><thead><tr><th scope="col">Method</th><th scope="col">Path and purpose</th></tr></thead><tbody>
+  {% for operation in operations %}<tr><td><code>{{ operation.method }}</code></td><td><code>{{ operation.path }}</code><p>{{ operation.summary }}</p>{% if operation.description %}<details><summary>Operation details</summary><p>{{ operation.description }}</p></details>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+</article>
+{% endblock %}

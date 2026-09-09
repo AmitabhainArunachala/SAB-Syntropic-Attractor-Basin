@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCUMENTS = ("skill.md", "seed.md", "auth.md", "heartbeat.md", "rules.md")
 SCHEMAS = (
     "sab.seed_packet.v1.schema.json",
+    "sab.challenge_packet.v1.schema.json",
     "sab.claim_dossier.v1.schema.json",
     "sab.public_snapshot.v1.schema.json",
     "sab.public_read_observation.v1.schema.json",
@@ -20,6 +21,7 @@ SCHEMAS = (
     "sab.authority_issuance_witness.v1.schema.json",
     "sab.authority_revocation.v1.schema.json",
 )
+PARTICIPANT = ("participant.css", "participant.js", "participant_crypto.js")
 STATIC = (
     "web.css",
     "seed_fusion.css",
@@ -51,6 +53,8 @@ def test_source_resource_bytes_are_canonical_and_independent_of_cwd(reader, tmp_
         assert (
             reader.read_public_static(name) == (REPO_ROOT / "agora" / "static" / name).read_bytes()
         )
+    for name in PARTICIPANT:
+        assert reader.read_participant_static(name) == (REPO_ROOT / "agora" / "static" / name).read_bytes()
 
 
 def test_packaged_resource_bytes_take_precedence_without_extraction(reader, monkeypatch):
@@ -61,7 +65,7 @@ def test_packaged_resource_bytes_take_precedence_without_extraction(reader, monk
             content = (REPO_ROOT.joinpath(*source)).read_bytes()
             expected[group, name] = content
             archive.writestr(f"agora/_public_resources/{group}/{name}", content)
-        for name in STATIC:
+        for name in (*STATIC, *PARTICIPANT):
             archive.writestr(
                 f"agora/static/{name}", (REPO_ROOT / "agora" / "static" / name).read_bytes()
             )
@@ -82,6 +86,8 @@ def test_packaged_resource_bytes_take_precedence_without_extraction(reader, monk
                 reader.read_public_static(name)
                 == (REPO_ROOT / "agora" / "static" / name).read_bytes()
             )
+        for name in PARTICIPANT:
+            assert reader.read_participant_static(name) == (REPO_ROOT / "agora" / "static" / name).read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -101,12 +107,19 @@ def test_unadvertised_documents_never_access_resources(reader, monkeypatch, grou
 
 
 @pytest.mark.parametrize(
-    "name", ["../public_snapshot.py", "web.css/extra", "sab/sab.css", "unknown.css"]
+    "name", ["../public_snapshot.py", "web.css/extra", "sab/sab.css", "unknown.css", *PARTICIPANT]
 )
 def test_unadvertised_static_never_accesses_resources(reader, monkeypatch, name):
     monkeypatch.setattr(reader.resources, "files", lambda *args: pytest.fail("unallowlisted read"))
     with pytest.raises(reader.PublicResourceError, match="not allowlisted"):
         reader.read_public_static(name)
+
+
+@pytest.mark.parametrize("name", ["../web.js", "web.js", "participant.js/extra", "unknown.css"])
+def test_participant_assets_require_their_separate_allowlist(reader, monkeypatch, name):
+    monkeypatch.setattr(reader.resources, "files", lambda *args: pytest.fail("unallowlisted read"))
+    with pytest.raises(reader.PublicResourceError, match="not allowlisted"):
+        reader.read_participant_static(name)
 
 
 def test_partial_package_cannot_fall_back_to_checkout(reader, tmp_path, monkeypatch):
@@ -192,6 +205,12 @@ def test_public_routes_return_exact_resource_bytes_without_runtime_writes(tmp_pa
             assert response.content == (REPO_ROOT / "agora" / "static" / name).read_bytes()
             assert response.headers["cache-control"] == "no-store"
             assert client.head("/static/" + name).status_code == 200
+        for name in PARTICIPANT:
+            response = client.get("/static/" + name)
+            assert response.status_code == 404
+            assert response.json()["code"] == "not_published"
+            assert "set-cookie" not in response.headers
+            assert client.head("/static/" + name).status_code == 404
         for path in ("/", "/claims", "/about", "/frontier"):
             assert client.get(path).status_code == 200
         assert "evidence_url" in app.templates.env.filters

@@ -1,5 +1,6 @@
 {% extends "web_base.html" %}
 {% from "_macros/dossier.html" import recorded, check_result %}
+{% from "_macros/participant.html" import participant_actions %}
 {% block title %}{{ dossier.seed.title if dossier else 'Claim dossier' }} — SAB{% endblock %}
 {% block description %}Inspect an exact submitted claim, evidence references, unresolved challenges, and the limits of recorded standing.{% endblock %}
 {% block content %}
@@ -30,6 +31,8 @@
       <a href="#continue">Find a next step</a>
     </div>
   </header>
+
+  {% if not public_readonly %}{{ participant_actions(dossier.identity.seed_id, dossier.identity.claim_id) }}{% endif %}
 
   <nav class="dossier-section-nav" aria-label="Dossier sections">
     <a href="#claim">Exact claim</a><a href="#evidence">Evidence</a><a href="#challenges">Challenges</a>
@@ -170,3 +173,5 @@
 </section>
 {% endif %}
 {% endblock %}
+
+{% block scripts %}{% if not public_readonly and dossier %}<script type="module" src="/static/participant.js"></script>{% endif %}{% endblock %}

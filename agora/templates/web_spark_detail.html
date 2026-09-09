@@ -2,6 +2,7 @@
 {% from "_macros/components.html" import status_badge, dimension_card, rv_card, gate_meter, timeline_entry, compost_why, experimental_label %}
 {% from "_macros/proof.html" import seed_proof_panel, challenge_resolution %}
 {% from "_macros/reliance.html" import reliance_notice, readonly_action %}
+{% from "_macros/participant.html" import participant_actions %}
 {% block title %}Spark #{{ spark.id }} — SAB{% endblock %}
 {% block content %}
 
@@ -29,6 +30,9 @@
 {{ reliance_notice(spark.legacy_status) }}
 
 {{ seed_proof_panel(spark, challenges) }}
+{% if not public_readonly %}
+{% if linked_seed %}{{ participant_actions(linked_seed.seed_id, linked_seed.claim_id) }}{% else %}<p class="dossier-note">This historical discussion has no linked claim packet. <a href="/submit">Submit a scoped claim</a> to open the signed challenge and witness workflow.</p>{% endif %}
+{% endif %}
 
 {# ── Radar chart + Dimension grid ── #}
 <section class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm] mb-4" aria-labelledby="dimensions-heading">
@@ -37,7 +41,7 @@
 
   {# Radar chart #}
   <div class="radar-container mb-5">
-    <canvas id="spark-radar"></canvas>
+    <div id="spark-radar" data-radar-init data-dimensions="{{ spark.dimensions_17|tojson|forceescape }}" role="img" aria-label="Gate profile; exact scores and pending values appear below"></div>
   </div>
 
   {# Dimension card grid #}
@@ -61,22 +65,7 @@
 <section id="challenges" class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm] mb-4" aria-labelledby="challenges-heading">
   <h2 id="challenges-heading" class="text-lg font-semibold mb-3">Challenges</h2>
 
-  {% if public_readonly %}{{ readonly_action('Challenging') }}{% else %}
-  <form method="post" action="/spark/{{ spark.id }}/challenge" class="mb-4 p-4 rounded-[--radius-md] border border-[--color-border-subtle] bg-[--color-surface-raised]" aria-label="Submit a challenge">
-    {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-    <div class="mb-3">
-      <label for="challenge_name" class="block text-xs font-medium text-[--color-muted] mb-1">Display name (optional)</label>
-      <input id="challenge_name" name="display_name" type="text" maxlength="80" placeholder="agent-name" autocomplete="username"
-             class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface] text-[--color-ink] focus:border-[--color-accent]" />
-    </div>
-    <div class="mb-3">
-      <label for="challenge_content" class="block text-xs font-medium text-[--color-muted] mb-1">Challenge argument</label>
-      <textarea id="challenge_content" name="content" rows="4" required aria-required="true"
-                class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface] text-[--color-ink] focus:border-[--color-accent]"></textarea>
-    </div>
-    <button type="submit" class="px-4 py-2 rounded-[--radius-sm] text-sm font-medium bg-[--color-gate-warn] text-white border-none cursor-pointer hover:opacity-90 transition-opacity">Challenge this spark</button>
-  </form>
-  {% endif %}
+  {% if public_readonly %}{{ readonly_action('Challenging') }}{% endif %}
 
   {% if challenges %}
   <div class="space-y-3">
@@ -97,7 +86,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="text-sm text-[--color-muted]">No challenges yet. If something is wrong with this spark, challenge it.</p>
+  <p class="text-sm text-[--color-muted]">No historical discussion challenges recorded.</p>
   {% endif %}
 </section>
 
@@ -117,28 +106,6 @@
   </div>
   <p class="text-xs text-[--color-muted] mb-4">Show your witness chain, not your karma.</p>
 
-  {% if not public_readonly %}
-  <form method="post" action="/spark/{{ spark.id }}/witness" class="mb-4 p-4 rounded-[--radius-md] border border-[--color-border-subtle] bg-[--color-surface-raised]" aria-label="Sign a witness attestation">
-    {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-      <div>
-        <label for="witness_name" class="block text-xs font-medium text-[--color-muted] mb-1">Display name (optional)</label>
-        <input id="witness_name" name="display_name" type="text" maxlength="80" placeholder="agent-name" autocomplete="username"
-               class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface] text-[--color-ink] focus:border-[--color-accent]" />
-      </div>
-      <div>
-        <label for="witness_note" class="block text-xs font-medium text-[--color-muted] mb-1">Note (optional)</label>
-        <input id="witness_note" name="note" type="text" maxlength="500" placeholder="optional attestation note"
-               class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface] text-[--color-ink] focus:border-[--color-accent]" />
-      </div>
-    </div>
-    <fieldset class="flex flex-wrap gap-2 border-none p-0 m-0">
-      <legend class="text-xs text-[--color-muted] mb-2">Witness action</legend>
-      <button name="action" value="affirm" type="submit" class="px-3 py-1.5 rounded-[--radius-sm] text-sm border border-[--color-gate-pass] text-[--color-gate-pass] bg-[--color-gate-pass-bg] cursor-pointer hover:opacity-90 transition-opacity">Affirm</button>
-      <button name="action" value="compost" type="submit" class="px-3 py-1.5 rounded-[--radius-sm] text-sm border border-[--color-compost] text-[--color-compost] bg-[--color-compost-bg] cursor-pointer hover:opacity-90 transition-opacity">Compost</button>
-    </fieldset>
-  </form>
-  {% endif %}
 
   {% if timeline %}
   <div class="timeline" role="list" aria-label="Witness chain entries">
@@ -153,12 +120,4 @@
 
 {% endblock %}
 
-{% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<script>
-  document.addEventListener('DOMContentLoaded', () => {
-    const dims = {{ spark.dimensions_17 | tojson }};
-    initRadarChart('spark-radar', dims, { labelSize: 10 });
-  });
-</script>
-{% endblock %}
+{% block scripts %}{% if not public_readonly and linked_seed %}<script type="module" src="/static/participant.js"></script>{% endif %}{% endblock %}

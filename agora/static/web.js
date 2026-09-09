@@ -1,194 +1,90 @@
-/* ── SAB Web Shell — Progressive Enhancement ── */
+/* Native, self-hosted controls. This shared script never opens a participant key. */
+'use strict';
 
-/* Dark mode */
-document.addEventListener('alpine:init', () => {
-  Alpine.store('theme', {
-    dark: localStorage.getItem('sab-dark') === 'true' ||
-          (!localStorage.getItem('sab-dark') && window.matchMedia('(prefers-color-scheme: dark)').matches),
-
-    toggle() {
-      this.dark = !this.dark;
-      localStorage.setItem('sab-dark', this.dark);
-      document.documentElement.classList.toggle('dark', this.dark);
-    },
-
-    init() {
-      document.documentElement.classList.toggle('dark', this.dark);
-    }
-  });
-});
-
-/* Radar chart initialization */
-function initRadarChart(canvasId, dimensions, options) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas || typeof Chart === 'undefined') return;
-
-  const labels = dimensions.map(d => d.label);
-  const scores = dimensions.map(d => d.score !== null && d.score !== undefined ? d.score : 0);
-  const colors = dimensions.map(d => {
-    if (d.score === null || d.score === undefined) return 'rgba(143, 139, 129, 0.6)';
-    if (d.score >= 0.75) return 'rgba(47, 125, 50, 0.6)';
-    if (d.score >= 0.45) return 'rgba(178, 136, 0, 0.6)';
-    return 'rgba(176, 40, 40, 0.6)';
-  });
-
-  const isDark = document.documentElement.classList.contains('dark');
-  const gridColor = isDark ? 'rgba(200, 197, 188, 0.15)' : 'rgba(30, 29, 26, 0.08)';
-  const tickColor = isDark ? '#c8c5bc' : '#6f6a5f';
-
-  new Chart(canvas, {
-    type: 'radar',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Gate Profile',
-        data: scores,
-        backgroundColor: 'rgba(17, 78, 138, 0.12)',
-        borderColor: 'rgba(17, 78, 138, 0.7)',
-        borderWidth: 2,
-        pointBackgroundColor: colors,
-        pointBorderColor: colors,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => {
-              const dim = dimensions[ctx.dataIndex];
-              const score = dim.score !== null ? dim.score.toFixed(3) : 'pending';
-              return `${dim.label}: ${score}`;
-            }
-          }
-        }
-      },
-      scales: {
-        r: {
-          min: 0,
-          max: 1,
-          ticks: {
-            stepSize: 0.25,
-            color: tickColor,
-            font: { size: 9 },
-            backdropColor: 'transparent',
-          },
-          grid: { color: gridColor },
-          angleLines: { color: gridColor },
-          pointLabels: {
-            color: tickColor,
-            font: {
-              family: "'Space Grotesk', sans-serif",
-              size: options?.labelSize || 10,
-            }
-          }
-        }
-      },
-      ...(options?.extra || {})
-    }
-  });
+function initTheme() {
+  let saved;
+  try { saved = localStorage.getItem('sab-dark'); } catch (_) { /* Storage is optional for theme. */ }
+  let dark = saved === 'true' || (saved === null && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  function render() {
+    document.documentElement.classList.toggle('dark', dark);
+    document.querySelectorAll('[data-theme-moon]').forEach(node => { node.toggleAttribute('hidden', dark); });
+    document.querySelectorAll('[data-theme-sun]').forEach(node => { node.toggleAttribute('hidden', !dark); });
+    document.querySelectorAll('[data-theme-toggle]').forEach(node => node.setAttribute('aria-pressed', String(dark)));
+  }
+  render();
+  document.querySelectorAll('[data-theme-toggle]').forEach(button => button.addEventListener('click', () => {
+    dark = !dark;
+    try { localStorage.setItem('sab-dark', String(dark)); } catch (_) { /* Keep working without persistence. */ }
+    render();
+    document.querySelectorAll('[data-radar-init]').forEach(renderRadar);
+  }));
 }
 
-/* Witness chain client-side verification */
-async function verifyWitnessChain(entries) {
-  if (!entries || entries.length === 0) return { verified: true, brokenAt: null };
-
-  let prevHash = 'genesis';
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-
-    if (entry.prev_hash !== prevHash) {
-      return { verified: false, brokenAt: i };
-    }
-
-    const material = {
-      spark_id: entry.spark_id,
-      witness_id: entry.witness_id,
-      signature: entry.signature,
-      action: entry.action,
-      payload: entry.payload,
-      timestamp: entry.timestamp,
-      prev_hash: entry.prev_hash,
-    };
-
-    const canonical = JSON.stringify(material, Object.keys(material).sort(), '');
-    const encoded = new TextEncoder().encode(canonical);
-    const hashBuf = await crypto.subtle.digest('SHA-256', encoded);
-    const hashArr = Array.from(new Uint8Array(hashBuf));
-    const hashHex = hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
-
-    if (hashHex !== entry.hash) {
-      return { verified: false, brokenAt: i };
-    }
-    prevHash = entry.hash;
+function renderRadar(root) {
+  let dimensions;
+  try { dimensions = JSON.parse(root.dataset.dimensions); } catch (_) { return; }
+  if (!Array.isArray(dimensions) || dimensions.length < 3) return;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 420 420');
+  svg.setAttribute('aria-hidden', 'true');
+  const point = (index, radius) => {
+    const angle = index * Math.PI * 2 / dimensions.length - Math.PI / 2;
+    return [210 + Math.cos(angle) * radius, 210 + Math.sin(angle) * radius];
+  };
+  function element(tag, attributes, text) {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, String(value)));
+    if (text !== undefined) node.textContent = text;
+    svg.append(node);
   }
-  return { verified: true, brokenAt: null };
+  for (const scale of [.25, .5, .75, 1]) {
+    element('polygon', {points: dimensions.map((_, i) => point(i, 145 * scale).join(',')).join(' '), fill:'none', stroke:'var(--color-border)'});
+  }
+  const values = dimensions.map((dim, i) => point(i, 145 * (Number.isFinite(dim.score) ? Math.max(0, Math.min(1, dim.score)) : 0)).join(','));
+  element('polygon', {points:values.join(' '), fill:'var(--color-accent)', 'fill-opacity':'.12', stroke:'var(--color-accent)', 'stroke-width':2});
+  dimensions.forEach((dim, i) => {
+    const [x, y] = point(i, 173);
+    element('text', {x,y,'text-anchor':'middle','dominant-baseline':'middle',fill:'var(--color-muted)','font-size':11}, dim.label);
+    if (Number.isFinite(dim.score)) {
+      const [cx, cy] = point(i, 145 * Math.max(0, Math.min(1, dim.score)));
+      element('circle', {cx,cy,r:3,fill:'var(--color-accent)'});
+    }
+  });
+  root.replaceChildren(svg);
 }
 
 function setChainStatus(root, className, text) {
   const status = root.querySelector('[data-chain-status]');
   if (!status) return;
   status.classList.remove('chain-verified', 'chain-broken', 'chain-pending');
-  if (className) status.classList.add(className);
+  status.classList.add(className);
   status.textContent = text;
 }
 
 async function verifyChainFromEndpoint(root) {
-  const endpoint = root?.dataset?.chainEndpoint;
-  if (!endpoint) return;
-
-  setChainStatus(root, 'chain-pending', 'checking');
+  const endpoint = root.dataset.chainEndpoint;
+  if (!endpoint || !/^\/api\/spark\/\d+\/chain$/.test(endpoint)) return;
+  setChainStatus(root, 'chain-pending', 'checking with server');
   try {
-    const response = await fetch(endpoint, {
-      headers: { Accept: 'application/json' },
-      credentials: 'same-origin',
-    });
-    if (!response.ok) {
-      setChainStatus(root, 'chain-broken', `unavailable ${response.status}`);
-      return;
-    }
+    const response = await fetch(endpoint, {headers:{Accept:'application/json'}, credentials:'omit', redirect:'error'});
+    if (!response.ok) throw new Error('unavailable');
     const data = await response.json();
     const entries = Array.isArray(data.entries) ? data.entries : [];
-    if (data.verified === true) {
-      setChainStatus(root, 'chain-verified', `verified ${entries.length} entries`);
-    } else {
-      const brokenAt = data.broken_at ?? data.brokenAt ?? null;
-      const suffix = brokenAt === null ? '' : ` at ${brokenAt}`;
-      setChainStatus(root, 'chain-broken', `broken${suffix}`);
-    }
-  } catch (_err) {
-    setChainStatus(root, 'chain-broken', 'unavailable');
-  }
-}
-
-function initChainVerifiers(scope) {
-  const rootScope = scope || document;
-  rootScope.querySelectorAll('[data-chain-verifier]').forEach((root) => {
-    if (root.dataset.chainVerifierReady === 'true') return;
-    root.dataset.chainVerifierReady = 'true';
-    const button = root.querySelector('[data-chain-trigger]');
-    if (button) {
-      button.addEventListener('click', () => verifyChainFromEndpoint(root));
-    }
-    verifyChainFromEndpoint(root);
-  });
+    setChainStatus(root, data.verified === true ? 'chain-verified' : 'chain-broken',
+      data.verified === true ? `server checked ${entries.length} entries` : 'server reports a broken chain');
+  } catch (_) { setChainStatus(root, 'chain-broken', 'server check unavailable'); }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  initChainVerifiers(document);
-});
-
-/* HTMX event hooks */
-document.addEventListener('htmx:afterSwap', (evt) => {
-  /* Re-init any charts in swapped content */
-  const canvases = evt.detail.target.querySelectorAll('[data-radar-init]');
-  canvases.forEach(c => {
-    const dims = JSON.parse(c.dataset.dimensions || '[]');
-    initRadarChart(c.id, dims, { labelSize: 8 });
+  initTheme();
+  document.querySelectorAll('[data-radar-init]').forEach(renderRadar);
+  document.querySelectorAll('[data-chain-verifier]').forEach(root => {
+    root.querySelector('[data-chain-trigger]')?.addEventListener('click', () => verifyChainFromEndpoint(root));
+    verifyChainFromEndpoint(root);
   });
-  initChainVerifiers(evt.detail.target);
+  document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(button.dataset.copy); button.textContent = 'Copied'; }
+    catch (_) { button.textContent = 'Select text to copy'; }
+  }));
 });

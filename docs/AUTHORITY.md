@@ -6,6 +6,9 @@ explicitly configured issuer policy in the action's database transaction.
 Authority grants confer no standing, truth or operator independence. This does
 not enable invite beta or public mutation.
 
+The [browser participation guide](BROWSER_PARTICIPATION.md) shows how retained
+keys and separate sessions reach the same grant-checked v1 commands.
+
 ```text
 KeyControl + SignedProposal != Permission
 
@@ -152,8 +155,8 @@ witness records can include their hash-covered authorization reference; it
 does not establish authentic issuance or current permission in a frozen public
 snapshot. Previously pinned records without the extension retain their hashes.
 
-Invitation controls, authenticated operator independence, participant browser
-custody, general command versioning and cached retry results, finality/appeals, abuse controls and
+Invitation controls, authenticated operator independence,
+general command versioning and cached retry results, finality/appeals, abuse controls and
 independent beta acceptance remain open. A configured issuer plus a second
 key is not evidence of two independent operators.
 

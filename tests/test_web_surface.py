@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from historical_web_fixtures import historical_actor, historical_spark
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -35,37 +36,6 @@ def web_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def client(web_app):
     with TestClient(web_app.app) as test_client:
         yield test_client
-
-
-def _get_csrf_token(web_app) -> str:
-    """Extract a CSRF token from the first active web session."""
-    sessions = getattr(web_app, "_WEB_SESSIONS", {})
-    for _token, session_data in sessions.items():
-        csrf = session_data.get("csrf_token", "")
-        if csrf:
-            return csrf
-    return ""
-
-
-def _submit_via_web(client: TestClient, content: str, web_app=None):
-    form_data = {
-        "display_name": "web-agent",
-        "content": content,
-        "content_type": "text",
-    }
-    if web_app is not None:
-        csrf = _get_csrf_token(web_app)
-        if csrf:
-            form_data["_csrf"] = csrf
-    response = client.post(
-        "/submit",
-        data=form_data,
-        follow_redirects=False,
-    )
-    assert response.status_code == 303, response.text
-    location = response.headers.get("location", "")
-    assert location.startswith("/spark/")
-    return location
 
 
 def test_web_pages_render(client: TestClient):
@@ -205,8 +175,8 @@ def test_frontier_artifact_paths_are_sanitized(
     assert row["evidence_refs"] == ["local:prior_art.md sha256:aaaaaaaaaaaa"]
 
 
-def test_submit_flow_renders_dimension_profile(client: TestClient):
-    location = _submit_via_web(client, "Sprint 2 web surface smoke test content.")
+def test_historical_discussion_renders_dimension_profile(client: TestClient):
+    location = historical_spark(client, "Historical web surface smoke test content.")
     spark_page = client.get(location)
     assert spark_page.status_code == 200
     assert "17 Gate Dimensions" in spark_page.text
@@ -214,28 +184,18 @@ def test_submit_flow_renders_dimension_profile(client: TestClient):
     assert "EXPERIMENTAL" in spark_page.text
 
 
-def test_challenge_flow_visible_on_spark_page(client: TestClient, web_app):
-    location = _submit_via_web(client, "Spark to challenge.", web_app=web_app)
+def test_signed_historical_challenge_visible_on_spark_page(client: TestClient):
+    location = historical_spark(client, "Spark to challenge.")
     spark_id = int(location.split("/")[2].split("?")[0])
-
-    form_data = {"content": "Challenge argument from web form."}
-    csrf = _get_csrf_token(web_app)
-    if csrf:
-        form_data["_csrf"] = csrf
-    challenge = client.post(
-        f"/spark/{spark_id}/challenge",
-        data=form_data,
-        follow_redirects=False,
-    )
-    assert challenge.status_code == 303
+    historical_actor(client).challenge(spark_id, "Signed historical challenge argument.")
 
     spark_page = client.get(f"/spark/{spark_id}")
     assert spark_page.status_code == 200
-    assert "Challenge argument from web form." in spark_page.text
+    assert "Signed historical challenge argument." in spark_page.text
 
 
 def test_compost_feed_shows_why_card(client: TestClient):
-    _submit_via_web(client, "This content says kill yourself and should fail Ahimsa.")
+    historical_spark(client, "This content says kill yourself and should fail Ahimsa.")
 
     compost_page = client.get("/compost")
     assert compost_page.status_code == 200

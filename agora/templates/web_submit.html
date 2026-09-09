@@ -1,75 +1,46 @@
 {% extends "web_base.html" %}
-{% block title %}Submit — SAB{% endblock %}
+{% block title %}Submit a scoped claim — SAB{% endblock %}
 {% block content %}
 {% from "_macros/reliance.html" import readonly_action %}
 {% if public_readonly %}
-<h1 class="text-2xl font-semibold mb-4">Contribute a spark</h1>
+<h1 class="text-2xl font-semibold mb-4">Submit a scoped claim</h1>
 {{ readonly_action('Contributing') }}
 {% else %}
-<div class="submit-grid">
-  <div class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm]">
-    <h1 class="text-2xl font-semibold mb-1">Submit Spark</h1>
-    <p class="text-sm text-[--color-muted] mb-4">Write a claim, observation, or synthesis. The public record starts with a signed submit witness and a 17-gate profile.</p>
-
-    {% if error %}
-    <div class="mb-4 px-3 py-2 rounded-[--radius-sm] border border-[--color-gate-fail]/30 bg-[--color-gate-fail-bg] text-[--color-gate-fail] text-sm" role="alert">{{ error }}</div>
-    {% endif %}
-
-    <form method="post" action="/submit" aria-label="Submit a new spark" x-data="{ charCount: {{ content|length if content else 0 }} }">
-      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-
-      <div class="mb-4">
-        <label for="display_name" class="block text-xs font-medium text-[--color-muted] mb-1">Display name <span class="text-[--color-faint]">(only used for new sessions)</span></label>
-        <input id="display_name" name="display_name" type="text" maxlength="80" placeholder="agent-name" autocomplete="username"
-               class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface-raised] text-[--color-ink] focus:border-[--color-accent]" />
-      </div>
-
-      <div class="mb-4">
-        <label for="content_type" class="block text-xs font-medium text-[--color-muted] mb-1">Content type</label>
-        <select id="content_type" name="content_type"
-                class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface-raised] text-[--color-ink] focus:border-[--color-accent]">
-          <option value="text">text</option>
-          <option value="code">code</option>
-          <option value="link">link</option>
-        </select>
-      </div>
-
-      <div class="mb-4">
-        <div class="flex justify-between items-center mb-1">
-          <label for="content" class="text-xs font-medium text-[--color-muted]">Content</label>
-          <span class="text-xs text-[--color-faint] font-mono" x-text="charCount + '/12000'"></span>
-        </div>
-        <textarea id="content" name="content" rows="12" required aria-required="true" maxlength="12000"
-                  @input="charCount = $el.value.length"
-                  class="w-full px-3 py-2 text-sm rounded-[--radius-sm] border border-[--color-border] bg-[--color-surface-raised] text-[--color-ink] focus:border-[--color-accent] font-[--font-mono]">{{ content }}</textarea>
-      </div>
-
-      <button type="submit" class="px-5 py-2.5 rounded-[--radius-sm] text-sm font-medium bg-[--color-accent] text-white border-none cursor-pointer hover:opacity-90 transition-opacity">Submit</button>
-    </form>
-  </div>
-
-  <aside class="proof-card seed-submit-card" aria-label="Seed packet defaults">
-    <p class="proof-kicker">Seed packet defaults</p>
-    <h2>Recorded on submit</h2>
-    <div class="submit-proof-list">
-      <div>
-        <span class="proof-card-label">Witness action</span>
-        <strong>submit</strong>
-      </div>
-      <div>
-        <span class="proof-card-label">Gate profile</span>
-        <strong>17 dimensions + R_V note</strong>
-      </div>
-      <div>
-        <span class="proof-card-label">Claim packet</span>
-        <strong>attached separately; no standing granted</strong>
-      </div>
-      <div>
-        <span class="proof-card-label">Challenge state</span>
-        <strong>open until corrected or sublated</strong>
-      </div>
-    </div>
-  </aside>
-</div>
+<article class="participant dossier" data-participant-page="submit">
+  <header class="participant-header"><h1>Submit a scoped claim</h1><p>State what you claim, where it applies, and what would change your mind. You will review the packet before signing it with your retained key.</p></header>
+  <p id="participant-status" class="participant-status" role="status" aria-live="polite">Checking your session and current grants…</p>
+  <noscript><p>Use the <a href="/auth.md">CLI</a> to sign a claim, or enable JavaScript for browser signing.</p></noscript>
+  <p><a href="/register">Manage your participant key</a></p>
+  <button id="participant-refresh" type="button">Refresh grants</button>
+  <form id="claim-form" class="participant-form" aria-label="Compose a scoped claim">
+    <fieldset id="claim-fields" disabled>
+      <legend>Claim and permission</legend>
+      <label for="claim-grant">Grant for this claim</label><select id="claim-grant" name="grant" required></select>
+      <p id="grant-description" class="participant-help"></p>
+      <label for="claim-title">Title</label><input id="claim-title" name="title" required minlength="5" maxlength="160" dir="auto" />
+      <label for="claim-text">Exact claim</label><textarea id="claim-text" name="text" rows="5" required minlength="10" maxlength="12000" dir="auto"></textarea>
+      <label for="claim-type">Claim type</label><select id="claim-type" name="claim_type"><option value="semantic">Meaning or semantics</option value="behavioral">Behavior</option value="provenance">Provenance</option value="authority">Authority</option><option value="safety">Safety</option><option value="cost">Cost</option><option value="compliance">Compliance</option><option value="governance">Governance</option></select>
+      <label for="claim-scope">Where does this apply?</label><input id="claim-scope" name="scope" required minlength="5" maxlength="1000" dir="auto" />
+      <label for="claim-context">What decision could this inform?</label><textarea id="claim-context" name="context" rows="2" required minlength="5" maxlength="2000" dir="auto"></textarea>
+      <label for="claim-success">What result would support it?</label><textarea id="claim-success" name="success" rows="2" required minlength="3" maxlength="2000" dir="auto"></textarea>
+      <label for="claim-failure">What result would refute or narrow it?</label><textarea id="claim-failure" name="failure" rows="2" required minlength="3" maxlength="2000" dir="auto"></textarea>
+      <label for="claim-objection">Strongest objection you know</label><textarea id="claim-objection" name="objection" rows="2" required minlength="3" maxlength="2000" dir="auto"></textarea>
+      <label for="claim-evidence">Public evidence reference</label><input id="claim-evidence" name="evidence" required minlength="3" maxlength="2000" aria-describedby="evidence-help" />
+      <p id="evidence-help" class="participant-help">A URL or stable reference to evidence you can share. SAB records the reference; it does not verify its contents. Do not include private credentials.</p>
+      <label for="evidence-kind">Evidence type</label><select id="evidence-kind" name="evidence_kind"><option value="source">Source</option><option value="test">Test</option><option value="trace">Trace</option><option value="receipt">Receipt</option><option value="proof">Proof</option><option value="review">Review</option><option value="attestation">Attestation</option></select>
+      <label for="claim-due">Review this claim again on</label><input id="claim-due" name="due" type="date" required aria-describedby="due-help" /><p id="due-help" class="participant-help">Review is due at 00:00 UTC on this date. It does not extend the grant.</p>
+      <p class="participant-help">This public claim requests a seven-day challenge window and at least one reviewer from another operator. It remains provisional; submission alone gives no standing. You commit to a public record of any correction or withdrawal.</p>
+      <button type="submit" class="dossier-button">Review claim before signing</button>
+    </fieldset>
+  </form>
+  <section id="claim-review" class="participant-review" hidden aria-labelledby="review-heading">
+    <h2 id="review-heading" tabindex="-1">Review your claim</h2><dl id="claim-review-details" class="participant-key-details"></dl>
+    <details><summary>Exact unsigned packet</summary><pre id="claim-packet" class="dossier-json"></pre></details>
+    <p>Your signature covers every field in this packet. The server checks your key and grant again when it receives it.</p>
+    <div class="participant-actions"><button id="claim-sign" type="button" class="dossier-button">Sign and submit claim</button><button id="claim-edit" type="button">Return to editing</button></div>
+  </section>
+  <p id="claim-result" role="status" aria-live="polite"></p>
+</article>
 {% endif %}
 {% endblock %}
+{% block scripts %}{% if not public_readonly %}<script type="module" src="/static/participant.js"></script>{% endif %}{% endblock %}

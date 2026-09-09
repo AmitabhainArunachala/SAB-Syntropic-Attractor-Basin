@@ -31,6 +31,18 @@ jobs:
         pip install -e .
         pip install pytest pytest-asyncio pytest-cov jsonschema
 
+    - name: Set up Node 22 for browser protocol checks
+      if: matrix.python-version == '3.10'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Verify browser cryptography against Python 3.10
+      if: matrix.python-version == '3.10'
+      run: |
+        node tests/browser/participant_flow.mjs --test-sanitizer
+        SAB_TEST_PYTHON="$(command -v python)" node --test tests/browser/test_participant_crypto.mjs
+
     - name: Validate NAME_REGISTRY
       run: |
         python3 scripts/check_name_registry.py
@@ -104,7 +116,7 @@ jobs:
 
   distribution:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
@@ -113,6 +125,19 @@ jobs:
     - uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Set up Node 22 for installed browser rehearsals
+      if: matrix.python-version == '3.10'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - name: Install isolated Playwright and Chromium test dependencies
+      if: matrix.python-version == '3.10'
+      run: |
+        set -euo pipefail
+        npm install --prefix "$RUNNER_TEMP/sab-playwright" --no-audit --no-fund playwright@1.62.1
+        PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/sab-chromium" \
+          node "$RUNNER_TEMP/sab-playwright/node_modules/playwright/cli.js" install --with-deps chromium
+        echo "SAB_BROWSER_OUTPUT=$HOME/.dharma/sab/browser-rehearsals/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
     - name: Build wheel and rebuild from source distribution
       run: |
         set -euo pipefail
@@ -142,6 +167,16 @@ jobs:
             --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-key-control-$kind"
           "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_authority.py" \
             --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-authority-$kind"
+          if [ "${{ matrix.python-version }}" = '3.10' ]; then
+            # Installed public inspection above used runtime dependencies only.
+            # Browser schema verification explicitly adds this development tool.
+            "$venv/bin/python" -m pip install jsonschema
+            "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_participant_browser.py" \
+              --installed --source-root "$GITHUB_WORKSPACE" \
+              --playwright-module "$RUNNER_TEMP/sab-playwright/node_modules/playwright" \
+              --browser-cache "$RUNNER_TEMP/sab-chromium" \
+              --runtime-root "$SAB_BROWSER_OUTPUT/$kind"
+          fi
         done
     - name: Retain synthetic artifact verification receipts
       if: always()
@@ -156,6 +191,25 @@ jobs:
           ${{ runner.temp }}/sab-key-control-*/*.log
           ${{ runner.temp }}/sab-authority-*/receipt.json
           ${{ runner.temp }}/sab-authority-*/*.log
+
+    - name: Retain public browser verification receipts and screenshots
+      if: always() && matrix.python-version == '3.10'
+      uses: actions/upload-artifact@v4
+      with:
+        name: participant-browser-distribution-3.10
+        # Exact sanitized records/success captures only. Raw process logs,
+        # failure screenshots, profiles, database and system keys stay private.
+        path: |
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/bridge-receipt.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/browser-observations.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/desktop-claim-review.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/mobile-key.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/mobile-witness-review.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/bridge-receipt.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/browser-observations.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/desktop-claim-review.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/mobile-key.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/mobile-witness-review.png
 
   lint:
     runs-on: ubuntu-latest

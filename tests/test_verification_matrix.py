@@ -1,28 +1,33 @@
 """
-SAB Sprint 2 Verification Matrix Integration Tests.
+Historical discussion rendering and participant boundary integration tests.
 
-Covers all mandatory browser workflow invariants:
+Covers these compatibility invariants using explicit caller-signed fixtures:
   a. Feed pages render with expected status codes
-  b. Submit flow creates spark and redirects to detail page
+  b. Signed historical discussion remains readable at its detail page
   c. Spark page shows 17 dimensions + R_V experimental label
-  d. Challenge form posts and thread displays new challenge
-  e. Witness action via web updates witness timeline
+  d. Signed legacy challenges remain visible in their historical thread
+  e. Signed legacy witness observations remain visible in the timeline
   f. Compost page shows WHY card reason
   g. Agent profile reliability metrics render without division errors
   h. Cache invalidation reflects latest state after writes
   i. Invalid signature API paths remain rejected
-  j. Existing promotion/auth tests remain green (covered by test_integration.py)
+  j. Unsigned browser forms reject requests without creating identities or writes
 """
 from __future__ import annotations
 
 import importlib
 import json
 import sys
-import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from historical_web_fixtures import (
+    HistoricalWebActor,
+    database_state,
+    historical_actor,
+    historical_spark,
+)
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,36 +60,9 @@ def client(web_app):
         yield tc
 
 
-def _get_csrf_token(web_app) -> str:
-    """Extract a CSRF token from the first active web session."""
-    sessions = getattr(web_app, "_WEB_SESSIONS", {})
-    for _token, session_data in sessions.items():
-        csrf = session_data.get("csrf_token", "")
-        if csrf:
-            return csrf
-    return ""
-
-
-def _submit_spark(client: TestClient, content: str, web_app=None) -> str:
-    """Submit a spark via web form and return the redirect location."""
-    form_data = {
-        "display_name": "vm-tester",
-        "content": content,
-        "content_type": "text",
-    }
-    if web_app is not None:
-        csrf = _get_csrf_token(web_app)
-        if csrf:
-            form_data["_csrf"] = csrf
-    response = client.post(
-        "/submit",
-        data=form_data,
-        follow_redirects=False,
-    )
-    assert response.status_code == 303, response.text
-    location = response.headers.get("location", "")
-    assert location.startswith("/spark/"), f"Expected redirect to /spark/*, got {location}"
-    return location
+def _submit_spark(client: TestClient, content: str) -> str:
+    """Create caller-signed historical discussion, then return its read URL."""
+    return historical_spark(client, content)
 
 
 def _get_spark_id(location: str) -> int:
@@ -130,11 +108,11 @@ class TestFeedPagesRender:
 
 
 # ---------------------------------------------------------------------------
-# (b) Submit flow creates spark and redirects to detail page
+# (b) Signed historical discussion creates a readable detail page
 # ---------------------------------------------------------------------------
 
 class TestSubmitFlow:
-    def test_submit_redirects_to_spark_detail(self, client: TestClient):
+    def test_signed_discussion_has_spark_detail(self, client: TestClient):
         location = _submit_spark(client, "Submit flow verification test content.")
         assert "/spark/" in location
 
@@ -144,15 +122,17 @@ class TestSubmitFlow:
         assert detail.status_code == 200
         assert "text/html" in detail.headers.get("content-type", "")
 
-    def test_submit_empty_content_does_not_crash(self, client: TestClient):
-        """Submitting empty content should not 500."""
+    def test_unsigned_empty_submission_is_rejected_without_effects(self, client: TestClient, web_app):
+        before = database_state(web_app)
         resp = client.post(
             "/submit",
             data={"display_name": "vm-empty", "content": "", "content_type": "text"},
             follow_redirects=False,
         )
-        # Should either redirect or render form with error, but not 500
-        assert resp.status_code in (200, 303, 422)
+        assert resp.status_code == 428
+        assert resp.json()["error"] == "browser_key_required"
+        assert "set-cookie" not in resp.headers
+        assert database_state(web_app) == before
 
 
 # ---------------------------------------------------------------------------
@@ -189,100 +169,67 @@ class TestDimensionProfile:
 
 
 # ---------------------------------------------------------------------------
-# (d) Challenge form posts and thread displays new challenge
+# (d) Historical challenge signatures and thread rendering
 # ---------------------------------------------------------------------------
 
 class TestChallengeFlow:
-    def _challenge_form(self, web_app, content: str) -> dict:
-        form = {"content": content}
-        csrf = _get_csrf_token(web_app)
-        if csrf:
-            form["_csrf"] = csrf
-        return form
-
-    def test_challenge_post_redirects(self, client: TestClient, web_app):
-        location = _submit_spark(client, "Spark for challenge.", web_app=web_app)
+    def test_signed_challenge_records_author(self, client: TestClient, web_app):
+        location = _submit_spark(client, "Spark for challenge.")
         spark_id = _get_spark_id(location)
-        resp = client.post(
-            f"/spark/{spark_id}/challenge",
-            data=self._challenge_form(web_app, "Challenge from web form."),
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303
+        actor = historical_actor(client)
+        record = actor.challenge(spark_id, "Challenge signed by the historical author.")
+        assert record["challenger_id"] == actor.subject_id
+        assert record["resolution"] == "pending"
 
     def test_challenge_visible_on_spark_page(self, client: TestClient, web_app):
-        location = _submit_spark(client, "Spark for challenge visibility.", web_app=web_app)
+        location = _submit_spark(client, "Spark for challenge visibility.")
         spark_id = _get_spark_id(location)
-        client.post(
-            f"/spark/{spark_id}/challenge",
-            data=self._challenge_form(web_app, "Visible challenge argument."),
-            follow_redirects=False,
-        )
+        historical_actor(client).challenge(spark_id, "Visible challenge argument.")
         page = client.get(f"/spark/{spark_id}")
         assert page.status_code == 200
         assert "Visible challenge argument." in page.text
 
     def test_multiple_challenges_all_visible(self, client: TestClient, web_app):
-        location = _submit_spark(client, "Spark for multi challenge.", web_app=web_app)
+        location = _submit_spark(client, "Spark for multi challenge.")
         spark_id = _get_spark_id(location)
         for i in range(3):
-            client.post(
-                f"/spark/{spark_id}/challenge",
-                data=self._challenge_form(web_app, f"Challenge number {i}"),
-                follow_redirects=False,
-            )
+            historical_actor(client).challenge(spark_id, f"Challenge number {i}")
         page = client.get(f"/spark/{spark_id}")
         assert page.status_code == 200
         for i in range(3):
             assert f"Challenge number {i}" in page.text
 
-    def test_empty_challenge_does_not_crash(self, client: TestClient, web_app):
-        location = _submit_spark(client, "Spark for empty challenge test.", web_app=web_app)
+    def test_unsigned_empty_challenge_is_rejected_without_effects(self, client: TestClient, web_app):
+        location = _submit_spark(client, "Spark for empty challenge test.")
         spark_id = _get_spark_id(location)
-        form = self._challenge_form(web_app, "")
+        before = database_state(web_app)
         resp = client.post(
             f"/spark/{spark_id}/challenge",
-            data=form,
+            data={"content": ""},
             follow_redirects=False,
         )
-        # FastAPI Form(...) validation may reject empty string with 422,
-        # or the handler may redirect back.  Either way, no 500.
-        assert resp.status_code in (200, 303, 422)
+        assert resp.status_code == 428
+        assert resp.json()["error"] == "browser_key_required"
+        assert "set-cookie" not in resp.headers
+        assert database_state(web_app) == before
 
 
 # ---------------------------------------------------------------------------
-# (e) Witness action via web updates witness timeline
+# (e) Signed historical witness observations update the discussion timeline
 # ---------------------------------------------------------------------------
 
 class TestWitnessWebAction:
-    def _witness_form(self, web_app, action: str, note: str, display_name: str = "") -> dict:
-        form: dict = {"action": action, "note": note}
-        if display_name:
-            form["display_name"] = display_name
-        csrf = _get_csrf_token(web_app)
-        if csrf:
-            form["_csrf"] = csrf
-        return form
-
-    def test_witness_affirm_redirects(self, client: TestClient, web_app):
-        location = _submit_spark(client, "Spark for witness action.", web_app=web_app)
+    def test_signed_witness_affirm_is_recorded(self, client: TestClient, web_app):
+        location = _submit_spark(client, "Spark for witness action.")
         spark_id = _get_spark_id(location)
-        resp = client.post(
-            f"/spark/{spark_id}/witness",
-            data=self._witness_form(web_app, "affirm", "Good spark.", "witness-agent"),
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303
-        assert f"/spark/{spark_id}#timeline" in resp.headers.get("location", "")
+        record = historical_actor(client).witness(spark_id, "affirm", "Good spark.")
+        assert record["entry"]["action"] == "affirm"
+        assert record["authority"]["standing_effect"] == "none"
 
     def test_witness_action_appears_in_timeline(self, client: TestClient, web_app):
-        location = _submit_spark(client, "Spark for witness timeline check.", web_app=web_app)
+        location = _submit_spark(client, "Spark for witness timeline check.")
         spark_id = _get_spark_id(location)
-        client.post(
-            f"/spark/{spark_id}/witness",
-            data=self._witness_form(web_app, "affirm", "Timeline entry.", "timeline-witness"),
-            follow_redirects=False,
-        )
+        historical_actor(client).witness(spark_id, "affirm", "Timeline entry.")
         page = client.get(f"/spark/{spark_id}")
         assert page.status_code == 200
         # The timeline section should include the witness action
@@ -290,26 +237,21 @@ class TestWitnessWebAction:
 
     def test_witness_api_records_attestation(self, client: TestClient, web_app):
         """API endpoint /api/witness/{agent_id} should reflect witness activity."""
-        location = _submit_spark(client, "Spark for API witness check.", web_app=web_app)
+        location = _submit_spark(client, "Spark for API witness check.")
         spark_id = _get_spark_id(location)
-        # Post witness via web to capture the agent_id from session
-        resp = client.post(
-            f"/spark/{spark_id}/witness",
-            data=self._witness_form(web_app, "affirm", "API check.", "api-witness"),
-            follow_redirects=True,
-        )
-        assert resp.status_code == 200
+        actor = historical_actor(client)
+        record = actor.witness(spark_id, "affirm", "API check.")
+        response = client.get(f"/api/witness/{actor.subject_id}")
+        assert response.status_code == 200
+        assert any(entry["hash"] == record["entry"]["hash"] for entry in response.json()["entries"])
 
     def test_compost_witness_action(self, client: TestClient, web_app):
-        """Compost witness action should not crash."""
-        location = _submit_spark(client, "Spark for compost witness.", web_app=web_app)
+        """A signed historical compost observation remains inspectable."""
+        location = _submit_spark(client, "Spark for compost witness.")
         spark_id = _get_spark_id(location)
-        resp = client.post(
-            f"/spark/{spark_id}/witness",
-            data=self._witness_form(web_app, "compost", "Low quality."),
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303
+        record = historical_actor(client).witness(spark_id, "compost", "Low quality.")
+        assert record["legacy_status"] == "compost"
+        assert client.get(f"/api/spark/{spark_id}").json()["legacy_status"] == "compost"
 
 
 # ---------------------------------------------------------------------------
@@ -339,52 +281,30 @@ class TestCompostWhyCard:
 class TestAgentProfileReliability:
     def test_new_agent_profile_no_division_error(self, client: TestClient):
         """New agent with zero submissions should not produce ZeroDivisionError."""
-        # Register via web form
-        resp = client.post(
-            "/register",
-            data={"display_name": "zero-division-test"},
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303
-        agent_url = resp.headers.get("location", "")
-        assert agent_url.startswith("/agent/")
-
-        profile = client.get(agent_url)
+        actor = HistoricalWebActor(client, display_name="zero-division-test")
+        profile = client.get(f"/agent/{actor.subject_id}")
         assert profile.status_code == 200
         assert "text/html" in profile.headers.get("content-type", "")
+        assert "zero-division-test" in profile.text
+        assert "<dt>Contributions</dt><dd>0</dd>" in profile.text
 
     def test_agent_with_submissions_renders_metrics(self, client: TestClient):
         """Agent who submitted sparks should have renderable reliability metrics."""
-        location = _submit_spark(client, "Agent metrics test submission.")
-        # The submit created/found a session; register explicitly to get profile URL
-        resp = client.post(
-            "/register",
-            data={"display_name": "metrics-agent"},
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303
-        agent_url = resp.headers.get("location", "")
-        profile = client.get(agent_url)
+        _submit_spark(client, "Agent metrics test submission.")
+        profile = client.get(f"/agent/{historical_actor(client).subject_id}")
         assert profile.status_code == 200
+        assert "<dt>Contributions</dt><dd>1</dd>" in profile.text
 
     def test_agent_with_witness_activity_renders(self, client: TestClient):
         """Agent who witnessed sparks should have renderable profile."""
         location = _submit_spark(client, "Spark for profile witness check.")
         spark_id = _get_spark_id(location)
-        client.post(
-            f"/spark/{spark_id}/witness",
-            data={"action": "affirm", "note": "Profile test.", "display_name": "profile-witness"},
-            follow_redirects=False,
-        )
-        resp = client.post(
-            "/register",
-            data={"display_name": "profile-witness-check"},
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303
-        agent_url = resp.headers.get("location", "")
-        profile = client.get(agent_url)
+        actor = HistoricalWebActor(client, display_name="profile-witness")
+        actor.witness(spark_id, "affirm", "Profile test.")
+        profile = client.get(f"/agent/{actor.subject_id}")
         assert profile.status_code == 200
+        assert "profile-witness" in profile.text
+        assert "<dt>Endorsements given</dt><dd>1</dd>" in profile.text
 
     def test_nonexistent_agent_returns_404(self, client: TestClient):
         resp = client.get("/agent/nonexistent999")
@@ -413,8 +333,8 @@ class TestCacheInvalidation:
 
     def test_second_spark_visible_after_first(self, client: TestClient, web_app):
         """Two sequential submissions should both appear."""
-        _submit_spark(client, "First spark for cache test AAA.", web_app=web_app)
-        _submit_spark(client, "Second spark for cache test BBB.", web_app=web_app)
+        _submit_spark(client, "First spark for cache test AAA.")
+        _submit_spark(client, "Second spark for cache test BBB.")
         page = client.get("/feed")
         assert page.status_code == 200
         assert "First spark for cache test AAA" in page.text
@@ -422,22 +342,16 @@ class TestCacheInvalidation:
 
     def test_challenge_count_updates_in_feed(self, client: TestClient, web_app):
         """After a challenge, the feed should reflect the updated challenge count."""
-        location = _submit_spark(client, "Spark for challenge count cache test.", web_app=web_app)
+        location = _submit_spark(client, "Spark for challenge count cache test.")
         spark_id = _get_spark_id(location)
-        # Invalidate cache via a write operation
-        web_app._invalidate_web_cache()
-        form = {"content": "Challenge for cache count."}
-        csrf = _get_csrf_token(web_app)
-        if csrf:
-            form["_csrf"] = csrf
-        client.post(
-            f"/spark/{spark_id}/challenge",
-            data=form,
-            follow_redirects=False,
-        )
+        # Populate the cache before the command; the command must invalidate it.
+        assert client.get("/feed").status_code == 200
+        assert client.get(f"/api/spark/{spark_id}").json()["challenge_count"] == 0
+        historical_actor(client).challenge(spark_id, "Challenge for cache count.")
         detail = client.get(f"/spark/{spark_id}")
         assert detail.status_code == 200
         assert "Challenge for cache count." in detail.text
+        assert client.get(f"/api/spark/{spark_id}").json()["challenge_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -593,42 +507,46 @@ class TestApiFeedEndpoints:
 
 
 # ---------------------------------------------------------------------------
-# Web registration flow
+# Browser registration requires a client-held key and independent session proof
 # ---------------------------------------------------------------------------
 
 class TestWebRegistration:
-    def test_register_creates_session_and_redirects(self, client: TestClient):
-        resp = client.post(
-            "/register",
-            data={"display_name": "reg-test-agent"},
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303
-        assert resp.headers.get("location", "").startswith("/agent/")
+    def test_client_registration_and_session_proof_allow_profile_read(self, client: TestClient, web_app):
+        actor = HistoricalWebActor(client, display_name="reg-test-agent")
+        assert not client.cookies
+        observation = actor.open_session(web_app.KEY_CONTROL.audience)
+        assert observation["display_name"] == "reg-test-agent"
+        session = client.get("/api/v1/browser/session").json()["session"]
+        assert session == observation
+        assert client.get(f"/agent/{actor.subject_id}").status_code == 200
+        assert client.get("/register").status_code == 200
+        assert web_app.WEB_SESSION_COOKIE in client.cookies
 
-    def test_register_with_whitespace_name_uses_anonymous(self, client: TestClient):
-        """Whitespace-only display name should fall back to 'anonymous'."""
+    @pytest.mark.parametrize("name", ["reg-test-agent", "  "])
+    def test_unsigned_registration_creates_no_identity_or_session(self, client: TestClient, web_app, name):
+        before = database_state(web_app)
         resp = client.post(
             "/register",
-            data={"display_name": "  "},
+            data={"display_name": name},
             follow_redirects=False,
         )
-        assert resp.status_code == 303
-        agent_url = resp.headers.get("location", "")
-        profile = client.get(agent_url)
-        assert profile.status_code == 200
+        assert resp.status_code == 428
+        assert resp.json()["error"] == "browser_key_required"
+        assert "set-cookie" not in resp.headers
+        assert not client.cookies
+        assert database_state(web_app) == before
 
 
 # ---------------------------------------------------------------------------
-# Determinism: no external calls, no timing dependencies
+# Historical scoring preserves its structure and records changed context
 # ---------------------------------------------------------------------------
 
 class TestDeterminism:
-    def test_same_content_always_same_gate_scores(self, client: TestClient, web_app):
-        """Submitting identical content should yield consistent gate outcomes."""
+    def test_repeat_content_retains_dimensions_and_records_originality_warning(self, client: TestClient, web_app):
+        """A repeat keeps the profile structure while changing the originality observation."""
         content = "Determinism check with stable content for gate scoring."
-        loc1 = _submit_spark(client, content, web_app=web_app)
-        loc2 = _submit_spark(client, content, web_app=web_app)
+        loc1 = _submit_spark(client, content)
+        loc2 = _submit_spark(client, content)
         page1 = client.get(loc1)
         page2 = client.get(loc2)
         assert page1.status_code == 200
@@ -636,6 +554,15 @@ class TestDeterminism:
         # Both should show same dimension structure
         assert "17 Gate Dimensions" in page1.text
         assert "17 Gate Dimensions" in page2.text
+        first = client.get(f"/api/spark/{_get_spark_id(loc1)}").json()
+        second = client.get(f"/api/spark/{_get_spark_id(loc2)}").json()
+        first_dimensions = first["gate_scores"]["dimensions"]
+        second_dimensions = second["gate_scores"]["dimensions"]
+        assert first_dimensions.keys() == second_dimensions.keys()
+        assert first_dimensions["ahimsa"] == second_dimensions["ahimsa"]
+        assert first_dimensions["originality"]["result"] == "passed"
+        assert second_dimensions["originality"]["result"] == "warning"
+        assert second_dimensions["originality"]["reason"] == "Duplicate of recent content"
 
     def test_api_chain_verification_on_fresh_spark(self, client: TestClient, web_app):
         """Chain verification should pass on a freshly submitted spark."""

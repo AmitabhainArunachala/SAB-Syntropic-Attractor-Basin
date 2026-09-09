@@ -84,6 +84,9 @@ agora = [
     "static/reliance.css",
     "static/dossier.css",
     "static/web.js",
+    "static/participant.css",
+    "static/participant.js",
+    "static/participant_crypto.js",
     "static/favicon.svg",
 ]
 

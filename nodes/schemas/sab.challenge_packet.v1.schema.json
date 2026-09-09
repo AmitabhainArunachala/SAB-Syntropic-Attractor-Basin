@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sab.local/schemas/sab.challenge_packet.v1.schema.json",
   "title": "SAB Challenge Packet v1",
-  "description": "Signed challenge against a seed claim or authority action.",
+  "description": "Signed challenge command for an exact existing claim under an issued authority grant. Historical packets may predate the current submission requirements.",
   "type": "object",
   "required": [
     "schema",
@@ -16,10 +16,14 @@
     "proposed_falsification_or_narrowing",
     "severity",
     "deadline",
-    "signature"
+    "signature",
+    "created_at",
+    "authority_lease"
   ],
   "properties": {
-    "schema": { "const": "sab.challenge_packet.v1" },
+    "schema": {
+      "const": "sab.challenge_packet.v1"
+    },
     "challenge_id": {
       "type": "string",
       "pattern": "^sab_challenge_[A-Za-z0-9_.:-]{3,}$"
@@ -36,7 +40,10 @@
       "type": "string",
       "pattern": "^sab_identity_[A-Za-z0-9_.:-]{3,}$"
     },
-    "quoted_claim_fragment": { "type": "string", "minLength": 5 },
+    "quoted_claim_fragment": {
+      "type": "string",
+      "minLength": 5
+    },
     "challenge_type": {
       "type": "string",
       "enum": [
@@ -59,12 +66,27 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["ref", "kind", "privacy_class"],
+        "required": [
+          "ref",
+          "kind",
+          "privacy_class"
+        ],
         "properties": {
-          "ref": { "type": "string", "minLength": 3 },
+          "ref": {
+            "type": "string",
+            "minLength": 3
+          },
           "kind": {
             "type": "string",
-            "enum": ["source", "test", "trace", "receipt", "proof", "review", "attestation"]
+            "enum": [
+              "source",
+              "test",
+              "trace",
+              "receipt",
+              "proof",
+              "review",
+              "attestation"
+            ]
           },
           "digest": {
             "type": "string",
@@ -72,9 +94,15 @@
           },
           "privacy_class": {
             "type": "string",
-            "enum": ["public", "redacted_public", "private_pointer"]
+            "enum": [
+              "public",
+              "redacted_public",
+              "private_pointer"
+            ]
           },
-          "notes": { "type": "string" }
+          "notes": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       }
@@ -85,9 +113,17 @@
     },
     "severity": {
       "type": "string",
-      "enum": ["low", "medium", "high", "blocking"]
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "blocking"
+      ]
     },
-    "deadline": { "type": "string", "format": "date-time" },
+    "deadline": {
+      "type": "string",
+      "format": "date-time"
+    },
     "signature": {
       "type": "object",
       "required": [
@@ -98,7 +134,9 @@
         "signed_payload"
       ],
       "properties": {
-        "alg": { "const": "ed25519" },
+        "alg": {
+          "const": "ed25519"
+        },
         "signer": {
           "type": "string",
           "pattern": "^agent_[A-Za-z0-9_.:-]{3,}$"
@@ -107,7 +145,9 @@
           "type": "string",
           "pattern": "^[a-f0-9]{128}$"
         },
-        "canonicalization": { "const": "json-sort-keys-compact-v1" },
+        "canonicalization": {
+          "const": "json-sort-keys-compact-v1"
+        },
         "signed_payload": {
           "type": "object",
           "required": [
@@ -119,7 +159,9 @@
             "created_at"
           ],
           "properties": {
-            "kind": { "const": "sab_challenge_submit" },
+            "kind": {
+              "const": "sab_challenge_submit"
+            },
             "target_seed_id": {
               "type": "string",
               "pattern": "^sab_seed_[A-Za-z0-9_.:-]{3,}$"
@@ -136,9 +178,49 @@
               "type": "string",
               "pattern": "^sab_identity_[A-Za-z0-9_.:-]{3,}$"
             },
-            "created_at": { "type": "string", "format": "date-time" }
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "authority_lease": {
+      "type": "object",
+      "required": [
+        "lease_ref",
+        "scope",
+        "expires_at",
+        "revoker",
+        "challenge_path"
+      ],
+      "properties": {
+        "lease_ref": {
+          "type": "string",
+          "pattern": "^sab_lease_[A-Za-z0-9_.:-]{3,}$"
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 5
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revoker": {
+          "type": "string",
+          "minLength": 3
+        },
+        "challenge_path": {
+          "type": "string",
+          "pattern": "^(https?://|/)[^\\s]+$"
         }
       },
       "additionalProperties": false

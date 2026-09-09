@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import importlib
 import json
 import re
 import sqlite3
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +22,10 @@ from agora.public_runtime import (
 
 
 WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE", "TRACE", "CONNECT", "PROPFIND", "COPY")
+BROWSER_SESSION_PATHS = (
+    "/api/v1/browser/session", "/api/v1/browser/session/challenge",
+    "/api/v1/browser/session/verify", "/api/v1/browser/session/logout",
+)
 
 
 def _load_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None = None):
@@ -212,8 +214,9 @@ def test_all_registered_paths_mounts_and_unknown_paths_reject_writes(public_app)
         paths = _registered_paths(public_app.app.routes)
         assert {"/api/v1/agents/register", "/api/agents/register", "/register", "/submit"} <= paths
         paths.update({"/never-registered", "/api/v1/never-registered", "/static/missing.css"})
+        paths.update(BROWSER_SESSION_PATHS)
         before = _database_snapshot(public_app)
-        sessions = copy.deepcopy(public_app._WEB_SESSIONS)
+        assert public_app.BROWSER_SESSIONS is None
         assert not public_app.SYSTEM_KEY_PATH.exists()
         for path in sorted(paths):
             for method in WRITE_METHODS:
@@ -228,29 +231,34 @@ def test_all_registered_paths_mounts_and_unknown_paths_reject_writes(public_app)
                 _assert_readonly(response)
         assert not reached
         assert _database_snapshot(public_app) == before
-        assert public_app._WEB_SESSIONS == sessions
+        assert public_app.BROWSER_SESSIONS is None
         assert not public_app.SYSTEM_KEY_PATH.exists()
         assert not public_app.SPARK_DB.exists()
         assert not client.cookies
 
 
-def test_public_get_pages_do_not_create_or_mutate_browser_sessions(public_app):
+@pytest.mark.parametrize("old_cookie", ["old-local", "expired-local", "A" * 43])
+def test_public_get_pages_do_not_create_or_mutate_browser_sessions(public_app, old_cookie):
     with TestClient(public_app.app) as client:
-        # An old local cookie must neither delete expired sessions nor generate a
-        # CSRF token in a surviving session when the process runs publicly.
-        public_app._WEB_SESSIONS.update({
-            "old-local": {"created_at_epoch": time.time(), "name": "local visitor"},
-            "expired-local": {"created_at_epoch": 0.0},
-        })
-        client.cookies.set(public_app.WEB_SESSION_COOKIE, "old-local")
-        sessions = copy.deepcopy(public_app._WEB_SESSIONS)
+        # A cookie from a private deployment must not initialize a private
+        # service, renew a cookie, or expose a session in the public process.
+        client.cookies.set(public_app.WEB_SESSION_COOKIE, old_cookie)
+        assert public_app.BROWSER_SESSIONS is None
         before = _database_snapshot(public_app)
         for path in ("/", "/frontier", "/submit", "/about", "/register", "/claims"):
             response = client.get(path)
             assert response.status_code == 200, f"{path}: {response.text}"
             assert "set-cookie" not in response.headers
-        assert public_app._WEB_SESSIONS == sessions
+        for path in BROWSER_SESSION_PATHS:
+            response = client.get(path)
+            assert response.status_code == 404
+            assert "set-cookie" not in response.headers
+        assert client.cookies.get(public_app.WEB_SESSION_COOKIE) == old_cookie
+        assert public_app.BROWSER_SESSIONS is None
         assert _database_snapshot(public_app) == before
+        with public_app._db() as conn:
+            assert conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == []
+        assert not public_app.SPARK_DB.exists()
 
 
 def test_public_empty_process_never_initializes_authority_tables(public_app):
@@ -400,7 +408,7 @@ def test_v1_reads_observe_expiry_without_changing_stored_history(tmp_path, monke
         assert client.get("/api/v1/seeds/seed_readonly").json()["state"] == "challenged"
         assert client.get("/api/v1/challenges/challenge_readonly").json()["status"] == "pending"
         assert _database_snapshot(public_app) == before
-        assert not public_app._WEB_SESSIONS
+        assert public_app.BROWSER_SESSIONS is None
         assert not client.cookies
         assert {p.name: p.read_bytes() for p in bundle.iterdir()} == bundle_before
 
@@ -432,19 +440,25 @@ def test_standing_observation_handles_terminal_history_and_expiry(stored, expiry
     }
 
 
-def test_explicit_local_mode_preserves_browser_submission(tmp_path, monkeypatch):
+def test_explicit_local_mode_requires_caller_signature_for_historical_discussion(tmp_path, monkeypatch):
+    from historical_web_fixtures import database_state, historical_spark
+
     module = _load_app(tmp_path, monkeypatch, "local")
     with TestClient(module.app) as client:
+        before = database_state(module)
         response = client.post(
             "/submit",
             data={"display_name": "Local test author", "content": "A concrete local observation."},
             follow_redirects=False,
         )
-        assert response.status_code == 303, response.text
-        assert response.headers["location"].startswith("/spark/")
-        assert module.WEB_SESSION_COOKIE in client.cookies
-        assert len(module._WEB_SESSIONS) == 1
-        assert client.get(response.headers["location"]).status_code == 200
+        assert response.status_code == 428, response.text
+        assert response.json()["error"] == "browser_key_required"
+        assert "set-cookie" not in response.headers
+        assert not client.cookies
+        assert database_state(module) == before
+        location = historical_spark(client, "A concrete client-signed historical observation.")
+        assert client.get(location).status_code == 200
+        assert not client.cookies
         with module._db() as conn:
             assert conn.execute("SELECT COUNT(*) FROM web_agents").fetchone()[0] == 1
             assert conn.execute("SELECT COUNT(*) FROM sparks").fetchone()[0] == 1

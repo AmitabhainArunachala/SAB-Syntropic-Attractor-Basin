@@ -19,11 +19,12 @@ import zipfile
 
 
 PUBLIC_SCHEMA_NAMES = (
-    "sab.seed_packet.v1.schema.json", "sab.claim_dossier.v1.schema.json",
+    "sab.seed_packet.v1.schema.json", "sab.challenge_packet.v1.schema.json", "sab.claim_dossier.v1.schema.json",
     "sab.public_snapshot.v1.schema.json", "sab.public_read_observation.v1.schema.json",
     "sab.authority_policy.v1.schema.json", "sab.authority_lease.v2.schema.json",
     "sab.authority_issuance_witness.v1.schema.json", "sab.authority_revocation.v1.schema.json",
 )
+PARTICIPANT_ASSETS = ("participant.css", "participant.js", "participant_crypto.js")
 
 
 def digest(content: bytes) -> str:
@@ -74,6 +75,7 @@ def main() -> None:
             f"agora/_public_resources/docs/{name}.md"
             for name in ("skill", "seed", "auth", "heartbeat", "rules")
         ),
+        *(f"agora/static/{name}" for name in PARTICIPANT_ASSETS),
         *(
             f"agora/_public_resources/schemas/{name}"
             for name in PUBLIC_SCHEMA_NAMES
@@ -101,6 +103,8 @@ def main() -> None:
         "LICENSE",
     }
     with zipfile.ZipFile(wheel) as archive:
+        if not {f"agora/static/{name}" for name in PARTICIPANT_ASSETS} <= set(archive.namelist()):
+            raise RuntimeError("wheel is missing required local participant assets")
         for name in archive.namelist():
             if name.endswith("/"):
                 continue
@@ -120,6 +124,12 @@ def main() -> None:
                 if Path(metadata.locate_file(name)).read_bytes() != archive.read(name):
                     raise RuntimeError(f"installed file does not match wheel: {name}")
                 verified_files += 1
+        participant_assets = {}
+        for name in PARTICIPANT_ASSETS:
+            packaged = archive.read(f"agora/static/{name}")
+            if packaged != (source / "agora" / "static" / name).read_bytes():
+                raise RuntimeError(f"packaged participant asset differs from source: {name}")
+            participant_assets[name] = digest(packaged)
 
     from fastapi.testclient import TestClient
     from agora.app import app
@@ -149,6 +159,8 @@ def main() -> None:
         }
     )
     served = {}
+    blocked_routes = {"/api/feed", "/api/cache/stats", "/api/v1/agents/me/home",
+                      "/api/v1/browser/session", *(f"/static/{name}" for name in PARTICIPANT_ASSETS)}
     with TestClient(app) as client:
 
         def read(path: str, expected: int = 200):
@@ -160,7 +172,7 @@ def main() -> None:
                 or "set-cookie" in response.headers
             ):
                 raise RuntimeError(f"{path}: public caching/cookie contract failed")
-            if path not in {"/api/feed", "/api/cache/stats", "/api/v1/agents/me/home"} and (
+            if path not in blocked_routes and (
                 response.headers.get("sab-currentness") != "unestablished"
                 or response.headers.get("sab-publication-age-status") != "not_configured"
             ):
@@ -208,9 +220,13 @@ def main() -> None:
             raise RuntimeError("unconfigured installation exposed claims")
         read("/publication/manifest", 404)
         read("/claims/absent", 404)
-        for path in ("/api/feed", "/api/cache/stats", "/api/v1/agents/me/home"):
+        for path in sorted(blocked_routes):
             if read(path, 404).json().get("code") != "not_published":
                 raise RuntimeError("an unapproved route reached the application")
+            if path.startswith("/static/"):
+                denial = client.head(path, follow_redirects=False)
+                if denial.status_code != 404 or "set-cookie" in denial.headers:
+                    raise RuntimeError("public HEAD exposed a private participant asset")
         rejection = client.post("/api/v1/seeds", content=b"not-json")
         if rejection.status_code != 403 or rejection.json().get("code") != "public_readonly":
             raise RuntimeError("installed public app accepted a write")
@@ -259,6 +275,8 @@ def main() -> None:
         "wheel_sha256": digest(wheel.read_bytes()),
         "wheel_files_verified": verified_files,
         "canonical_resources": served,
+        "packaged_participant_assets_sha256": participant_assets,
+        "participant_assets_unavailable_in_public_mode": True,
         "runtime_dependencies_only": True,
         "package_unchanged": True,
         "private_runtime_paths_absent": True,

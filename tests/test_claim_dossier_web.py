@@ -121,7 +121,7 @@ def test_origin_discovery_to_shared_dossier_and_download(public_site):
     assert exported["identity"] == dossier["identity"]
     assert exported["claim"] == dossier["claim"]
     assert not client.cookies
-    assert not app._WEB_SESSIONS
+    assert app.BROWSER_SESSIONS is None
     assert database_digest(app) == before
 
 

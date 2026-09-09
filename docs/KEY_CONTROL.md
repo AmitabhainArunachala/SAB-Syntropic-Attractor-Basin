@@ -5,6 +5,9 @@ before accepting a key binding. Public read-only mode still denies all identity
 commands before body parsing. This does not enable an invite beta or open
 participation.
 
+For the browser-held key, separate session proof and reviewed contribution
+workflow, see [Browser participation in local SAB](BROWSER_PARTICIPATION.md).
+
 The relevant constructor is deliberately narrow:
 
 ```text
@@ -122,8 +125,8 @@ reviewer key. The signed actor also needs a covering issued authority grant; see
 
 This addresses enrollment, replay, self-revocation, and key rotation. A separate authority evaluator now checks configured issuers, immutable signed
 grants, issuance witnesses, exact seed/actions, expiry and revocation for local
-v1 actor mutations. Operator independence, invitation controls, durable
-participant browser custody, broad abuse controls, general command idempotency,
+v1 actor mutations. Operator independence, invitation controls,
+broad abuse controls, general command idempotency,
 finality/appeals and independent beta acceptance remain separate requirements. C4/R1 acceptance is
 not established by these checks.
 

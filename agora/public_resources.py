@@ -17,6 +17,7 @@ SCHEMA_SOURCES = {
     name: ("nodes", "schemas", name)
     for name in (
         "sab.seed_packet.v1.schema.json",
+        "sab.challenge_packet.v1.schema.json",
         "sab.claim_dossier.v1.schema.json",
         "sab.public_snapshot.v1.schema.json",
         "sab.public_read_observation.v1.schema.json",
@@ -34,6 +35,11 @@ STATIC_MEDIA_TYPES = {
     "dossier.css": "text/css",
     "web.js": "text/javascript",
     "favicon.svg": "image/svg+xml",
+}
+PARTICIPANT_MEDIA_TYPES = {
+    "participant.css": "text/css",
+    "participant.js": "text/javascript",
+    "participant_crypto.js": "text/javascript",
 }
 STAGED_RESOURCES = {
     **{("docs", name): source for name, source in DOCUMENT_SOURCES.items()},
@@ -89,3 +95,13 @@ def read_public_static(name: str) -> bytes:
         return resources.files("agora").joinpath("static", name).read_bytes()
     except (FileNotFoundError, NotADirectoryError):
         raise PublicResourceError("The packaged static resource is missing.") from None
+
+
+def read_participant_static(name: str) -> bytes:
+    """Read a fixed local participation asset; public runtime does not allow it."""
+    if name not in PARTICIPANT_MEDIA_TYPES:
+        raise PublicResourceError("The requested participant resource is not allowlisted.")
+    try:
+        return resources.files("agora").joinpath("static", name).read_bytes()
+    except (FileNotFoundError, NotADirectoryError):
+        raise PublicResourceError("The packaged participant resource is missing.") from None
