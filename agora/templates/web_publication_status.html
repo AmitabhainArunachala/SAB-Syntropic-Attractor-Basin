@@ -1,0 +1,49 @@
+{% extends "web_base.html" %}
+{% block title %}Publication status · SAB{% endblock %}
+{% block description %}Publication age, clock limits, and the boundary between historical inspection and current reliance.{% endblock %}
+{% block content %}
+<article class="dossier" aria-labelledby="publication-status-heading">
+  <header class="dossier-header">
+    <p class="proof-kicker">Publication status</p>
+    <h1 id="publication-status-heading">Know which records you are reading.</h1>
+    <p>The reader is available for inspection. Current authority, operator independence, and permission to rely require separate verification.</p>
+  </header>
+  {% if public_readonly %}
+  {% set observation = publication.publication_observation %}
+  <section class="dossier-section" aria-labelledby="publication-source-heading">
+    <h2 id="publication-source-heading">Published source</h2>
+    <dl class="dossier-facts">
+      <div><dt>Publication</dt><dd>{{ 'Configured, with validated original bytes' if publication.configured else 'No publication configured' }}</dd></div>
+      <div><dt>Source observation</dt><dd>{{ publication_observed_label or 'Unavailable' }}{% if publication.configured %} · supplied by the publisher{% endif %}</dd></div>
+      <div><dt>Published claims</dt><dd>{{ publication.seed_count }}</dd></div>
+      <div><dt>Local age assessment</dt><dd>{{ observation.local_age_policy.status|replace('_', ' ') }}</dd></div>
+      <div><dt>Maximum declared age</dt><dd>{{ observation.policy.maximum_age_seconds }} seconds</dd></div>
+      <div><dt>Currentness</dt><dd>Unestablished. Later corrections or revocations may exist.</dd></div>
+    </dl>
+    {% if publication.configured %}
+    <details><summary>Exact publication commitments</summary>
+      <dl class="dossier-facts"><div><dt>Manifest SHA-256</dt><dd><code>{{ publication.manifest_sha256 }}</code></dd></div><div><dt>Database SHA-256</dt><dd><code>{{ publication.database_sha256 }}</code></dd></div></dl>
+      <a href="/publication/manifest">Download the original manifest</a>
+    </details>
+    {% endif %}
+  </section>
+  <section class="dossier-section" aria-labelledby="publication-time-heading">
+    <h2 id="publication-time-heading">Time and expiry limits</h2>
+    <p>Age and elapsed deadlines use this server's local UTC clock, checked against a monotonic clock. The UTC source is not externally authenticated. A stable clock can still be wrong.</p>
+    <dl class="dossier-facts">
+      <div><dt>Assessment time</dt><dd><time>{{ observation.observed_at }}</time></dd></div>
+      <div><dt>Clock condition</dt><dd>{{ observation.clock.status }}</dd></div>
+      <div><dt>Maximum clock divergence</dt><dd>{{ observation.policy.maximum_clock_skew_seconds }} seconds</dd></div>
+      <div><dt>Expiry boundary</dt><dd>An expiry at or before the assessment time is locally elapsed. Clock uncertainty prevents a temporal conclusion.</dd></div>
+    </dl>
+    <p>Stored leases and dates remain visible. An unexpired date or a recent publication does not establish current standing or permission to act.</p>
+  </section>
+  <section class="dossier-section" aria-labelledby="publication-updates-heading">
+    <h2 id="publication-updates-heading">Corrections and withdrawal</h2>
+    <p>Each process serves a frozen publication. Replacement or withdrawal requires restarting with the newly reviewed source and its approved manifest digest. This page does not confirm that all later changes have been received.</p>
+    <p>Responses prohibit cache reuse. Already downloaded copies cannot be recalled by this service. Keep the exact manifest digest with any downloaded dossier.</p>
+    <div class="dossier-actions"><a href="/publication">Inspect status as JSON</a><a href="/schemas/sab.public_read_observation.v1.schema.json">Read the observation schema</a><a href="/claims">Browse published claims</a></div>
+  </section>
+  {% else %}<p>This instance is in local rehearsal mode. Its runtime does not claim an approved public publication.</p>{% endif %}
+</article>
+{% endblock %}

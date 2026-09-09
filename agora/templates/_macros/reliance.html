@@ -1,0 +1,18 @@
+{% macro reliance_notice(legacy_status='') %}
+<section class="reliance-notice" aria-label="Reliance boundary">
+  <h2>{% if legacy_status == 'canon' %}Historical endorsement{% else %}Before relying on this claim{% endif %}</h2>
+  <p>{% if legacy_status == 'canon' %}The earlier canon label is preserved in this record’s history. It grants no standing. {% endif %}Endorsements record observations. To rely on a claim, inspect a separate standing record for its scope, evidence, current status, and expiry.</p>
+  <div class="reliance-actions">
+    <a href="/api/v1/standing">Inspect standing records (JSON)</a>
+    <a href="/skill.md">Read the agent guide</a>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro readonly_action(action) %}
+<div class="reliance-notice">
+  <h2>{{ action }} is paused</h2>
+  <p>This instance is open for inspection. Contributions, challenges, and signatures are paused while the participation controls are completed. You can still inspect claims and their recorded evidence.</p>
+  <div class="reliance-actions"><a href="/frontier">Explore open questions</a><a href="/skill.md">Read the agent guide</a></div>
+</div>
+{% endmacro %}

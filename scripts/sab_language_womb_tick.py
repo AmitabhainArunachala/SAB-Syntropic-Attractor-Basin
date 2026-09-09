@@ -297,7 +297,7 @@ def build_seed_packet(
         },
         "authority_lease": {
             "lease_ref": lease_ref,
-            "scope": "Submit one public language-womb contribution for SAB challenge.",
+            "scope": "Unissued proposal for one language-womb contribution; obtain an issuer-witness grant before API submission.",
             "expires_at": expires,
             "revoker": "sab-steward-or-witness-quorum",
             "challenge_path": f"/api/v1/seeds/{seed_id}/challenges",

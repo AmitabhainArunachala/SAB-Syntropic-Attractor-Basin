@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.authority_revocation.v1.schema.json",
+  "title": "sab.authority_revocation.v1",
+  "description": "Closed signing data. Shape validation alone proves no authority. The evaluator verifies exact configured pins, real Ed25519 signatures, key control, action/resource bounds, logical time intervals and immutable history before any permission is usable.",
+  "type": "object",
+  "required": [
+    "schema",
+    "command_id",
+    "audience",
+    "lease_id",
+    "lease_sha256",
+    "revoker_id",
+    "revoker_public_key",
+    "reason",
+    "issued_at",
+    "expires_at"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sab.authority_revocation.v1"
+    },
+    "command_id": {
+      "type": "string",
+      "pattern": "^sab_[A-Za-z0-9_.:-]{3,150}$"
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "An exact configured canonical HTTPS origin, or explicit loopback HTTP origin. Evaluator verifies canonical form."
+    },
+    "lease_id": {
+      "type": "string",
+      "pattern": "^sab_lease_[A-Za-z0-9_.:-]{3,128}$"
+    },
+    "lease_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "revoker_id": {
+      "type": "string",
+      "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+    },
+    "revoker_public_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$"
+    }
+  },
+  "additionalProperties": false
+}

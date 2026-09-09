@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.claim_dossier.v1.schema.json",
+  "title": "SAB Claim Dossier v1",
+  "description": "A read-only observation of one stored seed submission, recorded history, and narrowly named checks. This schema does not confer authority, standing, truth, or independent operator control.",
+  "type": "object",
+  "required": [
+    "schema", "observed_at", "source", "authority_effect", "standing_effect",
+    "identity", "seed", "claim", "original_packet", "original_packet_json",
+    "evidence", "challenges", "corrections", "witness", "standing", "operators",
+    "checks", "finality", "reliance", "missing_data", "links"
+  ],
+  "properties": {
+    "schema": { "const": "sab.claim_dossier.v1" },
+    "publication_observation": {
+      "type": "object",
+      "required": [
+        "schema",
+        "observed_at",
+        "manifest_sha256",
+        "currentness"
+      ],
+      "properties": {
+        "schema": {
+          "const": "sab.public_read_observation.v1"
+        },
+        "currentness": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "unestablished"
+            }
+          }
+        }
+      },
+      "description": "Present on every public dossier. Validate this observation separately against /schemas/sab.public_read_observation.v1.schema.json. Optional for local database inspection."
+    },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "required": ["kind", "snapshot"],
+      "properties": {
+        "kind": { "const": "sab_v1_store" },
+        "snapshot": { "const": "single_read_transaction" }
+      }
+    },
+    "authority_effect": { "const": "none" },
+    "standing_effect": { "const": "none" },
+    "identity": {
+      "type": "object",
+      "required": ["seed_id", "claim_id", "packet_hash", "packet_schema", "version_meaning"],
+      "properties": {
+        "seed_id": { "type": "string" },
+        "claim_id": {},
+        "packet_hash": {},
+        "packet_schema": {},
+        "version_meaning": { "type": "string" }
+      }
+    },
+    "seed": { "type": "object", "required": ["seed_id", "stored_state"] },
+    "claim": {
+      "type": "object",
+      "required": ["text", "scope", "decision_context", "submitted", "current_corrected_text"],
+      "properties": {
+        "text": {}, "scope": {}, "decision_context": {}, "submitted": {},
+        "current_corrected_text": { "type": "null" }
+      },
+      "description": "Raw submitted fields may be absent or malformed. A historical statement field is not silently substituted for text, and correction events do not rewrite this claim."
+    },
+    "original_packet": {},
+    "original_packet_json": { "type": ["string", "null"] },
+    "evidence": {
+      "allOf": [{ "$ref": "#/$defs/collection" }],
+      "required": ["bytes_check"],
+      "properties": { "bytes_check": { "$ref": "#/$defs/check" } }
+    },
+    "challenges": {
+      "allOf": [{ "$ref": "#/$defs/collection" }],
+      "required": ["unresolved_count", "meaning"],
+      "properties": { "unresolved_count": { "type": "integer", "minimum": 0 } }
+    },
+    "corrections": { "$ref": "#/$defs/collection" },
+    "witness": {
+      "type": "object",
+      "required": ["events", "state_events", "head", "total_count", "complete", "availability", "checks"],
+      "properties": {
+        "events": { "type": "array", "items": { "type": "object" } },
+        "state_events": { "type": "array", "items": { "type": "object" } },
+        "head": { "type": ["string", "null"] },
+        "total_count": { "type": "integer", "minimum": 0 },
+        "complete": { "type": "boolean", "description": "All locally stored matching events were returned, without a silent limit; external completeness is not checked." },
+        "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } }
+      }
+    },
+    "standing": {
+      "allOf": [{ "$ref": "#/$defs/collection" }],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/standing_observation" } }
+      }
+    },
+    "operators": {
+      "type": "object",
+      "required": ["disclosures", "independently_verified", "independently_verified_count", "independence_status", "check"],
+      "properties": {
+        "disclosures": { "type": "array", "items": { "type": "object" } },
+        "independently_verified": { "type": "array", "maxItems": 0 },
+        "independently_verified_count": { "type": "null" },
+        "independence_status": { "const": "unknown" },
+        "check": { "$ref": "#/$defs/check" }
+      }
+    },
+    "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+    "finality": { "type": "object" },
+    "reliance": {
+      "type": "object",
+      "required": ["status", "reasons", "check"],
+      "properties": {
+        "status": { "const": "unestablished" },
+        "reasons": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "check": { "$ref": "#/$defs/check" }
+      }
+    },
+    "missing_data": { "type": "array", "items": { "type": "string" } },
+    "links": { "type": "object" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "standing_observation": {
+      "type": "object",
+      "required": ["status", "stored_status", "status_basis", "observed_at", "reliance_status"],
+      "description": "Stored status and signed lease/history retain their historical values. This reader performs no current private registry evaluation; active/canon cannot be an effective observation.",
+      "properties": {
+        "status": { "enum": ["unknown", "provisional", "challenged", "revoked", "expired", "compost", "superseded"] },
+        "stored_status": {},
+        "status_basis": {
+          "enum": ["stored", "invalid_stored_status", "invalid_expiry", "expiry_observation",
+                   "operator_control_unestablished", "currentness_unestablished", "clock_uncertain",
+                   "publication_not_configured", "publication_stale", "publication_future_observation",
+                   "local_expiry_observation"]
+        },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "reliance_status": { "const": "unestablished" },
+        "operator_control_eligible": { "const": false },
+        "current_standing_eligible": { "const": false }
+      }
+    },
+    "check": {
+      "type": "object",
+      "required": ["id", "label", "state", "detail"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "state": { "enum": ["passed", "failed", "not_checked"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "required": ["items", "availability"],
+      "properties": {
+        "items": { "type": "array", "items": { "type": "object" } },
+        "availability": { "type": "string" }
+      }
+    }
+  }
+}

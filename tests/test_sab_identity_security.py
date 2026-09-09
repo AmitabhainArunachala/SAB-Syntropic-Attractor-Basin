@@ -101,7 +101,9 @@ def _jwt_for_claims(claims: Dict[str, Any], header: Dict[str, Any] | None = None
     return f"{encode(header)}.{encode(claims)}.devsig"
 
 
-def test_register_route_returns_canonical_agent_identity(tmp_path, monkeypatch) -> None:
+def test_proved_identity_round_trips_through_legacy_compatibility_route(tmp_path, monkeypatch) -> None:
+    from keycontrol_fixtures import enroll_identity
+
     shared_db = tmp_path / "sab_authority.db"
     system_key = tmp_path / ".sab_system_ed25519.key"
     monkeypatch.setenv("SAB_AUTHORITY_DB_PATH", str(shared_db))
@@ -114,6 +116,8 @@ def test_register_route_returns_canonical_agent_identity(tmp_path, monkeypatch) 
 
     sk = SigningKey.generate()
     public_key = _public_key(sk)
+
+    proved = enroll_identity(client, sk, display_name="lane-four-agent")
     res = client.post("/api/agents/register", json={"name": "lane-four-agent", "public_key": public_key})
 
     assert res.status_code == 201, res.text
@@ -125,6 +129,10 @@ def test_register_route_returns_canonical_agent_identity(tmp_path, monkeypatch) 
     assert body["identity"]["identity_rail"] == "ed25519"
     assert body["identity"]["external_attestations"] == []
     assert body["identity"]["evidence_refs"] == [f"web_agents:{body['id']}"]
+    assert body["identity_status"] == "rehearsal_metadata"
+    assert body["key_control"]["status"] == "active"
+    assert body["identity"] == proved
+    assert body["authority_effect"] == body["standing_effect"] == "none"
 
 
 def test_canonical_signed_payload_verifies_and_rejects_tampering() -> None:
@@ -334,7 +342,7 @@ def test_external_attestations_and_moltbook_stub_never_grant_standing() -> None:
 def test_high_impact_witness_policy_rejects_self_witness_same_operator_and_concentration() -> None:
     _, claimant = _identity("claimant", operator_id="operator-a")
     _, same_operator_witness = _identity("same-operator", operator_id="operator-a")
-    _, independent_witness = _identity("independent", operator_id="operator-b")
+    _, differently_labelled_witness = _identity("different-label", operator_id="operator-b")
     _, second_same_witness = _identity("second-same", operator_id="operator-b")
 
     self_decision = validate_witness_independence(
@@ -353,17 +361,18 @@ def test_high_impact_witness_policy_rejects_self_witness_same_operator_and_conce
     assert not same_operator_decision.ok
     assert "same_operator_witness_forbidden_for_high_impact" in same_operator_decision.errors
 
-    independent_decision = validate_witness_independence(
+    labelled_decision = validate_witness_independence(
         claimant_identity=claimant,
-        witness_identity=independent_witness,
+        witness_identity=differently_labelled_witness,
         impact="high",
     )
-    assert independent_decision.ok
+    assert not labelled_decision.ok
+    assert "reviewed_operator_control_evidence_required" in labelled_decision.errors
 
     concentration_decision = validate_witness_independence(
         claimant_identity=claimant,
         witness_identity=second_same_witness,
-        existing_witness_identities=[independent_witness],
+        existing_witness_identities=[differently_labelled_witness],
         impact="standing",
         policy=OperatorConcentrationPolicy(max_high_impact_witnesses_per_operator=1),
     )
@@ -398,11 +407,10 @@ def test_unknown_operator_fails_closed_as_not_independent() -> None:
     assert "same_operator_witness_forbidden_for_high_impact" in decision.errors
 
 
-def test_quorum_tier_caps_at_provisional_below_three_operators() -> None:
+def test_quorum_tier_requires_reviewed_counts_for_claimant_and_witnesses() -> None:
     cross = [("cross_operator_unverified", "operator-a"), ("cross_operator_unverified", "operator-b")]
-    assert quorum_tier(witnesses=cross, system_operator_count=1) == "provisional"
-    assert quorum_tier(witnesses=cross, system_operator_count=2) == "provisional"
-    assert quorum_tier(witnesses=cross, system_operator_count=3) == "active"
+    for count in (1, 2, 3, 4, 1000):
+        assert quorum_tier(witnesses=cross, system_operator_count=count) == "provisional"
     assert quorum_tier(witnesses=[("self", "operator-a")], system_operator_count=3) == "provisional"
     assert quorum_tier(witnesses=[("undisclosed", "unknown")] * 3, system_operator_count=3) == "provisional"
     attested = [
@@ -410,4 +418,9 @@ def test_quorum_tier_caps_at_provisional_below_three_operators() -> None:
         ("cross_operator_attested", "operator-b"),
         ("cross_operator_attested", "operator-c"),
     ]
-    assert quorum_tier(witnesses=attested, system_operator_count=3) == "canon"
+    # Inputs here exercise tier arithmetic only. Production must derive them
+    # from current reviewed control evidence, never caller-provided grade strings.
+    assert quorum_tier(witnesses=attested[:2], system_operator_count=2) == "provisional"
+    assert quorum_tier(witnesses=attested[:2], system_operator_count=3) == "active"
+    assert quorum_tier(witnesses=attested, system_operator_count=3) == "active"
+    assert quorum_tier(witnesses=attested, system_operator_count=4) == "canon"

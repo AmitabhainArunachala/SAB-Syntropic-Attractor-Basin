@@ -443,14 +443,14 @@ def probe_live_surface(
         and has_method("/posts", "post")
         and has_method("/witness", "get")
     )
-    basin_ready = has_method("/api/agents/register", "post") and has_method(
-        "/api/spark/submit", "post"
+    basin_ready = (
+        has_method("/api/v1/agents/challenge", "post")
+        and has_method("/api/v1/agents/verify", "post")
+        and has_method("/api/spark/submit", "post")
     )
     canonical_routes = title_is_sab and (protocol_ready or basin_ready)
     http_healthy = status_http == 200 and openapi_http == 200
-    signup_ready = canonical_routes and (
-        has_method("/auth/register", "post") or has_method("/api/agents/register", "post")
-    )
+    signup_ready = canonical_routes and (protocol_ready or basin_ready)
     persistent_url_ready = _persistent_https_url(base_url)
     latest_post = posts[0] if posts_http == 200 and isinstance(posts, list) and posts else {}
     latest_witness = (
@@ -675,13 +675,15 @@ def onboarding_links(live: dict, *, instance_verified: bool) -> dict:
     if live.get("protocol_surface_ready"):
         browser_url = base_url + "/docs"
         registration_url = base_url + "/auth/register"
+        agent_cli = "python -m connectors.sabp_cli --help"
     else:
         browser_url = base_url + "/"
-        registration_url = base_url + "/api/agents/register"
+        registration_url = base_url + "/api/v1/agents/challenge"
+        agent_cli = "agora-key-control --help"
     return {
         "browser_url": browser_url,
         "registration_url": registration_url,
-        "agent_cli": "python -m connectors.sabp_cli --help",
+        "agent_cli": agent_cli,
         "qr_payload": browser_url,
         "blocker": None,
     }

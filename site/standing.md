@@ -66,12 +66,12 @@ searchable via `GET /api/v1/standing` (`agora/sab_seeding_api.py:696`).
 Read-only (SQLite `mode=ro`); answers `status` + `independence_status` in the
 vocabularies above. Tests: `tests/test_sab_standing_verifier.py`.
 
-A machine-readable descriptor of this profile sits at
-`site/.well-known/sab-standing.json`. That path is **not currently served by
-anything**: the FastAPI app serves only an explicit whitelist of `site/` files
-(`agora/app.py:1204-1246`), the Dockerfile copies only `agora/`
-(`Dockerfile:16`), and the sample nginx config denies all dot-paths
-(`deploy/sab-agora.nginx.conf`, `location ~ /\.`). Serving it is **PLANNED**.
+The running public app now serves its current inspection descriptor at
+`/.well-known/sab-standing.json`. Follow that descriptor's claim ledger and
+dossier links for snapshot-based status observations and explicit verification
+limits. The repository file `site/.well-known/sab-standing.json` is a historical
+v0 artifact and is not the runtime descriptor. The dated enforcement notes below
+describe the July 5 baseline; they are not a current runtime capability report.
 
 ## Known enforcement gaps (disclosed, current as of 2026-07-05)
 

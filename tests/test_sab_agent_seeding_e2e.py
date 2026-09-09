@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import pytest
 from fastapi.testclient import TestClient
+from operator_control_fixtures import adjudication_assessment
 
 try:
     from nacl.encoding import HexEncoder as _NaclHexEncoder
@@ -52,11 +53,17 @@ class EndpointContract:
 
 
 API_CONTRACTS: dict[str, EndpointContract] = {
-    "register_agent": EndpointContract(
+    "challenge_key": EndpointContract(
         "POST",
-        "/api/v1/agents/register",
+        "/api/v1/agents/challenge",
         201,
-        frozenset({"schema", "subject_id", "identity_ref", "public_key"}),
+        frozenset({"schema", "message", "canonicalization", "signature_algorithm"}),
+    ),
+    "verify_key": EndpointContract(
+        "POST",
+        "/api/v1/agents/verify",
+        200,
+        frozenset({"schema", "identity", "binding", "proof_id"}),
     ),
     "submit_seed": EndpointContract(
         "POST",
@@ -102,7 +109,7 @@ API_CONTRACTS: dict[str, EndpointContract] = {
         "POST",
         "/api/v1/standing/review",
         201,
-        frozenset({"state", "witness_head"}),
+        frozenset({"standing_id", "status", "witness_head"}),
     ),
 }
 
@@ -190,7 +197,7 @@ def _verify_agent_message(agent: AgentFixture, message: dict[str, Any], signatur
     return hmac.compare_digest(_sign_message(agent.signing_key, message), signature_hex)
 
 
-def _seed_packet(agent: AgentFixture, *, now: datetime | None = None) -> dict[str, Any]:
+def _seed_packet(agent: AgentFixture, *, now: datetime | None = None, authority_reference: dict | None = None) -> dict[str, Any]:
     created_at = now or _utc_now()
     packet: dict[str, Any] = {
         "schema": "sab.seed_packet.v1",
@@ -224,7 +231,7 @@ def _seed_packet(agent: AgentFixture, *, now: datetime | None = None) -> dict[st
             "disclosure": "self-attested lane 6 test agent",
             "concentration_attestation": "self_attested",
         },
-        "authority_lease": {
+        "authority_lease": authority_reference or {
             "lease_ref": "sab_lease_lane6_submit_seed",
             "scope": "Submit one public seed packet for witnessed challenge only.",
             "expires_at": _iso(created_at + timedelta(days=30)),
@@ -283,6 +290,7 @@ def _challenge_packet(
     challenger: AgentFixture,
     *,
     now: datetime | None = None,
+    authority_reference: dict | None = None,
 ) -> dict[str, Any]:
     created_at = now or _utc_now()
     packet: dict[str, Any] = {
@@ -306,6 +314,8 @@ def _challenge_packet(
         "deadline": _iso(created_at + timedelta(days=7)),
         "created_at": _iso(created_at),
     }
+    if authority_reference is not None:
+        packet["authority_lease"] = authority_reference
     challenge_material = copy.deepcopy(packet)
     challenge_hash = _sha256_obj(challenge_material)
     message = {
@@ -471,12 +481,19 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(db_path))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(key_path))
 
+    from authority_fixtures import provision_authority_policy
+    from operator_control_fixtures import provision_operator_policy
+    authority = provision_authority_policy(tmp_path, monkeypatch)
+    control = provision_operator_policy(tmp_path, monkeypatch)
     for mod_name in list(sys.modules):
         if mod_name == "agora" or mod_name.startswith("agora."):
             del sys.modules[mod_name]
 
     try:
-        return importlib.import_module("agora.app")
+        module = importlib.import_module("agora.app")
+        module.authority_test_fixture = authority
+        module.operator_control_test_fixture = control
+        return module
     except ImportError as exc:
         pytest.skip(f"agora.app runtime dependency missing for live API tests: {exc}")
     except RuntimeError as exc:
@@ -488,6 +505,8 @@ def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def client(sab_app):
     with TestClient(sab_app.app) as test_client:
+        sab_app.authority_test_fixture.enroll(test_client)
+        sab_app.operator_control_test_fixture.enroll(test_client)
         yield test_client
 
 
@@ -497,11 +516,12 @@ def _xfail_if_endpoint_missing(response, contract: EndpointContract) -> None:
 
 
 def _v1_register_or_xfail(client: TestClient, agent: AgentFixture) -> dict[str, Any]:
-    contract = API_CONTRACTS["register_agent"]
-    response = client.post(
-        contract.path,
-        json={
-            "schema": "sab.agent_identity.v1",
+    from keycontrol_fixtures import enroll_identity
+
+    return enroll_identity(
+        client,
+        agent.signing_key,
+        {
             "display_name": agent.label,
             "identity_rail": "ed25519",
             "public_key": agent.public_key,
@@ -515,11 +535,6 @@ def _v1_register_or_xfail(client: TestClient, agent: AgentFixture) -> dict[str, 
             "external_attestations": [],
         },
     )
-    _xfail_if_endpoint_missing(response, contract)
-    assert response.status_code == contract.success_status, response.text
-    body = response.json()
-    assert contract.required_response_keys <= set(body)
-    return body
 
 
 def _post_or_xfail(client: TestClient, contract: EndpointContract, path: str, payload: dict[str, Any]):
@@ -530,7 +545,8 @@ def _post_or_xfail(client: TestClient, contract: EndpointContract, path: str, pa
 
 def test_contract_matrix_names_all_lane6_endpoints_and_response_keys() -> None:
     assert {contract.path for contract in API_CONTRACTS.values()} == {
-        "/api/v1/agents/register",
+        "/api/v1/agents/challenge",
+        "/api/v1/agents/verify",
         "/api/v1/seeds",
         "/api/v1/seeds/{seed_id}",
         "/api/v1/seeds/{seed_id}/chain",
@@ -743,7 +759,10 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
     _v1_register_or_xfail(client, agent_a)
     _v1_register_or_xfail(client, agent_b)
 
-    seed = _seed_packet(agent_a)
+    seed_id = "sab_seed_lane6_scope_boundary"
+    client.authority.issue(client, agent_a.subject_id, seed_id, ["submit_seed", "respond_challenge"])
+    client.authority.issue(client, agent_b.subject_id, seed_id, ["submit_challenge"])
+    seed = _seed_packet(agent_a, authority_reference=client.authority.reference(agent_a.subject_id, seed_id))
     seed_response = _post_or_xfail(client, API_CONTRACTS["submit_seed"], "/api/v1/seeds", seed)
     assert seed_response.status_code == API_CONTRACTS["submit_seed"].success_status, seed_response.text
     seed_body = seed_response.json()
@@ -761,7 +780,7 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
     assert chain_body["verified"] is True
     assert [event["event_type"] for event in chain_body["events"][:1]] == ["submit"]
 
-    challenge = _challenge_packet(seed, agent_b)
+    challenge = _challenge_packet(seed, agent_b, authority_reference=client.authority.reference(agent_b.subject_id, seed_id))
     challenge_response = _post_or_xfail(
         client,
         API_CONTRACTS["challenge_seed"],
@@ -798,23 +817,84 @@ def test_api_v1_seed_challenge_correction_standing_e2e_contract(client: TestClie
     assert response.status_code == API_CONTRACTS["respond_challenge"].success_status
     assert API_CONTRACTS["respond_challenge"].required_response_keys <= set(response.json())
 
-    review_payload = {
-        "subject_seed_id": seed_id,
-        "requested_state": "provisional",
-        "scope": seed["claim"]["scope"],
-        "challenge_summary": [{"challenge_id": challenge_body["challenge_id"], "resolution": "corrected"}],
-        "witness_refs": [response.json()["witness_head"]],
-    }
+    from test_sab_seeding_api import (
+        _sign_challenge_action,
+        _sign_standing_review,
+        _sign_witness,
+        _standing_lease,
+    )
+
+    reviewer = _agent("agent-reviewer")
+    _v1_register_or_xfail(client, reviewer)
+    client.authority.issue(client, reviewer.subject_id, seed_id, ["adjudicate_challenge", "submit_witness_event", "request_standing_review"])
+    reviewed_at = _iso(_utc_now())
+    reason = {"value": "The recorded correction addresses the local scope objection.",
+              "operator_control_assessment": adjudication_assessment(
+                  client, seed_id, challenge_body["challenge_id"], reviewer.subject_id)}
+    resolution = client.post(
+        f"/api/v1/challenges/{challenge_body['challenge_id']}/reject",
+        json={
+            "actor_identity": reviewer.subject_id,
+            "created_at": reviewed_at,
+            "reason": reason,
+            "signature": _sign_challenge_action(
+                reviewer.signing_key,
+                action="reject",
+                challenge_id=challenge_body["challenge_id"],
+                actor_identity=reviewer.subject_id,
+                payload=reason,
+                created_at=reviewed_at,
+            ),
+        },
+    )
+    assert resolution.status_code == 201, resolution.text
+    prev_hash = client.get(f"/api/v1/seeds/{seed_id}/chain").json()["head"]
+    witness_payload = {"reason": "The explicit correction and resolution were inspected."}
+    witnessed_at = _iso(_utc_now())
+    witnessed = client.post(
+        "/api/v1/witness-events",
+        json={
+            "event_type": "affirm",
+            "actor_identity": reviewer.subject_id,
+            "subject_type": "seed",
+            "subject_id": seed_id,
+            "created_at": witnessed_at,
+            "prev_hash": prev_hash,
+            "payload": witness_payload,
+            "signature": _sign_witness(
+                reviewer.signing_key,
+                event_type="affirm",
+                subject_type="seed",
+                subject_id=seed_id,
+                payload=witness_payload,
+                prev_hash=prev_hash,
+                created_at=witnessed_at,
+            ),
+        },
+    )
+    assert witnessed.status_code == 201, witnessed.text
+    lease = _standing_lease(
+        standing_id="sab_standing_lane6_signed_review",
+        seed_id=seed_id,
+        claim_id=seed["claim"]["claim_id"],
+        reviewer_id=reviewer.subject_id,
+    )
+    lease["scope"] = seed["claim"]["scope"]
+    lease["challenge_summary"] = [
+        {"challenge_id": challenge_body["challenge_id"], "resolution": "rejected_after_correction"}
+    ]
+    lease["witness_quorum"]["witnesses"] = [witnessed.json()["event_id"]]
     standing = _post_or_xfail(
         client,
         API_CONTRACTS["standing_review"],
         "/api/v1/standing/review",
-        review_payload,
+        _sign_standing_review(reviewer.signing_key, lease, reviewer.subject_id),
     )
-    assert standing.status_code == API_CONTRACTS["standing_review"].success_status
+    assert standing.status_code == API_CONTRACTS["standing_review"].success_status, standing.text
     standing_body = standing.json()
     assert API_CONTRACTS["standing_review"].required_response_keys <= set(standing_body)
-    assert standing_body["state"] in {"standing_active", "compost"}
+    assert standing_body["status"] == "provisional"
+    assert client.get(f"/api/v1/seeds/{seed_id}").json()["state"] == "standing_active"
 
 
 @pytest.mark.parametrize(
@@ -845,7 +925,9 @@ def test_api_v1_seed_submit_adversarial_rejection_contract(
     del case_name
     agent = _agent("agent-a")
     _v1_register_or_xfail(client, agent)
-    packet = _seed_packet(agent)
+    seed_id = "sab_seed_lane6_scope_boundary"
+    client.authority.issue(client, agent.subject_id, seed_id, ["submit_seed"])
+    packet = _seed_packet(agent, authority_reference=client.authority.reference(agent.subject_id, seed_id))
     mutate(packet)
 
     response = _post_or_xfail(client, API_CONTRACTS["submit_seed"], "/api/v1/seeds", packet)

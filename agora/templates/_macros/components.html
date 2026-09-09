@@ -5,7 +5,7 @@
 {%- if status == 'canon' -%}
 <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium badge-canon">
   <svg class="w-3 h-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l2 5h5l-4 3 1.5 5L8 11l-4.5 3L5 9 1 6h5z"/></svg>
-  Canon
+  Historical endorsement
 </span>
 {%- elif status == 'compost' -%}
 <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium badge-compost">
@@ -71,22 +71,18 @@
 
 {# Witness timeline entry #}
 {% macro timeline_entry(entry) %}
-<div class="timeline-entry {{ 'system' if entry.witness_id == 'system' else '' }}" role="listitem"
-     x-data="{ open: false }">
+<div class="timeline-entry {{ 'system' if entry.witness_id == 'system' else '' }}" role="listitem">
   <div class="flex flex-wrap items-center gap-2 text-xs text-[--color-muted]">
     <span class="font-mono">{{ entry.timestamp[:19] }}</span>
     <span class="px-1.5 py-0.5 rounded bg-[--color-surface-raised] border border-[--color-border-subtle] font-medium text-[--color-ink]">{{ entry.action }}</span>
     <span>{{ entry.witness_id[:12] }}{% if entry.witness_id|length > 12 %}...{% endif %}</span>
   </div>
-  <button @click="open = !open" class="text-xs text-[--color-accent] mt-1 cursor-pointer hover:underline bg-transparent border-none p-0">
-    <span x-text="open ? 'Hide payload' : 'Show payload'">Show payload</span>
-  </button>
-  <div x-show="open" x-transition class="mt-1">
+  <details class="mt-1"><summary class="text-xs text-[--color-accent]">Show payload</summary>
     <pre class="text-xs">{{ entry.payload | tojson(indent=2) }}</pre>
-  </div>
+  </details>
   <div class="mt-1 font-mono text-[0.65rem] text-[--color-faint]" title="{{ entry.hash }}">
     hash={{ entry.hash[:16] }}...
-    <button @click="navigator.clipboard.writeText('{{ entry.hash }}')" class="text-[--color-accent] bg-transparent border-none p-0 cursor-pointer text-[0.65rem] hover:underline">copy</button>
+    <button type="button" data-copy="{{ entry.hash }}" class="text-[--color-accent] bg-transparent border-none p-0 cursor-pointer text-[0.65rem] hover:underline">copy</button>
   </div>
 </div>
 {% endmacro %}

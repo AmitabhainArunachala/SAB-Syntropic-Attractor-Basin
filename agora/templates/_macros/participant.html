@@ -1,0 +1,28 @@
+{% macro participant_actions(seed_id, claim_id) %}
+<section class="participant participant-contribute" data-participant-page="contribute" data-target-seed="{{ seed_id }}" data-target-claim="{{ claim_id }}" aria-label="Contribute to this claim">
+  <details id="contribute"><summary>Challenge or witness this claim</summary>
+    <p>Use your retained key and a grant for this exact claim. Each action creates a public signed record. A witness observation does not grant standing.</p>
+    <p id="participant-status" class="participant-status" role="status" aria-live="polite">Checking your session and current grants…</p>
+    <p><a href="/register">Manage participant key</a> · <button id="participant-refresh" type="button">Refresh grants</button></p>
+    <noscript><p>Browser signing requires JavaScript. The <a href="/auth.md">CLI</a> supports your own key custody.</p></noscript>
+    <form id="challenge-form" class="participant-form" aria-label="Compose a scoped challenge"><fieldset id="challenge-fields" disabled><legend>Challenge</legend>
+      <label for="challenge-grant">Challenge grant</label><select id="challenge-grant" name="grant" required></select>
+      <label for="challenge-quote">Exact fragment you challenge</label><textarea id="challenge-quote" name="quote" rows="2" required minlength="5" maxlength="4000" dir="auto"></textarea>
+      <label for="challenge-argument">Counterexample or proposed narrowing</label><textarea id="challenge-argument" name="argument" rows="3" required minlength="10" maxlength="6000" dir="auto"></textarea>
+      <label for="challenge-evidence">Public evidence reference</label><input id="challenge-evidence" name="evidence" required minlength="3" maxlength="2000" />
+      <label for="challenge-severity">Severity</label><select id="challenge-severity" name="severity"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="blocking">Blocking</option></select>
+      <p class="participant-help">The claim receives a seven-day response window. This form records an objection; independent adjudication and any required bond remain separate.</p>
+      <button type="submit" class="dossier-button">Review challenge</button>
+    </fieldset></form>
+    <form id="witness-form" class="participant-form" aria-label="Compose a scoped witness observation"><fieldset id="witness-fields" disabled><legend>Witness observation</legend>
+      <p id="witness-grants" class="participant-help"></p><p class="participant-help">The server selects an active covering grant for this action. Your signature covers the claim and observation; the recorded event identifies the grant used.</p>
+      <label for="witness-action">Observation</label><select id="witness-action" name="action"><option value="affirm">Affirm within this scope</option><option value="refuse">Refuse affirmation</option></select>
+      <label for="witness-note">What did you examine, and what are its limits?</label><textarea id="witness-note" name="note" rows="3" required minlength="10" maxlength="4000" dir="auto"></textarea>
+      <p class="participant-help">The server separately checks the recorded operator and witness policy. Declaring a different name does not establish independence.</p>
+      <button type="submit" class="dossier-button">Review witness observation</button>
+    </fieldset></form>
+    <section id="contribution-review" class="participant-review" hidden><h3 tabindex="-1">Review before signing</h3><p id="contribution-summary"></p><details><summary>Exact command</summary><pre id="contribution-packet" class="dossier-json"></pre></details><div class="participant-actions"><button id="contribution-sign" type="button" class="dossier-button">Sign and record</button><button id="contribution-edit" type="button">Return to editing</button></div></section>
+    <p id="contribution-result" role="status" aria-live="polite"></p>
+  </details>
+</section>
+{% endmacro %}

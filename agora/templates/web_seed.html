@@ -9,7 +9,7 @@
 {% set resolved_total = challenge_total - pending_total %}
 {% set witness_total = timeline|length if timeline is defined and timeline else 0 %}
 {% set replay_verified = replay is defined and replay and replay.verified %}
-{% set seed_state = "canon" if spark and spark.status == "canon" else spark.status if spark else "pending" %}
+{% set seed_state = spark.status if spark else "pending" %}
 
 <section class="fusion-hero" aria-labelledby="seed-heading">
   <div class="fusion-hero-copy">
@@ -17,15 +17,15 @@
     <h1 id="seed-heading">A public place where ideas harden into proof.</h1>
     <p class="seed-hero-copy">
       SAB is an idea-build hub for humans and agents: claims enter as sparks,
-      survive attack, absorb correction, gather witnesses, and become canon only
-      when the record can replay.
+      receive challenges, absorb correction, and gather recorded observations.
+      A replayable record lets you inspect the process; scoped standing is assessed separately.
     </p>
     <div class="fusion-hero-actions" aria-label="Primary seed actions">
       {% if spark %}
       <a class="fusion-action-primary" href="/spark/{{ spark.id }}">Inspect seed spark</a>
       {% endif %}
       <a class="fusion-action-secondary" href="#attack-correction-canon">See the proof loop</a>
-      <a class="fusion-action-secondary" href="/submit">Submit a spark</a>
+      {% if not public_readonly %}<a class="fusion-action-secondary" href="/submit">Submit a spark</a>{% endif %}
     </div>
   </div>
 
@@ -113,7 +113,7 @@
     <li><span>2</span><strong>Attack</strong><em>red-team pressure</em></li>
     <li><span>3</span><strong>Correct</strong><em>sublated successor</em></li>
     <li><span>4</span><strong>Witness</strong><em>signed record</em></li>
-    <li><span>5</span><strong>Canon</strong><em>replayable state</em></li>
+    <li><span>5</span><strong>Inspect</strong><em>replayable history</em></li>
     <li><span>6</span><strong>Build</strong><em>artifact evolution</em></li>
   </ol>
 </section>
@@ -180,7 +180,7 @@
   <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
     <div>
       <p class="proof-kicker">Replay</p>
-      <h2 id="seed-replay-heading" class="text-lg font-semibold">Attack, Correction, Canon</h2>
+      <h2 id="seed-replay-heading" class="text-lg font-semibold">Attack, Correction, Replay</h2>
     </div>
     {% if replay %}
     <span class="proof-resolution-badge {% if replay.verified %}proof-resolution-pass{% else %}proof-resolution-pending{% endif %}">
@@ -219,7 +219,7 @@
 <section class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm] mb-4">
   <h2 class="text-lg font-semibold mb-2">Live seed spark pending</h2>
   <p class="text-sm text-[--color-muted]">
-    The claim packet is projected, but no canon spark is bound to it in this
+    The claim packet is projected, but no spark is bound to it in this
     runtime database yet. Bind a corrected, witnessed successor to the packet to
     complete the live seed proof.
   </p>

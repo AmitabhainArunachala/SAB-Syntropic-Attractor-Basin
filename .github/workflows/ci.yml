@@ -29,7 +29,19 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install -e .
-        pip install pytest pytest-asyncio pytest-cov
+        pip install pytest pytest-asyncio pytest-cov jsonschema
+
+    - name: Set up Node 22 for browser protocol checks
+      if: matrix.python-version == '3.10'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Verify browser cryptography against Python 3.10
+      if: matrix.python-version == '3.10'
+      run: |
+        node tests/browser/participant_flow.mjs --test-sanitizer
+        SAB_TEST_PYTHON="$(command -v python)" node --test tests/browser/test_participant_crypto.mjs
 
     - name: Validate NAME_REGISTRY
       run: |
@@ -102,6 +114,107 @@ jobs:
         PY
         safety check -r requirements.txt -r requirements-dev.txt
 
+  distribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Set up Node 22 for installed browser rehearsals
+      if: matrix.python-version == '3.10'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - name: Install isolated Playwright and Chromium test dependencies
+      if: matrix.python-version == '3.10'
+      run: |
+        set -euo pipefail
+        npm install --prefix "$RUNNER_TEMP/sab-playwright" --no-audit --no-fund playwright@1.62.1
+        PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/sab-chromium" \
+          node "$RUNNER_TEMP/sab-playwright/node_modules/playwright/cli.js" install --with-deps chromium
+        echo "SAB_BROWSER_OUTPUT=$HOME/.dharma/sab/browser-rehearsals/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+    - name: Build wheel and rebuild from source distribution
+      run: |
+        set -euo pipefail
+        python -m pip install build
+        python -m build --sdist --wheel --outdir "$RUNNER_TEMP/sab-dist"
+        python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/sab-sdist-wheel" "$RUNNER_TEMP/sab-dist/"*.tar.gz
+    - name: Inspect installed artifacts and rehearse recovery, keys, authority and operator control
+      run: |
+        set -euo pipefail
+        cd "$RUNNER_TEMP"
+        for kind in direct sdist; do
+          if [ "$kind" = direct ]; then
+            wheels=("$RUNNER_TEMP/sab-dist/"*.whl)
+          else
+            wheels=("$RUNNER_TEMP/sab-sdist-wheel/"*.whl)
+          fi
+          wheel="${wheels[0]}"
+          venv="$RUNNER_TEMP/sab-installed-$kind"
+          python -m venv "$venv"
+          "$venv/bin/python" -m pip install "$wheel"
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/check_installed_public.py" \
+            --source "$GITHUB_WORKSPACE" --wheel "$wheel" --output "$RUNNER_TEMP/sab-inspection-$kind"
+          wheel_sha=$(sha256sum "$wheel" | cut -d ' ' -f 1)
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_public_recovery.py" \
+            --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-recovery-$kind"
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_key_control.py" \
+            --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-key-control-$kind"
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_authority.py" \
+            --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-authority-$kind"
+          "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_operator_control.py" \
+            --artifact-sha256 "$wheel_sha" --output "$RUNNER_TEMP/sab-operator-control-$kind"
+          if [ "${{ matrix.python-version }}" = '3.10' ]; then
+            # Installed public inspection above used runtime dependencies only.
+            # Browser schema verification explicitly adds this development tool.
+            "$venv/bin/python" -m pip install jsonschema
+            "$venv/bin/python" -I -B "$GITHUB_WORKSPACE/scripts/rehearse_participant_browser.py" \
+              --installed --source-root "$GITHUB_WORKSPACE" \
+              --playwright-module "$RUNNER_TEMP/sab-playwright/node_modules/playwright" \
+              --browser-cache "$RUNNER_TEMP/sab-chromium" \
+              --runtime-root "$SAB_BROWSER_OUTPUT/$kind"
+          fi
+        done
+    - name: Retain synthetic artifact verification receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: public-distribution-${{ matrix.python-version }}
+        path: |
+          ${{ runner.temp }}/sab-inspection-*/receipt.json
+          ${{ runner.temp }}/sab-recovery-*/receipt.json
+          ${{ runner.temp }}/sab-recovery-*/*.log
+          ${{ runner.temp }}/sab-key-control-*/receipt.json
+          ${{ runner.temp }}/sab-key-control-*/*.log
+          ${{ runner.temp }}/sab-authority-*/receipt.json
+          ${{ runner.temp }}/sab-authority-*/*.log
+          ${{ runner.temp }}/sab-operator-control-*/receipt.json
+          ${{ runner.temp }}/sab-operator-control-*/*.log
+
+    - name: Retain public browser verification receipts and screenshots
+      if: always() && matrix.python-version == '3.10'
+      uses: actions/upload-artifact@v4
+      with:
+        name: participant-browser-distribution-3.10
+        # Exact sanitized records/success captures only. Raw process logs,
+        # failure screenshots, profiles, database and system keys stay private.
+        path: |
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/bridge-receipt.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/browser-observations.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/desktop-claim-review.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/mobile-key.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/direct/mobile-witness-review.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/bridge-receipt.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/browser-observations.json
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/desktop-claim-review.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/mobile-key.png
+          ${{ env.SAB_BROWSER_OUTPUT }}/sdist/mobile-witness-review.png
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -122,6 +235,7 @@ jobs:
       run: |
         docker build --build-arg "SAB_BUILD_SHA=${GITHUB_SHA}" -t dharmic-agora:test .
         docker run --rm dharmic-agora:test python -c "import agora; print('Import OK')"
+        docker build --target public --build-arg "SAB_BUILD_SHA=${GITHUB_SHA}" -t dharmic-agora:public-test .
 
     - name: Deploy smoke check
       run: |
@@ -143,3 +257,19 @@ jobs:
         python scripts/check_deployment_parity.py \
           http://127.0.0.1:18080 \
           --expected-build-sha "${GITHUB_SHA}"
+
+    - name: Public inspection smoke check
+      run: |
+        set -euo pipefail
+        docker run -d --rm --read-only --name sab-public-smoke -p 18081:8000 dharmic-agora:public-test
+        cleanup() {
+          docker rm -f sab-public-smoke >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+        for _ in $(seq 1 60); do
+          if curl -fsS http://127.0.0.1:18081/health >/dev/null; then
+            break
+          fi
+          sleep 1
+        done
+        python scripts/check_public_inspection.py http://127.0.0.1:18081

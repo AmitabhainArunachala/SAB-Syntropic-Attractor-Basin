@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.authority_issuance_witness.v1.schema.json",
+  "title": "sab.authority_issuance_witness.v1",
+  "description": "Closed signing data. Shape validation alone proves no authority. The evaluator verifies exact configured pins, real Ed25519 signatures, key control, action/resource bounds, logical time intervals and immutable history before any permission is usable.",
+  "type": "object",
+  "required": [
+    "schema",
+    "event_id",
+    "audience",
+    "policy_hash",
+    "lease_sha256",
+    "witness_id",
+    "witness_public_key",
+    "observed_at",
+    "signature"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sab.authority_issuance_witness.v1"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^sab_[A-Za-z0-9_.:-]{3,150}$"
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "An exact configured canonical HTTPS origin, or explicit loopback HTTP origin. Evaluator verifies canonical form."
+    },
+    "policy_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "lease_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "witness_id": {
+      "type": "string",
+      "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+    },
+    "witness_public_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    }
+  },
+  "additionalProperties": false
+}

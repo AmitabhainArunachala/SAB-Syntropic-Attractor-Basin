@@ -3,8 +3,8 @@
 
 Runs on a launchd schedule (com.dharma.sab-agent-tick). Each tick:
   1. health-checks the SAB server,
-  2. reconciles lane packet files into the API store (re-signing with local
-     keys where the legacy file signature does not match the API contract),
+  2. verifies an existing issued grant against an explicit local policy pin,
+     then reconciles permitted lane packets using the local signer,
   3. reports every seed's lifecycle state and challenge window,
   4. writes a digest to ~/.dharma/sab_agent/LATEST.md and appends log.jsonl.
 
@@ -17,6 +17,7 @@ Hard policy (AGENT_CONSTITUTION.md + SAB_MASTER_VISION_V1.md §6):
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -77,28 +78,115 @@ def find_key(agent_id: str):
 
 
 def signing_key(path: Path):
-    from nacl.signing import SigningKey
+    from agora.key_control_client import load_signing_key
 
-    return SigningKey(bytes.fromhex(path.read_text().strip()))
+    return load_signing_key(path)
 
 
 def ensure_registered(agent_id: str, sk) -> bool:
-    status, _ = api(f"/api/v1/agents/me/home?subject_id={agent_id}")
-    if status == 200:
-        return True
-    status, resp = api("/api/v1/agents/register", {
+    from agora.key_control_client import (
+        KeyControlClientError,
+        active_binding_matches,
+        enroll,
+        read_home,
+    )
+
+    registration = {
         "public_key": sk.verify_key.encode().hex(),
         "display_name": agent_id.removeprefix("agent_").replace("_", "-"),
         "subject_id": agent_id,
-        "controller": "sab_agent_tick",
+        "controller": "operator",
         "operator_backing": {
-            "operator_ref": OPERATOR,
+            "operator_id": OPERATOR,
+            "operator_kind": "human",
             "disclosure": "Founding operator's fleet; not independent of other fleet identities.",
-            "concentration_attestation": "self_attested",
+            "backing_count_attestation": "self_attested",
         },
-    })
-    log_event({"kind": "register", "agent_id": agent_id, "status": status})
-    return status == 201
+    }
+    try:
+        home = read_home(BASE, agent_id)
+    except KeyControlClientError as exc:
+        if exc.status_code != 404:
+            log_event(
+                {
+                    "kind": "register",
+                    "agent_id": agent_id,
+                    "result": exc.reason,
+                    "status": exc.status_code,
+                }
+            )
+            return False
+        home = {}
+    if active_binding_matches(home, registration, sk):
+        return True
+    binding = home.get("key_control")
+    if isinstance(binding, dict) and binding.get("status") in {
+        "revoked",
+        "superseded",
+        "inconsistent",
+    }:
+        log_event({"kind": "register", "agent_id": agent_id, "result": "binding_not_active"})
+        return False
+    try:
+        receipt = enroll(BASE, registration, sk)
+    except KeyControlClientError as exc:
+        log_event(
+            {
+                "kind": "register",
+                "agent_id": agent_id,
+                "result": exc.reason,
+                "status": exc.status_code,
+            }
+        )
+        return False
+    log_event(
+        {
+            "kind": "register",
+            "agent_id": agent_id,
+            "result": "key_control_proved",
+            "proof_id": receipt["proof_id"],
+        }
+    )
+    return True
+
+
+def inspect_submission_grant(packet: dict) -> bool:
+    """Verify an existing grant under an explicit pin before loading a signer.
+
+    This observation never grants permission. The server must recheck the grant
+    in the submission transaction; the tick cannot create or change a lease.
+    """
+    from agora.authority import AuthorityError, lease_reference, load_authority_policy
+    from agora.authority_client import AuthorityClientError, inspect_lease
+    from agora.key_control_client import KeyControlClientError
+
+    try:
+        policy = load_authority_policy(
+            os.environ.get("SAB_AUTHORITY_POLICY_PATH"),
+            os.environ.get("SAB_AUTHORITY_POLICY_SHA256"),
+        )
+        if policy is None:
+            return False
+        reference = packet.get("authority_lease")
+        if not isinstance(reference, dict):
+            return False
+        observed = inspect_lease(BASE, reference.get("lease_ref"), policy)
+        lease = observed["lease"]
+        now = datetime.now(timezone.utc)
+        def stamp(value):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return (
+            observed["reported_status"] == "active"
+            and lease["subject_id"] == packet["claimant_identity"]["subject_id"]
+            and lease["target_seed_id"] == packet["seed_id"]
+            and "submit_seed" in lease["allowed_actions"]
+            and reference == lease_reference(observed)
+            and stamp(policy["not_before"]) <= now < stamp(policy["expires_at"])
+            and stamp(lease["issued_at"]) <= now < stamp(lease["expires_at"])
+        )
+    except (AuthorityError, AuthorityClientError, KeyControlClientError,
+            ValueError, TypeError, KeyError, OSError):
+        return False
 
 
 def reconcile_packet(path: Path):
@@ -112,6 +200,8 @@ def reconcile_packet(path: Path):
         return {"packet": path.name, "action": "none", "reason": "already in store"}
 
     claimant = (packet.get("claimant_identity") or {}).get("subject_id", "")
+    if not inspect_submission_grant(packet):
+        return {"packet": path.name, "action": "skip", "reason": "existing scoped authority grant required"}
     key_path = find_key(claimant)
     if key_path is None:
         return {"packet": path.name, "action": "skip", "reason": f"no local key for {claimant}"}

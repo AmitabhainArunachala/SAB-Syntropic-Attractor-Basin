@@ -1,9 +1,12 @@
 """Regression lock for the Demonstration Zero dogfood loop (2026-07-05).
 
-Replays the exact API sequence receipted under
+Extends the historical API sequence receipted under
 docs/lanes/sab-agent-seeding-v1/reviews/2026-07-05-sab-review-recovery/dogfood/
 against a temporary database: register x3 -> seed -> challenge -> respond
-(scope narrowing) -> witness affirm -> chain verify -> standing lease review.
+(scope narrowing) -> explicit adjudication -> witness affirm -> chain verify
+-> standing lease review, now under authentic exact seed permissions and an
+explicitly synthetic control review for adjudication. This runner owns every
+fixture key; no actual cross-operator independence follows.
 
 D1 (registration/canonical identity round trip) and D2
 (witness_plan.forbidden_witnesses enforcement) are locked as real regression
@@ -20,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from operator_control_fixtures import adjudication_assessment
 
 nacl_signing = pytest.importorskip("nacl.signing")
 from nacl.encoding import HexEncoder  # noqa: E402
@@ -60,23 +64,34 @@ class _Agent:
 def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(tmp_path / "dogfood_regression.db"))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / ".dogfood_system_ed25519.key"))
+    from authority_fixtures import provision_authority_policy
+    from operator_control_fixtures import provision_operator_policy
+    authority = provision_authority_policy(tmp_path, monkeypatch)
+    control = provision_operator_policy(tmp_path, monkeypatch)
     for mod_name in list(sys.modules):
         if mod_name == "agora" or mod_name.startswith("agora."):
             del sys.modules[mod_name]
-    return importlib.import_module("agora.app")
+    module = importlib.import_module("agora.app")
+    module.authority_test_fixture = authority
+    module.operator_control_test_fixture = control
+    return module
 
 
 @pytest.fixture
 def client(sab_app):
     with TestClient(sab_app.app) as test_client:
+        sab_app.authority_test_fixture.enroll(test_client)
+        sab_app.operator_control_test_fixture.enroll(test_client)
         yield test_client
 
 
 def _register(client: TestClient, agent: _Agent, label: str) -> dict[str, Any]:
-    response = client.post(
-        "/api/v1/agents/register",
-        json={
-            "schema": "sab.agent_identity.v1",
+    from keycontrol_fixtures import enroll_identity
+
+    body = enroll_identity(
+        client,
+        agent.key,
+        {
             "display_name": label,
             "identity_rail": "ed25519",
             "public_key": agent.public_key,
@@ -90,8 +105,6 @@ def _register(client: TestClient, agent: _Agent, label: str) -> dict[str, Any]:
             "external_attestations": [],
         },
     )
-    assert response.status_code == 201, response.text
-    body = response.json()
     agent.subject_id = body["subject_id"]
     return body
 
@@ -109,15 +122,7 @@ def _submit_seed(client: TestClient, claimant: _Agent, seed_id: str, claim_id: s
             "scope": "this repo, this venv, one machine, single operator",
         },
         "claimant_identity": {"subject_id": claimant.subject_id},
-        "authority_lease": {
-            "lease_ref": f"sab_lease_{seed_id}_submit",
-            "subject_id": claimant.subject_id,
-            "purpose": "submit_seed",
-            "scope": "submit one regression seed for witnessed challenge only",
-            "expires_at": _iso(_now() + timedelta(days=14)),
-            "revoker": "operator_dogfood_regression",
-            "challenge_path": f"/api/v1/seeds/{seed_id}/challenges",
-        },
+        "authority_lease": client.authority.reference(claimant.subject_id, seed_id),
         "challenge_plan": {"required": True, "challenge_window": "P7D"},
         "witness_plan": {
             "required_roles": ["challenger", "witness"],
@@ -175,6 +180,9 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
         _register(client, agent, f"dogfood-regression-{label}")
 
     seed_id = "sab_seed_dogfood_regression"
+    client.authority.issue(client, claimant.subject_id, seed_id, ["submit_seed", "respond_challenge"])
+    client.authority.issue(client, challenger.subject_id, seed_id, ["submit_challenge"])
+    client.authority.issue(client, witness.subject_id, seed_id, ["adjudicate_challenge", "submit_witness_event", "request_standing_review"])
     claim_id = "sab_claim_dogfood_regression"
     seed_body = _submit_seed(client, claimant, seed_id, claim_id)
     assert seed_body["state"] == "pending_seed"
@@ -187,6 +195,7 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
         "target_seed_id": seed_id,
         "target_claim_id": claim_id,
         "challenger_identity": challenger.subject_id,
+        "authority_lease": client.authority.reference(challenger.subject_id, seed_id),
         "challenge_type": "scope",
         "challenge_text": (
             "This claim is too broad unless scoped to local repo/test environment and does not "
@@ -235,6 +244,18 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
     assert respond.status_code == 201, respond.text
     assert respond.json()["seed_state"] == "corrected"
 
+    adjudication = {"value": "The scoped correction resolves the challenged breadth in this rehearsal",
+                    "operator_control_assessment": adjudication_assessment(
+                        client, seed_id, challenge_id, witness.subject_id)}
+    reviewed_at = _iso(_now())
+    adjudication_message = {"kind": "sab_challenge_reject", "challenge_id": challenge_id,
+                           "actor_identity": witness.subject_id, "payload_sha256": _sha256_obj(adjudication),
+                           "created_at": reviewed_at}
+    resolved = client.post(f"/api/v1/challenges/{challenge_id}/reject", json={
+        "actor_identity": witness.subject_id, "reason": adjudication, "created_at": reviewed_at,
+        "signature": witness.sign(adjudication_message),
+    })
+    assert resolved.status_code == 201, resolved.text
     chain = client.get(f"/api/v1/seeds/{seed_id}/chain").json()
     witness_body = _witness_event_body(
         witness,
@@ -248,7 +269,7 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
 
     verify = client.get(f"/api/v1/witness/verify?seed_id={seed_id}").json()
     assert verify["verified"] is True
-    assert verify["entry_count"] == 4  # submit, challenge, response, affirm
+    assert verify["entry_count"] == 5  # submit, challenge, response, adjudication, affirm
 
     issued_at = _iso(_now())
     standing_id = "sab_standing_dogfood_regression"
@@ -282,9 +303,9 @@ def test_dogfood_loop_seed_challenge_respond_witness_standing(client: TestClient
         json={"standing_lease": lease, "reviewer_identity": witness.subject_id, "created_at": issued_at},
     )
     assert standing.status_code == 201, standing.text
-    # Independence Law cap (SAB_MASTER_VISION_V1 §6): one operator => provisional.
+    # No complete signed standing basis: the adjudication review cannot promote it.
     assert standing.json()["status"] == "provisional"
-    assert standing.json()["issued_under"]["rehearsal_flag"] == "single_operator_rehearsal"
+    assert standing.json()["issued_under"]["rehearsal_flag"] == "unestablished_operator_control"
 
     final_seed = client.get(f"/api/v1/seeds/{seed_id}").json()
     assert final_seed["state"] == "standing_active"
@@ -302,34 +323,32 @@ def test_register_response_round_trips_through_canonical_identity_model(client: 
     assert identity.identity_ref == f"sab_identity_{identity.subject_id}"
 
 
-def test_register_preserves_explicit_named_legacy_subject(client: TestClient) -> None:
+def test_register_preserves_existing_named_legacy_subject(client: TestClient, sab_app) -> None:
     from agora.sab_identity import AgentIdentityV1
+    from keycontrol_fixtures import enroll_identity, historical_identity
 
     agent = _Agent()
     legacy_subject = "agent_claude_fable_5"
     legacy_ref = f"sab_identity_{legacy_subject}"
-    response = client.post(
-        "/api/v1/agents/register",
-        json={
-            "schema": "sab.agent_identity.v1",
-            "subject_id": legacy_subject,
-            "identity_ref": legacy_ref,
-            "display_name": "Fable legacy identity",
-            "identity_rail": "ed25519",
-            "public_key": agent.public_key,
-            "controller": "operator",
-            "operator_backing": {
-                "operator_id": "operator_dogfood_regression",
-                "operator_kind": "human",
-                "disclosure": "explicit legacy subject compatibility fixture",
-                "backing_count_attestation": "self_attested",
-            },
-            "external_attestations": [],
+    registration = {
+        "subject_id": legacy_subject,
+        "identity_ref": legacy_ref,
+        "display_name": "Fable legacy identity",
+        "identity_rail": "ed25519",
+        "public_key": agent.public_key,
+        "controller": "operator",
+        "operator_backing": {
+            "operator_id": "operator_dogfood_regression",
+            "operator_kind": "human",
+            "disclosure": "explicit legacy subject compatibility fixture",
+            "backing_count_attestation": "self_attested",
         },
-    )
-
-    assert response.status_code == 201, response.text
-    identity = AgentIdentityV1.model_validate(response.json())
+        "external_attestations": [],
+    }
+    before = historical_identity(sab_app, registration)
+    proved = enroll_identity(client, agent.key, registration)
+    assert proved == before
+    identity = AgentIdentityV1.model_validate(proved)
     assert identity.subject_id == legacy_subject
     assert identity.identity_ref == legacy_ref
 
@@ -338,21 +357,23 @@ def test_register_rejects_noncanonical_ed25519_subject_alias(client: TestClient)
     agent = _Agent()
     obsolete_subject = f"agent_ed25519_{hashlib.sha256(agent.public_key.encode()).hexdigest()[:16]}"
     response = client.post(
-        "/api/v1/agents/register",
+        "/api/v1/agents/challenge",
         json={
-            "schema": "sab.agent_identity.v1",
-            "subject_id": obsolete_subject,
-            "display_name": "obsolete sixteen character identity",
-            "identity_rail": "ed25519",
-            "public_key": agent.public_key,
-            "controller": "operator",
-            "operator_backing": {
-                "operator_id": "operator_dogfood_regression",
-                "operator_kind": "human",
-                "disclosure": "negative canonical namespace fixture",
-                "backing_count_attestation": "self_attested",
+            "action": "register",
+            "registration": {
+                "subject_id": obsolete_subject,
+                "display_name": "obsolete sixteen character identity",
+                "identity_rail": "ed25519",
+                "public_key": agent.public_key,
+                "controller": "operator",
+                "operator_backing": {
+                    "operator_id": "operator_dogfood_regression",
+                    "operator_kind": "human",
+                    "disclosure": "negative canonical namespace fixture",
+                    "backing_count_attestation": "self_attested",
+                },
+                "external_attestations": [],
             },
-            "external_attestations": [],
         },
     )
 
@@ -368,6 +389,7 @@ def test_claimant_self_witness_is_rejected_when_seed_forbids_it(client: TestClie
     claimant = _Agent()
     _register(client, claimant, "dogfood-regression-self-witness")
     seed_id = "sab_seed_dogfood_self_witness"
+    client.authority.issue(client, claimant.subject_id, seed_id, ["submit_seed", "submit_witness_event"])
     _submit_seed(client, claimant, seed_id, "sab_claim_dogfood_self_witness")
 
     chain = client.get(f"/api/v1/seeds/{seed_id}/chain").json()

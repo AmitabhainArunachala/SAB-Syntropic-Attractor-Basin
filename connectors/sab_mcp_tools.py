@@ -6,10 +6,9 @@ v1. It is a manifest only — a stub with respect to any runtime MCP surface:
 - No MCP server in this repository binds, registers, or serves these tools
   (verified 2026-07-05: no server bootstrap in connectors/, no MCP entry point
   in pyproject.toml or package.json, no MCP config referencing this module).
-- The `/api/v1` routes named below ARE live in-process (mounted via
-  `agora/app.py` -> `agora/sab_seeding_api.py`) with one exception:
-  `GET /api/v1/authority-leases/{lease_id}` (used by `sab.lease.validate`)
-  does not exist in the router as of 2026-07-05.
+- The `/api/v1` routes named below are mounted only in local mode. Authority
+  reads return observations with `authority_effect: none`; action permission
+  is evaluated inside a signed mutation, never by this manifest.
 - `returns` lists on mutation tools are the declared contract from
   docs/lanes/sab-agent-seeding-v1/MCP_A2A_PROFILE.md; the live routes observed
   on 2026-07-05 return `witness_head` but not a top-level `witness_event_id`
@@ -222,32 +221,25 @@ MCP_TOOLS: list[dict[str, Any]] = [
         "name": "sab.lease.validate",
         "kind": "read",
         "method": "GET",
-        "endpoint": "/api/v1/authority-leases/{lease_id}",
+        "endpoint": "/api/v1/authority/leases/{lease_id}",
         "description": (
-            "Validate authority lease scope, expiry, revoker, challenge path, and status. "
-            "PLANNED / stub target: this endpoint is NOT implemented in "
-            "agora/sab_seeding_api.py as of 2026-07-05 — authority leases are stored "
-            "(sab_authority_leases_v1) but expose no read route."
+            "Inspect an issued grant, its issuer and witness signatures, and observed status. "
+            "The caller must verify against its explicit policy pin. This read grants no "
+            "permission; the server rechecks the exact action and resource at mutation."
         ),
         "requires_signature": False,
         "input_schema": {
             "type": "object",
-            "required": ["lease_id", "intended_action", "intended_scope"],
+            "required": ["lease_id"],
             "properties": {
-                "lease_id": {"type": "string", "minLength": 3},
-                "intended_action": {"type": "string", "minLength": 3},
-                "intended_scope": {"type": "string", "minLength": 3},
+                "lease_id": {"type": "string", "minLength": 3, "maxLength": 160},
             },
             "additionalProperties": False,
         },
         "returns": [
-            "valid",
-            "lease_id",
-            "scope",
-            "expires_at",
-            "revoker",
-            "challenge_path",
-            "warnings",
+            "lease_id", "lease", "issuer_signature", "issuance_witness",
+            "lease_sha256", "envelope_sha256", "status", "observed_at",
+            "authority_effect", "standing_effect",
         ],
         "secret_handling": SECRET_HANDLING_WARNING,
     },

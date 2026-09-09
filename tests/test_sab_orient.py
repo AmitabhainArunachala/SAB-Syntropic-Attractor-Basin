@@ -347,9 +347,7 @@ def test_hardened_federation_401_is_acceptable_only_when_openapi_declares_header
         payloads = {
             "/status": {"status": "healthy"},
             "/posts": [{"id": 9, "created_at": "2026-07-26T00:00:00Z"}],
-            "/witness": [
-                {"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}
-            ],
+            "/witness": [{"id": 11, "hash": "a" * 64, "timestamp": "2026-07-26T00:01:00Z"}],
             "/openapi.json": {
                 "info": {"title": "SAB DHARMIC_AGORA API"},
                 "paths": {
@@ -1133,6 +1131,39 @@ def test_onboarding_links_exist_only_when_recruitment_is_ready():
     assert blocked["registration_url"] is None
     assert wrong_instance["qr_payload"] is None
     assert wrong_instance["registration_url"] is None
+
+
+def test_basin_orientation_requires_both_signed_enrollment_operations():
+    module = load_module()
+    for identity_paths, expected in (
+        ({"/api/agents/register"}, False),
+        ({"/api/v1/agents/challenge"}, False),
+        ({"/api/v1/agents/challenge", "/api/v1/agents/verify"}, True),
+    ):
+        openapi = {
+            "info": {"title": "SAB Basin API"},
+            "paths": {path: {"post": {}} for path in identity_paths | {"/api/spark/submit"}},
+        }
+
+        def get_json(base_url, path, timeout):
+            return (200, openapi) if path == "/openapi.json" else (404, {})
+
+        live = module.probe_live_surface("https://sab.example", get_json=get_json)
+        assert live["signup_ready"] is expected
+        assert live["recruitment_ready"] is False
+        assert module.onboarding_links(live, instance_verified=True)["registration_url"] is None
+
+    links = module.onboarding_links(
+        {
+            "base_url": "https://sab.example",
+            "recruitment_ready": True,
+            "protocol_surface_ready": False,
+            "public_basin_ready": True,
+        },
+        instance_verified=True,
+    )
+    assert links["registration_url"] == "https://sab.example/api/v1/agents/challenge"
+    assert links["agent_cli"] == "agora-key-control --help"
 
 
 def test_human_render_contains_dense_orientation_sections_and_all_files():

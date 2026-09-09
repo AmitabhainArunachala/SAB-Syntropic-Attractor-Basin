@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sab.local/schemas/sab.operator_control_review.v1.schema.json",
+  "title": "sab.operator_control_review.v1",
+  "description": "Closed reviewed evidence data. Shape and signatures alone do not establish independent control. Only current policy-pinned registry evaluation of the exact assessment, scope, requested participants, complete source findings, graph pairs, active keys and immutable history can establish scoped eligibility. Synthetic review roots do not evidence real operators.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reviewer_subject_id",
+    "reviewer_public_key",
+    "assessment_sha256",
+    "observed_at",
+    "findings",
+    "signature"
+  ],
+  "properties": {
+    "reviewer_subject_id": {
+      "type": "string",
+      "pattern": "^agent_[A-Za-z0-9_.:-]{2,154}$"
+    },
+    "reviewer_public_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "assessment_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "observed_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+      "format": "date-time"
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "evidence_ids",
+          "outcome"
+        ],
+        "properties": {
+          "category": {
+            "enum": [
+              "administrator_access",
+              "conflicts",
+              "controller_resolution",
+              "delegation_decision_rights",
+              "funding",
+              "runtime_control",
+              "signing_custody"
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^evidence_[A-Za-z0-9_.:-]{3,96}$"
+            }
+          },
+          "outcome": {
+            "enum": [
+              "contradicted",
+              "supported",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    }
+  }
+}

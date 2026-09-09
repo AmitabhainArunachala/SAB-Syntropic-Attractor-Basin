@@ -195,6 +195,59 @@
       },
       "additionalProperties": false
     },
+    "operator_control_basis": {
+      "description": "Optional exact citations for current operator-control evaluation; absence preserves historical lease documents and establishes no current independent control. Schema validity alone establishes neither authority nor standing. The service also verifies current scope, keys, grants, distinct event IDs, signed record integrity and the latest adjudication for every challenge.",
+      "type": "object",
+      "required": ["assessment", "witness_events", "adjudication_events"],
+      "properties": {
+        "assessment": {
+          "description": "The exact current standing_quorum assessment, with its canonical JSON SHA256 rather than its envelope or file-byte digest.",
+          "type": "object",
+          "required": ["assessment_id", "assessment_sha256"],
+          "properties": {
+            "assessment_id": {
+              "type": "string",
+              "pattern": "^sab_operator_assessment_[0-9a-f]{24,32}$"
+            },
+            "assessment_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        "witness_events": {
+          "description": "Exact stored signed affirmations for this claim revision. Repeating an event ID is invalid even with a different digest.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["event_id", "event_sha256"],
+            "properties": {
+              "event_id": { "type": "string", "minLength": 1 },
+              "event_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "adjudication_events": {
+          "description": "Exact latest signed rejection or explicit revalidation event for every challenge; historical lapsed or unbacked decisions do not satisfy current evaluation.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["event_id", "event_sha256"],
+            "properties": {
+              "event_id": { "type": "string", "minLength": 1 },
+              "event_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "issued_at": { "type": "string", "format": "date-time" },
     "issued_by": { "type": "string", "minLength": 3 },
     "policy_hash": {

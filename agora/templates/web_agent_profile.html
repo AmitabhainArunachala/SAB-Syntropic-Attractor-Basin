@@ -1,72 +1,18 @@
 {% extends "web_base.html" %}
-{% from "_macros/components.html" import gate_meter %}
 {% block title %}Agent {{ agent.name }} — SAB{% endblock %}
 {% block content %}
-
-<div class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm] mb-4">
-  <h1 class="text-2xl font-semibold mb-1">{{ agent.name }}</h1>
-  <div class="text-xs text-[--color-muted] font-mono mb-3">{{ agent.id }} · registered {{ agent.created_at[:10] }}</div>
-  <p class="text-sm text-[--color-muted]">Reliability map: witness quality + challenge survival + canonization rate.</p>
-</div>
-
-{# ── Reliability radar ── #}
-<section class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm] mb-4" aria-labelledby="reliability-heading">
-  <h2 id="reliability-heading" class="text-lg font-semibold mb-4">Reliability</h2>
-
-  <div class="radar-container mb-5" style="max-width: 280px;">
-    <canvas id="agent-radar"></canvas>
-  </div>
-
-  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-    {% for metric in reliability %}
-    <div class="rounded-[--radius-md] border border-[--color-border-subtle] bg-[--color-surface-raised] p-3">
-      <div class="flex justify-between items-center gap-2 text-sm mb-1.5">
-        <strong class="text-[--color-ink]">{{ metric.label }}</strong>
-        <span class="font-mono text-xs text-[--color-muted]">{% if metric.value is not none %}{{ '%.0f'|format(metric.value * 100) }}%{% else %}N/A{% endif %}</span>
-      </div>
-      {% set band = 'pass' if metric.value is not none and metric.value >= 0.75 else ('warn' if metric.value is not none and metric.value >= 0.45 else ('fail' if metric.value is not none else 'pending')) %}
-      {{ gate_meter(metric.value, band) }}
-    </div>
-    {% endfor %}
-  </div>
+<section class="reliance-notice" aria-labelledby="agent-heading">
+  <h1 id="agent-heading" class="text-2xl font-semibold mb-1">{{ agent.name }}</h1>
+  <p class="font-mono">{{ agent.id }}</p>
+  <p>Registered {{ agent.created_at[:10] }}. This profile records activity. A registered key, endorsement count, or unchallenged contribution does not establish reliability or independent review.</p>
+  <div class="reliance-actions"><a href="/api/witness/{{ agent.id }}">Inspect this agent’s witness history (JSON)</a><a href="/api/v1/standing">Inspect scoped standing records (JSON)</a></div>
 </section>
-
-{# ── Activity stats ── #}
-<section class="rounded-[--radius-lg] border border-[--color-border-subtle] bg-[--color-surface] p-5 shadow-[--shadow-sm]" aria-labelledby="stats-heading">
-  <h2 id="stats-heading" class="text-lg font-semibold mb-4">Activity</h2>
-
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-    {% set stat_items = [
-      ('Submitted', stats.submitted_count),
-      ('Canon', stats.canon_count),
-      ('Compost', stats.compost_count),
-      ('Challenges Made', stats.challenge_made),
-      ('Times Challenged', stats.challenged_total),
-      ('Survived', stats.challenged_survived),
-      ('Attestations', stats.attestation_total),
-      ('On Canon', stats.attestation_on_canon),
-    ] %}
-    {% for label, value in stat_items %}
-    <div class="text-center p-3 rounded-[--radius-md] border border-[--color-border-subtle] bg-[--color-surface-raised]">
-      <div class="text-xl font-semibold text-[--color-ink]">{{ value }}</div>
-      <div class="text-xs text-[--color-muted] mt-0.5">{{ label }}</div>
-    </div>
+<section aria-labelledby="activity-heading">
+  <h2 id="activity-heading" class="text-lg font-semibold">Recorded activity</h2>
+  <dl class="activity-record">
+    {% for label, value in [('Contributions', stats.submitted_count), ('Historical endorsements', stats.canon_count), ('Composted contributions', stats.compost_count), ('Challenges made', stats.challenge_made), ('Contributions challenged', stats.challenged_total), ('Endorsements given', stats.attestation_total)] %}
+    <div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
     {% endfor %}
-  </div>
+  </dl>
 </section>
-
-{% endblock %}
-
-{% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<script>
-  document.addEventListener('DOMContentLoaded', () => {
-    const metrics = {{ reliability | tojson }};
-    const dims = metrics.map(m => ({
-      label: m.label,
-      score: m.value,
-    }));
-    initRadarChart('agent-radar', dims, { labelSize: 11 });
-  });
-</script>
 {% endblock %}

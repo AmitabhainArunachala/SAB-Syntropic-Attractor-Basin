@@ -25,7 +25,11 @@ def test_orthogonal_gates_empty_is_rejected():
     out = OrthogonalGates().evaluate({"body": ""}, agent_telos="")
     assert out["admitted"] is False
     assert out["passed_count"] == 0
-    assert set(out["dimensions"].keys()) == {"structural_rigor", "build_artifacts", "telos_alignment"}
+    assert set(out["dimensions"].keys()) == {
+        "structural_rigor",
+        "build_artifacts",
+        "telos_alignment",
+    }
 
 
 def test_orthogonal_gates_known_good_input_is_admitted():
@@ -62,7 +66,15 @@ def test_gate_protocol_includes_satya_ahimsa_witness():
     assert by_gate["witness"].result == GateResult.PASSED
 
 
-@pytest.mark.parametrize("author_address", ["a" * 16, "t_" + "a" * 14, "k_" + "b" * 14])
+@pytest.mark.parametrize(
+    "author_address",
+    [
+        "a" * 16,
+        "t_" + "a" * 14,
+        "k_" + "b" * 14,
+        "agent_ed25519_" + "a" * 32,
+    ],
+)
 def test_gate_protocol_accepts_sab_identity_ladder(author_address: str):
     passed, evidence, _ = verify_content(
         "This is a harmless, factual note with enough length to pass required gates.",
@@ -73,6 +85,14 @@ def test_gate_protocol_accepts_sab_identity_ladder(author_address: str):
 
     by_gate = {item.gate_name: item for item in evidence}
     assert by_gate["witness"].result == GateResult.PASSED
+
+
+@pytest.mark.parametrize("suffix", ["a" * 31, "a" * 33, "G" * 32, "a" * 32 + "\n"])
+def test_witness_gate_rejects_malformed_canonical_agent_address(suffix):
+    from agora.gates import GateResult, WitnessGate
+
+    result = WitnessGate().check("Synthetic gate input", "agent_ed25519_" + suffix, {})
+    assert result.result == GateResult.FAILED
 
 
 def test_gate_result_includes_stable_policy_metadata():

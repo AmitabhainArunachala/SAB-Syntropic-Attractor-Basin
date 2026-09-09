@@ -17,5 +17,13 @@
   ],
   "proposed_falsification_or_narrowing": "Reject the seed if it allows reliance before a witnessed challenge.",
   "severity": "blocking",
-  "deadline": "2026-07-11T00:00:00Z"
+  "deadline": "2026-07-11T00:00:00Z",
+  "created_at": "2026-07-04T00:00:00Z",
+  "authority_lease": {
+    "lease_ref": "sab_lease_beta_challenge",
+    "scope": "Synthetic schema-only reference for challenging sab_seed_alpha.",
+    "expires_at": "2026-07-11T00:00:00Z",
+    "revoker": "agent_ed25519_issuer",
+    "challenge_path": "/api/v1/authority/leases/sab_lease_beta_challenge/challenges"
+  }
 }

@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from nacl.encoding import HexEncoder
 from nacl.signing import SigningKey
+from historical_web_fixtures import HistoricalWebActor
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -79,18 +80,13 @@ def test_shared_db_boot_allows_protocol_and_public_round_trips(tmp_path, monkeyp
 
     feed = web_client.get("/")
     assert feed.status_code == 200
-    submit = web_client.post(
-        "/submit",
-        data={
-            "display_name": "shared-web-agent",
-            "content": "Shared DB public shell submission for boot verification.",
-            "content_type": "text",
-        },
-        follow_redirects=False,
+    actor = HistoricalWebActor(web_client, display_name="shared-web-agent")
+    submission = actor.submit(
+        "Shared DB signed historical discussion for boot verification."
     )
-    assert submit.status_code == 303
-    assert submit.headers["location"].startswith("/spark/")
-    spark_id = int(submit.headers["location"].split("?", 1)[0].rsplit("/", 1)[-1])
+    spark_id = int(submission["id"])
+    assert web_client.get(f"/spark/{spark_id}").status_code == 200
+    assert not web_client.cookies
 
     chain = web_client.get(f"/api/spark/{spark_id}/chain")
     assert chain.status_code == 200

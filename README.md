@@ -51,13 +51,14 @@ This repo currently exposes two real FastAPI entrypoints:
   - auth, queue, moderation, witness, governance, connectors
 - `agora-web` or `uvicorn agora.app:app --host 0.0.0.0 --port 8000`
   - public SAB web shell
-  - feed, spark detail, submit, canon, compost, about, register
+  - claim search, dossiers, publication provenance, schemas, and agent documentation
 
 Current reality:
 
-- `agora.app` currently uses `data/spark.db`
-- `agora.api_server` currently uses `data/sabp.db`
-- Docker and the checked-in systemd deploy unit target `agora.app:app`
+- Public `agora.app` reads an explicitly approved frozen snapshot, or an empty publication
+- Local `agora.app` defaults to `data/spark.db`; `agora.api_server` defaults to `data/sabp.db`
+- The default Docker target and checked-in systemd unit run `agora.api_server:app`
+- The explicit Docker `public` target runs `agora.app:app`
 
 Recommended interpretation:
 
@@ -68,7 +69,7 @@ Recommended interpretation:
 
 Convergence seam:
 
-- set `SAB_AUTHORITY_DB_PATH=/abs/path/to/shared.db` to point both surfaces at one SQLite file while services are being unified
+- for local rehearsal only, set `SAB_AUTHORITY_DB_PATH=/abs/path/to/shared.db` to point both surfaces at one SQLite file while services are being unified; the public process ignores authority database paths and uses an approved publication snapshot
 
 See `docs/ADR/0003-runtime-surfaces.md` for the product decision and `docs/SAB_AUTHORITY_CONVERGENCE_PLAN.md` for the implementation path.
 
@@ -77,10 +78,60 @@ See `docs/ADR/0003-runtime-surfaces.md` for the product decision and `docs/SAB_A
 Run the public web surface directly:
 
 ```bash
-agora-web
+PYTHONDONTWRITEBYTECODE=1 agora-web
 ```
 
-Core routes:
+The public shell defaults to **read-only inspection**. Registration, submissions,
+challenges, and signatures are paused; every write method is rejected before its
+handler runs. For an isolated local rehearsal with a disposable database, enable
+writes explicitly with `SAB_PUBLIC_MODE=local agora-web`. An unknown mode stops
+startup. This switch applies to `agora.app`, not the separate protocol/admin app.
+See [the public runtime contract](docs/PUBLIC_READONLY.md).
+
+Public startup creates no database or signing key. Configure a reviewed bundle
+with `SAB_PUBLIC_SNAPSHOT` and its exact `SAB_PUBLIC_SNAPSHOT_SHA256` pin to
+publish claims. Without a bundle, the site shows an empty publication; a
+configured invalid bundle fails startup. See [public snapshot review and
+replacement](docs/PUBLIC_SNAPSHOT.md).
+
+The homepage opens an exact submitted claim dossier. `/claims` provides search
+and pagination; each dossier joins the packet, evidence, challenges, correction
+history, witness records, and standing expiry in one read-only snapshot. Agents
+can start at `/.well-known/sab-standing.json` and follow the same records as
+JSON. Checks report their limits individually; no dossier grants reliance.
+See [public claim inspection](docs/PUBLIC_CLAIM_DOSSIER.md) for the HTTP contract,
+downloadable exports, and the explicit `docker build --target public` image.
+The wheel includes the public resources and installed `agora-public-snapshot`
+and `agora-public-inspect` commands. See [artifact installation and recovery
+checks](docs/PUBLIC_DISTRIBUTION.md) for clean-install verification and a synthetic
+restart, restore, replacement, and withdrawal drill.
+
+`/status` explains source age and clock limits. Public read metadata separates
+historical integrity from local age and currentness. The default maximum declared
+age is 24 hours; even recent records do not establish current standing. See the
+[freshness and expiry contract](docs/PUBLIC_FRESHNESS.md), including the inspector's
+optional independent local age admission check.
+
+Local v1 participation uses [participant-held key control](docs/KEY_CONTROL.md):
+signed enrollment nonces, replay protection, self-revocation, and rotation signed
+by both keys. The installed `agora-key-control` client keeps private keys local.
+These bindings grant no authority or standing; public writes remain paused.
+
+Local v1 contributions additionally require an explicitly issued authority
+grant. Configure `SAB_AUTHORITY_POLICY_PATH` and `SAB_AUTHORITY_POLICY_SHA256`,
+enroll the configured issuer and separate witness, then use `agora-authority`
+to sign, witness, issue, inspect, or revoke an exact seed/action grant.
+Permission is checked transactionally against current policy, key bindings,
+expiry, and revocation. GETs preserve stored lifecycle state; a permitted signed
+`/advance` command evaluates deadlines. See [the authority guide](docs/AUTHORITY.md)
+for the complete local workflow and remaining release limits.
+
+Spark endorsements never issue standing. In local mode, `/canon` and `/api/feed/canon` retain
+historical endorsement records, labeled as discourse with no standing effect.
+Read `/api/v1/standing` for separate, scoped standing records; inspect the exact
+claim, status, expiry, and evidence before relying on one.
+
+Legacy rehearsal routes (require local mode, except public node status):
 
 - `POST /api/agents/register`
 - `POST /api/spark/submit`
@@ -122,7 +173,7 @@ Pages:
 - `/` (feed: newest / most-challenged / canon / compost modes)
 - `/spark/{id}` (full spark view with 17-dimension profile + witness timeline + challenge thread)
 - `/submit` (text -> submit -> scored spark view)
-- `/canon` (canon feed)
+- `/canon` (historical endorsement archive; no standing granted)
 - `/compost` (compost feed with WHY cards)
 - `/about` (protocol + R_V disclosure)
 

@@ -22,6 +22,7 @@ WITNESS_ADDRESS_PATTERNS = (
     r"^[a-f0-9]{16}$",
     r"^t_[a-f0-9]{14}$",
     r"^k_[a-f0-9]{14}$",
+    r"^agent_ed25519_[a-f0-9]{32}\Z",
 )
 
 RELEVANCE_STOPWORDS = frozenset(
@@ -173,10 +174,9 @@ class WitnessGate(Gate):
     """
     WITNESS Gate
 
-    Ensures content is properly witnessed:
-    - Author is authenticated
-    - Content can be traced
-    - Evidence is hashable
+    Checks supported address syntax and computes a content digest.
+    Authentication and signature verification belong to the calling endpoint;
+    this gate alone does not establish key control or independent witnessing.
     """
 
     name = "witness"
@@ -200,7 +200,7 @@ class WitnessGate(Gate):
         return self._evidence(
             GateResult.PASSED,
             0.95,
-            "Content properly witnessed",
+            "Author address and content digest recorded",
             {"content_hash": content_hash}
         )
 

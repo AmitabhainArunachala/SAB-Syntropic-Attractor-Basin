@@ -12,18 +12,18 @@ import hashlib
 import json
 import logging
 import os
-import secrets
 import sqlite3
 import time
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlencode, urlsplit
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from jinja2 import PackageLoader
 from pydantic import BaseModel, Field, field_validator
 
 from .admission_policy import FAST_LANE_AUTO
@@ -32,6 +32,26 @@ from .gates import ALL_GATES, evaluate_submission_gates
 from .rv_signal import measure_rv_signal
 from .sab_seeding_storage import init_sab_seeding_storage
 from .sab_identity import AgentIdentityV1
+from .public_runtime import PublicMode, install_public_runtime, public_read_request, read_public_mode
+from .public_snapshot import load_public_snapshot
+from .key_control import KeyControlError, KeyControlService
+from .authority import AuthorityService, load_authority_policy
+from .browser_sessions import BrowserSessionError, BrowserSessionService
+from .browser_session_api import BrowserSecurityMiddleware, create_browser_session_router, SESSION_COOKIE
+from .public_freshness import (
+    PublicationFreshnessObserver,
+    current_publication_observation,
+    read_freshness_policy,
+)
+from .public_resources import (
+    PublicResourceError,
+    SCHEMA_SOURCES,
+    STATIC_MEDIA_TYPES,
+    PARTICIPANT_MEDIA_TYPES,
+    read_public_resource,
+    read_public_static,
+    read_participant_static,
+)
 from .witness_service import (
     PUBLICATION_WITNESS_DOMAIN,
     attach_witness_meta,
@@ -47,6 +67,62 @@ except ImportError as exc:  # pragma: no cover - runtime safety
     raise RuntimeError("PyNaCl is required for agora.app") from exc
 
 
+PUBLIC_MODE = read_public_mode()
+KEY_CONTROL = (
+    KeyControlService(os.environ.get("SAB_IDENTITY_ORIGIN", "http://127.0.0.1:8000"))
+    if PUBLIC_MODE == PublicMode.LOCAL else None
+)
+BROWSER_SESSIONS = BrowserSessionService(KEY_CONTROL) if KEY_CONTROL is not None else None
+AUTHORITY = (
+    AuthorityService(
+        load_authority_policy(
+            os.environ.get("SAB_AUTHORITY_POLICY_PATH"),
+            os.environ.get("SAB_AUTHORITY_POLICY_SHA256"),
+        ),
+        KEY_CONTROL,
+    )
+    if KEY_CONTROL is not None else None
+)
+from .operator_control import OperatorControlRegistry, load_operator_policy  # noqa: E402
+from .operator_control_api import create_operator_control_router  # noqa: E402
+
+OPERATOR_CONTROL = (
+    OperatorControlRegistry(
+        load_operator_policy(os.environ.get("SAB_OPERATOR_CONTROL_POLICY_PATH"),
+                             os.environ.get("SAB_OPERATOR_CONTROL_POLICY_SHA256")),
+        KEY_CONTROL, AUTHORITY,
+    )
+    if KEY_CONTROL is not None else None
+)
+PUBLIC_FRESHNESS_POLICY = read_freshness_policy() if PUBLIC_MODE == PublicMode.PUBLIC_READONLY else None
+PUBLIC_SNAPSHOT = (
+    load_public_snapshot(os.getenv("SAB_PUBLIC_SNAPSHOT"), os.getenv("SAB_PUBLIC_SNAPSHOT_SHA256"))
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY else None
+)
+PUBLIC_FRESHNESS = (
+    PublicationFreshnessObserver(PUBLIC_SNAPSHOT.status, PUBLIC_FRESHNESS_POLICY)
+    if PUBLIC_SNAPSHOT is not None else None
+)
+
+
+def _public_read_observation():
+    if PUBLIC_FRESHNESS is None:
+        return None
+    return current_publication_observation() or PUBLIC_FRESHNESS.observe()
+
+
+def _publication_status():
+    if PUBLIC_SNAPSHOT is None:
+        return {"status": "local_rehearsal", "configured": False}
+    return {**PUBLIC_SNAPSHOT.status, "readiness_scope": "historical_inspection",
+            "publication_observation": _public_read_observation().to_dict()}
+
+
+def _read_timestamp():
+    observation = _public_read_observation()
+    return observation.observed_at.isoformat() if observation is not None else _utc_now()
+
+
 DEFAULT_SPARK_DB = get_db_path().with_name("spark.db")
 SPARK_DB = Path(os.getenv("SAB_SPARK_DB_PATH", os.getenv("SAB_AUTHORITY_DB_PATH", str(DEFAULT_SPARK_DB))))
 SYSTEM_KEY_PATH = Path(
@@ -55,7 +131,6 @@ SYSTEM_KEY_PATH = Path(
         str(SPARK_DB.with_name(".sab_system_ed25519.key")),
     )
 )
-CANON_QUORUM = int(os.getenv("SAB_CANON_QUORUM", "3"))
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 TEMPLATES_DIR = APP_DIR / "templates"
@@ -75,8 +150,7 @@ LANGUAGE_WOMB_LANE_DIR = Path(
 LANGUAGE_WOMB_SEED_DOC = LANGUAGE_WOMB_LANE_DIR / "LANGUAGE_WOMB_GRAND_CHALLENGE_SEED.md"
 FRONTIER_PACKET_DIR = LANGUAGE_WOMB_LANE_DIR / "contributions" / "packets"
 FRONTIER_RECEIPT_DIR = LANGUAGE_WOMB_LANE_DIR / "contributions" / "receipts"
-WEB_SESSION_COOKIE = "sab_web_session"
-WEB_SESSION_MAX_AGE_SECONDS = int(os.getenv("SAB_WEB_SESSION_MAX_AGE_SECONDS", str(7 * 24 * 3600)))
+WEB_SESSION_COOKIE = SESSION_COOKIE
 WEB_CACHE_TTL_SECONDS = int(os.getenv("SAB_WEB_CACHE_TTL_SECONDS", "15"))
 WEB_AGENT_TABLE = "web_agents"
 SPARK_WITNESS_TABLE = "spark_witness_chain"
@@ -102,46 +176,34 @@ SAB_17_DIMENSIONS: List[Dict[str, str]] = [
     {"id": "INTEGRITY", "label": "Integrity", "source_gate": "telos_alignment"},
 ]
 
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
-TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+if PUBLIC_MODE == PublicMode.LOCAL:
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# Preserve Starlette's globals and the filters installed below, while reading
+# installed templates from the package without extraction or cwd lookup.
+templates.env.loader = PackageLoader("agora", "templates")
 
-_WEB_SESSIONS: Dict[str, Dict[str, Any]] = {}
+
+def _evidence_url(value: Any) -> Optional[str]:
+    """Only make ordinary web references clickable; never resolve or fetch them."""
+    if not isinstance(value, str) or any(ord(char) < 32 for char in value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme in {"https", "http"} and parsed.hostname and parsed.username is None:
+            return value
+    except ValueError:
+        pass
+    return None
+
+
+templates.env.filters["evidence_url"] = _evidence_url
+
 _WEB_CACHE: Dict[str, Dict[str, Any]] = {}
 _CACHE_STATS: Dict[str, int] = {"hits": 0, "misses": 0, "invalidations": 0}
 
 _log = logging.getLogger("sab.cache")
-
-# ---------------------------------------------------------------------------
-# CSRF protection helpers
-# ---------------------------------------------------------------------------
-
-import hmac as _hmac_mod  # noqa: E402
-
-
-def _csrf_token_for_session(session: Dict[str, Any]) -> str:
-    """Return (or generate) a per-session CSRF token."""
-    token = session.get("csrf_token")
-    if not token:
-        token = secrets.token_urlsafe(32)
-        session["csrf_token"] = token
-    return token
-
-
-def _verify_csrf_form_token(session: Optional[Dict[str, Any]], form_csrf: Optional[str]) -> None:
-    """Raise 403 if the form CSRF token is missing/mismatched.
-
-    New sessions (no cookie yet) are exempt -- there is no prior cookie to
-    hijack.
-    """
-    if session is None:
-        return
-    expected = session.get("csrf_token", "")
-    if not expected:
-        return
-    if not form_csrf or not _hmac_mod.compare_digest(form_csrf, expected):
-        raise HTTPException(status_code=403, detail="CSRF token invalid")
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -241,6 +303,8 @@ def _json_string_list(raw: Any) -> List[str]:
 
 
 def _seed_claim_payload() -> Dict[str, Any]:
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+        return {"claims": [], "stats": {"availability": "not_published"}}
     if not SEED_CLAIMS_PATH.exists():
         return {"claims": [], "stats": {"missing": str(SEED_CLAIMS_PATH)}}
     try:
@@ -364,75 +428,21 @@ def get_cache_stats() -> Dict[str, Any]:
     }
 
 
-def _cleanup_web_sessions() -> None:
-    now = time.time()
-    expired = [
-        token
-        for token, session in _WEB_SESSIONS.items()
-        if float(session.get("created_at_epoch", 0.0)) + WEB_SESSION_MAX_AGE_SECONDS < now
-    ]
-    for token in expired:
-        _WEB_SESSIONS.pop(token, None)
-
-
 def _read_web_session(request: Request) -> Optional[Dict[str, Any]]:
-    _cleanup_web_sessions()
-    token = request.cookies.get(WEB_SESSION_COOKIE)
+    if BROWSER_SESSIONS is None:
+        return None
+    token = request.cookies.get(WEB_SESSION_COOKIE, "")
     if not token:
         return None
-    return _WEB_SESSIONS.get(token)
-
-
-def _signing_key_from_session(session: Dict[str, Any]) -> SigningKey:
-    return SigningKey(str(session["private_key_hex"]).encode(), encoder=HexEncoder)
-
-
-def _create_web_session(conn: sqlite3.Connection, display_name: str) -> Dict[str, Any]:
-    clean_name = (display_name or "").strip()[:80] or "anonymous"
-    signing_key = SigningKey.generate()
-    private_key_hex = signing_key.encode(encoder=HexEncoder).decode()
-    public_key_hex = signing_key.verify_key.encode(encoder=HexEncoder).decode()
-    agent_id = hashlib.sha256(public_key_hex.encode()).hexdigest()[:16]
-    conn.execute(
-        """
-        INSERT OR IGNORE INTO web_agents (id, name, public_key, created_at, witness_count, witness_accuracy)
-        VALUES (?, ?, ?, ?, 0, 0.0)
-        """,
-        (agent_id, clean_name, public_key_hex, _utc_now()),
-    )
-    token = secrets.token_urlsafe(24)
-    session = {
-        "token": token,
-        "agent_id": agent_id,
-        "name": clean_name,
-        "private_key_hex": private_key_hex,
-        "public_key_hex": public_key_hex,
-        "created_at_epoch": time.time(),
-        "csrf_token": secrets.token_urlsafe(32),
-    }
-    _WEB_SESSIONS[token] = session
-    return session
-
-
-def _resolve_or_create_web_session(
-    request: Request,
-    conn: sqlite3.Connection,
-    display_name: str,
-) -> Dict[str, Any]:
-    existing = _read_web_session(request)
-    if existing:
-        return existing
-    return _create_web_session(conn, display_name)
-
-
-def _set_web_session_cookie(response: RedirectResponse, session: Dict[str, Any]) -> None:
-    response.set_cookie(
-        key=WEB_SESSION_COOKIE,
-        value=str(session["token"]),
-        httponly=True,
-        max_age=WEB_SESSION_MAX_AGE_SECONDS,
-        samesite="lax",
-    )
+    try:
+        with _db() as conn:
+            observation = BROWSER_SESSIONS.read(conn, token)
+    except (BrowserSessionError, KeyControlError):
+        return None
+    if observation is None:
+        return None
+    return {"agent_id": observation["subject_id"], "name": observation["display_name"],
+            "public_key": observation["public_key"], "expires_at": observation["expires_at"]}
 
 
 def _load_or_create_system_signing_key(path: Path) -> SigningKey:
@@ -453,14 +463,24 @@ def _load_or_create_system_signing_key(path: Path) -> SigningKey:
     return key
 
 
-SYSTEM_SIGNING_KEY = _load_or_create_system_signing_key(SYSTEM_KEY_PATH)
-SYSTEM_VERIFY_KEY_HEX = SYSTEM_SIGNING_KEY.verify_key.encode(encoder=HexEncoder).decode()
+SYSTEM_SIGNING_KEY = _load_or_create_system_signing_key(SYSTEM_KEY_PATH) if PUBLIC_MODE == PublicMode.LOCAL else None
+SYSTEM_VERIFY_KEY_HEX = SYSTEM_SIGNING_KEY.verify_key.encode(encoder=HexEncoder).decode() if SYSTEM_SIGNING_KEY else None
 
 
 @contextmanager
 def _db() -> sqlite3.Connection:
-    SPARK_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(SPARK_DB)
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+        if PUBLIC_SNAPSHOT is None:
+            raise RuntimeError("The public snapshot reader is unavailable")
+        with PUBLIC_SNAPSHOT.connection() as conn:
+            yield conn
+        return
+    if public_read_request():
+        conn = sqlite3.connect(SPARK_DB.resolve().as_uri() + "?mode=ro", uri=True)
+        conn.execute("PRAGMA query_only = ON")
+    else:
+        SPARK_DB.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(SPARK_DB)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -521,6 +541,8 @@ def _migrate_legacy_public_tables(conn: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
+    if PUBLIC_MODE == PublicMode.PUBLIC_READONLY or public_read_request():
+        return
     with _db() as conn:
         cursor = conn.cursor()
         _migrate_legacy_public_tables(conn)
@@ -638,6 +660,8 @@ def init_db() -> None:
 
 
 def _system_sign(payload: Dict[str, Any]) -> str:
+    if SYSTEM_SIGNING_KEY is None:
+        raise RuntimeError("The public inspection process has no signing key")
     return SYSTEM_SIGNING_KEY.sign(_canonical_bytes(payload)).signature.hex()
 
 
@@ -696,6 +720,13 @@ def _message_for_witness(spark_id: int, witness_id: str, action: str, payload_sh
 
 
 def _verify_agent_signature(conn: sqlite3.Connection, agent_id: str, message: bytes, signature_hex: str) -> None:
+    # Serialize key-state checks with the mutation that follows on this connection.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    if KEY_CONTROL is not None:
+        binding = KEY_CONTROL.binding_status(conn, agent_id)
+        if binding["status"] in {"revoked", "superseded", "inconsistent"}:
+            raise HTTPException(status_code=403, detail="Signing key is inactive or its binding is inconsistent")
     row = conn.execute("SELECT public_key FROM web_agents WHERE id = ?", (agent_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_id}")
@@ -706,6 +737,18 @@ def _verify_agent_signature(conn: sqlite3.Connection, agent_id: str, message: by
         verify_key.verify(message, bytes.fromhex(signature_hex))
     except (BadSignatureError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid Ed25519 signature")
+
+
+def _verify_sab_agent_signature(conn: sqlite3.Connection, agent_id: str, message: bytes, signature_hex: str) -> None:
+    if KEY_CONTROL is None:
+        raise HTTPException(status_code=503, detail="Key-control verification is unavailable")
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        KEY_CONTROL.require_active_binding(conn, agent_id)
+    except KeyControlError as exc:
+        raise HTTPException(status_code=exc.status, detail={"code": exc.code, "detail": exc.detail}) from None
+    _verify_agent_signature(conn, agent_id, message, signature_hex)
 
 
 def _append_witness(
@@ -883,49 +926,23 @@ def _verify_chain_rows(rows: List[sqlite3.Row]) -> bool:
     return True
 
 
-def _promote_if_quorum(conn: sqlite3.Connection, spark_id: int) -> Optional[Dict[str, Any]]:
-    row = conn.execute("SELECT status FROM sparks WHERE id = ?", (spark_id,)).fetchone()
-    if row is None:
-        return None
-    if str(row["status"]) == "canon":
-        return None
-    if _pending_challenge_count(conn, spark_id) > 0:
-        return None
+def _discourse_status(stored_status: str) -> str:
+    """Keep historical labels inspectable without promoting them to standing.
 
-    witnesses = conn.execute(
-        """
-        SELECT DISTINCT witness_id
-        FROM spark_witness_chain
-        WHERE spark_id = ? AND action IN ('affirm', 'canon_affirm')
-        """,
-        (spark_id,),
-    ).fetchall()
-    if len(witnesses) < CANON_QUORUM:
-        return None
+    Legacy canon rows and their signed history remain untouched. A quorum of
+    keys proves neither independent operators nor permission to rely on a claim.
+    Only the v1 standing path can issue a scoped standing record.
+    """
+    return "spark" if stored_status == "canon" else stored_status
 
-    conn.execute("UPDATE sparks SET status = 'canon' WHERE id = ?", (spark_id,))
-    payload = {
-        "spark_id": spark_id,
-        "quorum": CANON_QUORUM,
-        "witness_count": len(witnesses),
+
+def _discourse_authority() -> Dict[str, Any]:
+    return {
+        "kind": "discourse",
+        "standing_effect": "none",
+        "standing_assessment": "not_assessed",
+        "standing_api": "/api/v1/standing",
     }
-    signature = _system_sign(
-        {
-            "kind": "system_witness",
-            "spark_id": spark_id,
-            "action": "canon_promoted",
-            "payload": payload,
-        }
-    )
-    entry = _append_witness(
-        conn,
-        spark_id=spark_id,
-        witness_id="system",
-        action="canon_promoted",
-        payload=payload,
-        signature_hex=signature,
-    )
-    return entry
 
 
 def _serialize_spark_row(row: sqlite3.Row) -> Dict[str, Any]:
@@ -945,7 +962,9 @@ def _serialize_spark_row(row: sqlite3.Row) -> Dict[str, Any]:
         "content_type": str(row["content_type"] or "text"),
         "author_id": str(row["author_id"] or ""),
         "created_at": str(row["created_at"] or ""),
-        "status": str(row["status"] or "spark"),
+        "status": _discourse_status(str(row["status"] or "spark")),
+        "legacy_status": str(row["status"] or "spark"),
+        "authority": _discourse_authority(),
         "rv_contraction": row["rv_contraction"],
         "composite_score": float(row["composite_score"] or 0.0),
         "gate_scores": _load_gate_scores(str(raw_gate_scores) if raw_gate_scores is not None else "{}"),
@@ -1119,11 +1138,11 @@ def _web_feed_items(
                 (SELECT COUNT(*) FROM spark_challenges c WHERE c.spark_id = s.id) AS challenge_count,
                 (SELECT COUNT(*) FROM spark_witness_chain w WHERE w.spark_id = s.id) AS witness_count
             FROM sparks s
-            WHERE s.status = ?
+            WHERE s.status = ? OR (? = 'spark' AND s.status = 'canon')
             ORDER BY s.created_at DESC
             LIMIT ?
             """,
-            (status_filter, limit),
+            (status_filter, status_filter, limit),
         ).fetchall()
     items: List[Dict[str, Any]] = []
     for row in rows:
@@ -1155,7 +1174,7 @@ class AgentRegisterRequest(BaseModel):
             VerifyKey(value.encode(), encoder=HexEncoder)
         except Exception as exc:
             raise ValueError("invalid Ed25519 public key (hex)") from exc
-        return value
+        return value.lower()
 
 
 class SparkSubmitRequest(BaseModel):
@@ -1197,106 +1216,291 @@ class WitnessSignRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    init_db()
+    if PUBLIC_MODE == PublicMode.LOCAL:
+        init_db()
+        with _db() as conn:
+            _init_v1_tables(conn)
     yield
 
 
 app = FastAPI(
     title="SAB Basin API",
-    description="Spark -> pressure -> witness -> canon/compost lifecycle API",
+    description="Inspectable discourse and the separate v1 scoped standing protocol",
     version=SAB_VERSION,
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
 )
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Publication is opt-in for routes as well as records. Legacy discussion,
+# profiles, caches and repository packets are outside the public surface.
+PUBLIC_READ_PATHS = (
+    r"/", r"/claims(?:/[^\x00]*)?", r"/frontier", r"/about", r"/submit", r"/register", r"/status",
+    r"/api/frontier", r"/api/node/status", r"/healthz?", r"/readyz",
+    r"/publication(?:/manifest)?", r"/\.well-known/sab-standing\.json",
+    r"/(?:skill|seed|auth|heartbeat|rules)\.md", r"/openapi\.json", r"/docs(?:/oauth2-redirect)?", r"/redoc",
+    r"/schemas/(?:index\.json|sab\.(?:seed_packet|challenge_packet|claim_dossier|public_snapshot|public_read_observation)\.v1\.schema\.json)",
+    r"/schemas/sab\.authority_(?:policy\.v1|lease\.v2|issuance_witness\.v1|revocation\.v1)\.schema\.json",
+    r"/schemas/sab\.operator_(?:control_(?:policy|review|challenge|revocation)|cohort_(?:assessment|issuance))\.v1\.schema\.json",
+    r"/static/(?:web\.(?:css|js)|favicon\.svg|(?:seed_fusion|frontier|reliance|dossier)\.css)",
+    r"/api/v1/claims(?:/record)?", r"/api/v1/seeds(?:/[^/]+(?:/chain)?)?",
+    r"/api/v1/seeds/[^\x00]+/dossier", r"/api/v1/challenges/[^/]+",
+    r"/api/v1/witness-events/[^/]+", r"/api/v1/witness/(?:chain|verify)",
+    r"/api/v1/standing(?:/[^/]+)?",
+)
+app.add_middleware(BrowserSecurityMiddleware, audience=KEY_CONTROL.audience if KEY_CONTROL else None)
+install_public_runtime(app, PUBLIC_MODE, public_read_paths=PUBLIC_READ_PATHS,
+                       observation_provider=_public_read_observation if PUBLIC_FRESHNESS is not None else None)
 
 
-def _public_agent_doc(name: str) -> FileResponse:
-    path = REPO_ROOT / "site" / name
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"Public agent doc not found: {name}")
-    return FileResponse(path, media_type="text/markdown; charset=utf-8")
+@app.api_route("/static/{path:path}", methods=["GET", "HEAD"], name="static", include_in_schema=False)
+async def public_static_asset(path: str) -> Response:
+    if path in PARTICIPANT_MEDIA_TYPES and PUBLIC_MODE == PublicMode.LOCAL:
+        try:
+            return Response(read_participant_static(path), media_type=PARTICIPANT_MEDIA_TYPES[path])
+        except PublicResourceError:
+            raise HTTPException(status_code=404, detail="Participant static resource unavailable") from None
+    try:
+        content = read_public_static(path)
+    except PublicResourceError:
+        raise HTTPException(status_code=404, detail="Public static resource unavailable") from None
+    return Response(content, media_type=STATIC_MEDIA_TYPES[path])
+
+
+@app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/redoc", response_class=HTMLResponse, include_in_schema=False)
+async def web_api_reference(request: Request) -> HTMLResponse:
+    """Readable OpenAPI reference without third-party executable dependencies."""
+    methods = {"get", "post", "put", "patch", "delete", "head", "options"}
+    operations = [{"path": path, "method": method.upper(),
+                   "summary": operation.get("summary", ""),
+                   "description": operation.get("description", "")}
+                  for path, item in app.openapi()["paths"].items()
+                  for method, operation in item.items() if method in methods]
+    return _render_template(request, "web_api_reference.html",
+                            {"operations": operations, "session": _read_web_session(request),
+                             "path_name": "/docs"})
+
+
+def _public_document(group: str, name: str, media_type: str) -> Response:
+    try:
+        content = read_public_resource(group, name)
+    except PublicResourceError:
+        raise HTTPException(status_code=404, detail="Public resource unavailable") from None
+    return Response(content, media_type=media_type)
+
+
+def _public_agent_doc(name: str) -> Response:
+    return _public_document("docs", name, "text/markdown; charset=utf-8")
 
 
 @app.get("/skill.md", include_in_schema=False)
-async def public_skill_md() -> FileResponse:
+async def public_skill_md() -> Response:
     return _public_agent_doc("skill.md")
 
 
+@app.get("/.well-known/sab-standing.json", include_in_schema=False)
+async def public_standing_discovery() -> JSONResponse:
+    """Describe this running inspection surface without claiming deployment or A2A binding."""
+    return JSONResponse(
+        {
+            "profile": "sab-standing",
+            "profile_version": "v1",
+            "runtime_mode": PUBLIC_MODE.value,
+            "public_mutation_enabled": PUBLIC_MODE == PublicMode.LOCAL,
+            "inspection_authentication": "none",
+            "authority_effect": "none",
+            "standing_effect": "none",
+            "publication": _publication_status(),
+            "links": {
+                "home": "/",
+                "claims": "/claims",
+                "claim_ledger": "/api/v1/claims",
+                "dossier_template": "/api/v1/seeds/{seed_id}/dossier",
+                "human_dossier_template": "/claims/{seed_id}",
+                "standing": "/api/v1/standing",
+                "skill": "/skill.md",
+                "rules": "/rules.md",
+                "openapi": "/openapi.json",
+                "schemas": "/schemas/index.json",
+                "publication": "/publication",
+                "publication_manifest": "/publication/manifest",
+                "status": "/status",
+                "publication_observation_schema": "/schemas/sab.public_read_observation.v1.schema.json",
+            },
+            "dossier_schema": "sab.claim_dossier.v1",
+            "verification_limits": [
+                "Digest and hash-link checks are scoped to the returned database snapshot.",
+                "Signatures, evidence contents, operator independence, and permission to rely require further verification.",
+                "This is a SAB HTTP inspection profile, not a bound MCP server or A2A service.",
+            ],
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/schemas/index.json", include_in_schema=False)
+async def public_schema_index() -> Dict[str, Any]:
+    return {"schemas": [
+        {"schema": name.removesuffix(".schema.json"), "url": "/schemas/" + name}
+        for name in SCHEMA_SOURCES
+    ]}
+
+
+@app.get("/publication")
+async def public_publication_status() -> Dict[str, Any]:
+    return _publication_status()
+
+
+@app.get("/schemas/sab.public_read_observation.v1.schema.json", include_in_schema=False)
+async def public_read_observation_schema() -> Response:
+    return _public_document("schemas", "sab.public_read_observation.v1.schema.json", "application/schema+json")
+
+
+@app.get("/publication/manifest")
+async def public_publication_manifest() -> Response:
+    if PUBLIC_SNAPSHOT is None or PUBLIC_SNAPSHOT.manifest_bytes is None:
+        raise HTTPException(status_code=404, detail="No public snapshot is configured")
+    return Response(PUBLIC_SNAPSHOT.manifest_bytes, media_type="application/json")
+
+
+@app.get("/schemas/sab.public_snapshot.v1.schema.json", include_in_schema=False)
+async def public_snapshot_schema() -> Response:
+    return _public_document("schemas", "sab.public_snapshot.v1.schema.json", "application/schema+json")
+
+
+@app.get("/schemas/sab.claim_dossier.v1.schema.json", include_in_schema=False)
+async def public_claim_dossier_schema() -> Response:
+    return _public_document("schemas", "sab.claim_dossier.v1.schema.json", "application/schema+json")
+
+
 @app.get("/seed.md", include_in_schema=False)
-async def public_seed_md() -> FileResponse:
+async def public_seed_md() -> Response:
     return _public_agent_doc("seed.md")
 
 
 @app.get("/auth.md", include_in_schema=False)
-async def public_auth_md() -> FileResponse:
+async def public_auth_md() -> Response:
     return _public_agent_doc("auth.md")
 
 
 @app.get("/heartbeat.md", include_in_schema=False)
-async def public_heartbeat_md() -> FileResponse:
+async def public_heartbeat_md() -> Response:
     return _public_agent_doc("heartbeat.md")
 
 
 @app.get("/rules.md", include_in_schema=False)
-async def public_rules_md() -> FileResponse:
+async def public_rules_md() -> Response:
     return _public_agent_doc("rules.md")
 
 
 @app.get("/schemas/sab.seed_packet.v1.schema.json", include_in_schema=False)
-async def public_seed_packet_schema() -> FileResponse:
-    for path in (
-        REPO_ROOT / "nodes" / "schemas" / "sab.seed_packet.v1.schema.json",
-        REPO_ROOT / "site" / "schemas" / "sab.seed_packet.v1.schema.json",
-    ):
-        if path.is_file():
-            return FileResponse(path, media_type="application/schema+json")
-    raise HTTPException(status_code=404, detail="Public seed packet schema not found")
+async def public_seed_packet_schema() -> Response:
+    return _public_document("schemas", "sab.seed_packet.v1.schema.json", "application/schema+json")
 
 
-from .sab_seeding_api import SabSeedingDeps, create_sab_seeding_router  # noqa: E402
+@app.get("/schemas/{schema_name}", include_in_schema=False)
+async def public_allowlisted_schema(schema_name: str) -> Response:
+    return _public_document("schemas", schema_name, "application/schema+json")
+
+
+from .sab_seeding_api import (  # noqa: E402
+    SabSeedingDeps,
+    create_sab_seeding_router,
+    observe_standing_status,
+    _init_v1_tables,
+)
+from .claim_dossier import list_claims, load_claim_dossier  # noqa: E402
 
 app.include_router(
     create_sab_seeding_router(
         SabSeedingDeps(
             init_db=init_db,
             db=_db,
-            verify_agent_signature=_verify_agent_signature,
+            verify_agent_signature=_verify_sab_agent_signature,
             system_sign=_system_sign,
             utc_now=_utc_now,
             invalidate_web_cache=_invalidate_web_cache,
+            read_only=PUBLIC_MODE == PublicMode.PUBLIC_READONLY,
+            publication_configured=PUBLIC_SNAPSHOT.configured if PUBLIC_SNAPSHOT is not None else True,
+            read_observation=_public_read_observation if PUBLIC_FRESHNESS is not None else None,
+            key_control=KEY_CONTROL,
+            authority=AUTHORITY,
+            operator_control=OPERATOR_CONTROL,
         )
     )
 )
+
+
+if BROWSER_SESSIONS is not None:
+    app.include_router(create_browser_session_router(BROWSER_SESSIONS, _db))
+if OPERATOR_CONTROL is not None:
+    app.include_router(create_operator_control_router(OPERATOR_CONTROL, _db))
 
 
 @app.post("/api/agents/register", status_code=status.HTTP_201_CREATED)
 async def register_agent(req: AgentRegisterRequest) -> Dict[str, Any]:
     init_db()
     agent_id = hashlib.sha256(req.public_key.encode()).hexdigest()[:16]
-    created_at = _utc_now()
     with _db() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO web_agents (id, name, public_key, created_at, witness_count, witness_accuracy)
-            VALUES (?, ?, ?, ?, 0, 0.0)
-            """,
-            (agent_id, req.name, req.public_key, created_at),
-        )
-        row = conn.execute("SELECT * FROM web_agents WHERE id = ?", (agent_id,)).fetchone()
-    if row is None:
-        raise HTTPException(status_code=500, detail="failed to register agent")
-    canonical_identity = AgentIdentityV1.from_public_key(
-        display_name=str(row["name"]),
-        public_key=str(row["public_key"]),
-        created_at=datetime.fromisoformat(str(row["created_at"])),
-        evidence_refs=[f"web_agents:{row['id']}"],
-    )
+        # Both registration routes share one key binding. Hex casing, a legacy
+        # request, or knowledge of a public key cannot create a second subject
+        # or replace metadata belonging to an existing participant.
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT * FROM web_agents WHERE id = ? OR lower(public_key) = ?",
+            (agent_id, req.public_key),
+        ).fetchall()
+        if len(rows) > 1:
+            raise HTTPException(status_code=409, detail="public key has conflicting existing identities")
+        row = rows[0] if rows else None
+        if row is None:
+            return JSONResponse(
+                status_code=428,
+                content={
+                    "code": "key_control_required",
+                    "detail": "New identities require a locally signed /api/v1/agents/challenge and /api/v1/agents/verify flow.",
+                    "authority_effect": "none",
+                    "standing_effect": "none",
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+        if str(row["public_key"]).lower() != req.public_key or str(row["name"]) != req.name:
+            raise HTTPException(status_code=409, detail="registration cannot update an existing identity")
+        agent_id = str(row["id"])
+        identities = []
+        if _table_exists(conn, "sab_agent_identities_v1"):
+            identities = conn.execute(
+                "SELECT * FROM sab_agent_identities_v1 WHERE subject_id = ? OR lower(public_key) = ?",
+                (agent_id, req.public_key),
+            ).fetchall()
+        if identities:
+            if (
+                len(identities) != 1
+                or row is None
+                or str(identities[0]["subject_id"]) != agent_id
+                or str(identities[0]["public_key"]).lower() != req.public_key
+                or str(identities[0]["display_name"]) != req.name
+            ):
+                raise HTTPException(status_code=409, detail="public key has conflicting existing identities")
+            identity = json.loads(str(identities[0]["identity_json"]))
+        else:
+            identity = AgentIdentityV1.from_public_key(
+                display_name=str(row["name"]),
+                public_key=str(row["public_key"]),
+                created_at=datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00")),
+                evidence_refs=[f"web_agents:{row['id']}"],
+            ).model_dump(mode="json", by_alias=True)
+        key_control = KEY_CONTROL.binding_status(conn, str(row["id"])) if KEY_CONTROL is not None else {"status": "unproven"}
     return {
         "id": str(row["id"]),
         "name": str(row["name"]),
         "public_key": str(row["public_key"]),
         "created_at": str(row["created_at"]),
-        "identity": canonical_identity.model_dump(mode="json", by_alias=True),
+        "identity": identity,
+        "identity_status": "rehearsal_metadata",
+        "key_control": key_control,
+        "authority_effect": "none",
+        "standing_effect": "none",
     }
 
 
@@ -1329,7 +1533,7 @@ async def submit_spark(req: SparkSubmitRequest) -> Dict[str, Any]:
             ).fetchall()
         ]
 
-        created_at = datetime.fromisoformat(str(agent_row["created_at"]))
+        created_at = datetime.fromisoformat(str(agent_row["created_at"]).replace("Z", "+00:00"))
         age_hours = max(0.0, (datetime.now(timezone.utc) - created_at.replace(tzinfo=timezone.utc)).total_seconds() / 3600.0)
         gate_context = {
             "author_posts_last_hour": counts["hour"],
@@ -1586,7 +1790,7 @@ async def sublate_challenge(
                 """
             ).fetchall()
         ]
-        created_at = datetime.fromisoformat(str(corrector_row["created_at"]))
+        created_at = datetime.fromisoformat(str(corrector_row["created_at"]).replace("Z", "+00:00"))
         age_hours = max(
             0.0,
             (datetime.now(timezone.utc) - created_at.replace(tzinfo=timezone.utc)).total_seconds() / 3600.0,
@@ -1779,9 +1983,9 @@ async def witness_sign(req: WitnessSignRequest) -> Dict[str, Any]:
             (req.witness_id,),
         )
 
-        if req.action in ("affirm", "canon_affirm"):
-            _promote_if_quorum(conn, req.spark_id)
-        elif req.action == "compost":
+        # Endorsements are observations only; they never grant standing, even
+        # when several keys or repeated requests agree.
+        if req.action == "compost":
             conn.execute("UPDATE sparks SET status = 'compost' WHERE id = ?", (req.spark_id,))
             compost_signature = _system_sign(
                 {
@@ -1801,12 +2005,14 @@ async def witness_sign(req: WitnessSignRequest) -> Dict[str, Any]:
             )
 
         status_row = conn.execute("SELECT status FROM sparks WHERE id = ?", (req.spark_id,)).fetchone()
-        spark_status = str(status_row["status"]) if status_row else "unknown"
+        legacy_status = str(status_row["status"]) if status_row else "unknown"
         _invalidate_web_cache()
 
         return {
             "spark_id": req.spark_id,
-            "spark_status": spark_status,
+            "spark_status": _discourse_status(legacy_status),
+            "legacy_status": legacy_status,
+            "authority": _discourse_authority(),
             "entry": entry,
         }
 
@@ -1833,11 +2039,11 @@ def _load_feed(conn: sqlite3.Connection, *, status_value: str, limit: int, gate_
     rows = conn.execute(
         """
         SELECT * FROM sparks
-        WHERE status = ?
+        WHERE status = ? OR (? = 'spark' AND status = 'canon')
         ORDER BY created_at DESC
         LIMIT ?
         """,
-        (status_value, limit),
+        (status_value, status_value, limit),
     ).fetchall()
     items = [_serialize_spark_row(row) for row in rows]
 
@@ -1857,7 +2063,18 @@ def _render_template(
     *,
     status_code: int = 200,
 ) -> HTMLResponse:
-    payload = {"request": request, **context}
+    publication = _publication_status() if PUBLIC_SNAPSHOT is not None else None
+    payload = {
+        "request": request,
+        **context,
+        "public_readonly": PUBLIC_MODE == PublicMode.PUBLIC_READONLY,
+        "public_mode": PUBLIC_MODE.value,
+        "publication": publication,
+        "publication_observed_label": (
+            datetime.fromisoformat(publication["observed_at"]).strftime("%d %b %Y, %H:%M UTC")
+            if publication and publication["observed_at"] else None
+        ),
+    }
     return templates.TemplateResponse(request, template_name, payload, status_code=status_code)
 
 
@@ -1994,6 +2211,8 @@ def _frontier_card_from_packet_payload(
     return {
         "source": source,
         "seed_id": str(packet.get("seed_id") or packet_path),
+        "dossier_url": "/claims?" + urlencode({"seed_id": str(packet.get("seed_id"))})
+        if source == "store" and packet.get("seed_id") else None,
         "title": str(packet.get("title") or "Untitled seed packet"),
         "status": str(state or packet.get("status") or "unknown"),
         "loop_position": str(packet.get("loop_position") or "spark"),
@@ -2067,8 +2286,9 @@ def _frontier_store_stats() -> Dict[str, Any]:
 
         init_db()
         with _db() as conn:
-            init_sab_seeding_storage(conn)
-            _init_v1_tables(conn)
+            if PUBLIC_MODE == PublicMode.LOCAL and not public_read_request():
+                init_sab_seeding_storage(conn)
+                _init_v1_tables(conn)
             seed_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_seed_packets_v1").fetchone()["c"])
             challenge_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_challenge_packets_v1").fetchone()["c"])
             pending_challenges = int(
@@ -2078,21 +2298,33 @@ def _frontier_store_stats() -> Dict[str, Any]:
             )
             witness_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_witness_events_v1").fetchone()["c"])
             standing_count = int(conn.execute("SELECT COUNT(*) AS c FROM sab_standing_leases_v1").fetchone()["c"])
+            observation = _public_read_observation()
+            observed_at = observation.observed_at if observation else datetime.now(timezone.utc)
+            conn.create_function(
+                "sab_observed_standing_status", 2,
+                lambda stored, expiry: observe_standing_status(
+                    stored, expiry, observed_at=observed_at, publication_observation=observation
+                )["status"],
+            )
             active_standing = int(
-                conn.execute("SELECT COUNT(*) AS c FROM sab_standing_leases_v1 WHERE status = 'active'").fetchone()[
+                conn.execute(
+                    "SELECT COUNT(*) AS c FROM sab_standing_leases_v1 "
+                    "WHERE sab_observed_standing_status(status, expiry) = 'active'",
+                ).fetchone()[
                     "c"
                 ]
             )
     except (OSError, sqlite3.Error) as exc:
         return {
             "available": False,
-            "error": str(exc),
+            "error": "Standing records are unavailable",
             "seeds": 0,
             "challenges": 0,
             "pending_challenges": 0,
             "witness_events": 0,
             "standing_leases": 0,
-            "active_standing": 0,
+            "active_standing": 0 if PUBLIC_MODE == PublicMode.LOCAL else None,
+            "active_standing_basis": "unavailable" if PUBLIC_MODE == PublicMode.LOCAL else "currentness_unestablished",
         }
     return {
         "available": True,
@@ -2101,7 +2333,8 @@ def _frontier_store_stats() -> Dict[str, Any]:
         "pending_challenges": pending_challenges,
         "witness_events": witness_count,
         "standing_leases": standing_count,
-        "active_standing": active_standing,
+        "active_standing": active_standing if PUBLIC_MODE == PublicMode.LOCAL else None,
+        "active_standing_basis": "local_observation" if PUBLIC_MODE == PublicMode.LOCAL else "currentness_unestablished",
     }
 
 
@@ -2112,8 +2345,9 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
 
         init_db()
         with _db() as conn:
-            init_sab_seeding_storage(conn)
-            _init_v1_tables(conn)
+            if PUBLIC_MODE == PublicMode.LOCAL and not public_read_request():
+                init_sab_seeding_storage(conn)
+                _init_v1_tables(conn)
             rows = conn.execute(
                 """
                 SELECT seed_id, state, packet_json, packet_hash, spark_projection_id,
@@ -2164,7 +2398,7 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
                 ).fetchone()
                 standing_row = conn.execute(
                     """
-                    SELECT status
+                    SELECT status, expiry
                     FROM sab_standing_leases_v1
                     WHERE subject_seed_id = ?
                     ORDER BY id DESC
@@ -2172,7 +2406,15 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
                     """,
                     (seed_id,),
                 ).fetchone()
-                standing_status = f"standing:{standing_row['status']}" if standing_row else "none"
+                standing_status = "none"
+                standing_observation = None
+                if standing_row:
+                    observed = observe_standing_status(
+                        standing_row["status"], standing_row["expiry"],
+                        publication_observation=_public_read_observation(),
+                    )
+                    standing_observation = observed
+                    standing_status = f"standing:{observed['status']}"
                 cards.append(
                     _frontier_card_from_packet_payload(
                         packet,
@@ -2189,6 +2431,12 @@ def _frontier_db_seed_cards(limit: int) -> List[Dict[str, Any]]:
                         standing_status=standing_status,
                     )
                 )
+                if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+                    cards[-1].update(
+                        status_basis="stored", standing_effect="none",
+                        standing_observation=standing_observation,
+                        currentness="unestablished",
+                    )
     except (OSError, sqlite3.Error):
         return cards
     return cards
@@ -2220,15 +2468,17 @@ def _frontier_board_lanes(cards: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
     return {
         "needs_challenge": needs_challenge[:6],
         "needs_witness": needs_witness[:6],
-        "ready_to_build": ready_to_build[:6],
+        "ready_to_build": ready_to_build[:6] if PUBLIC_MODE == PublicMode.LOCAL else [],
+        "recorded_build_candidates": ready_to_build[:6],
+        "readiness_basis": "local_heuristic" if PUBLIC_MODE == PublicMode.LOCAL else "currentness_unestablished",
     }
 
 
 def _frontier_snapshot(limit: int = 24) -> Dict[str, Any]:
-    receipts = _frontier_receipts_by_seed()
+    receipts = _frontier_receipts_by_seed() if PUBLIC_MODE == PublicMode.LOCAL else {}
     cards: List[Dict[str, Any]] = _frontier_db_seed_cards(limit)
     seen_seed_ids = {str(card.get("seed_id")) for card in cards}
-    if FRONTIER_PACKET_DIR.exists():
+    if PUBLIC_MODE == PublicMode.LOCAL and FRONTIER_PACKET_DIR.exists():
         for path in sorted(FRONTIER_PACKET_DIR.glob("*.json"), key=lambda item: item.name, reverse=True):
             payload = _read_json_object(path)
             if not payload:
@@ -2252,14 +2502,15 @@ def _frontier_snapshot(limit: int = 24) -> Dict[str, Any]:
     standing_surface_count = sum(
         1
         for card in cards
-        if str(card.get("standing_effect") or "").startswith("standing:")
+        if str(card.get("standing_effect") or "").startswith("standing:") or card.get("standing_observation")
     )
     external_action_count = sum(int(card.get("external_actions_count") or 0) for card in cards)
     store_stats = _frontier_store_stats()
 
     return {
         "schema": "sab.frontier_snapshot.v1",
-        "generated_at": _utc_now(),
+        "generated_at": _read_timestamp(),
+        **({"publication_observation": _public_read_observation().to_dict()} if PUBLIC_FRESHNESS is not None else {}),
         "frontier": {
             "id": "language_womb.epistemic_authority.v1",
             "title": "Language Womb Frontier",
@@ -2268,7 +2519,7 @@ def _frontier_snapshot(limit: int = 24) -> Dict[str, Any]:
                 "evidence grade, uncertainty, and authority affect typechecking and evaluation?"
             ),
             "target_rule": "Claim[Attested_by, womb] cannot satisfy Claim[Proven_by, core] without an accepted promotion proof.",
-            "source_doc": _safe_repo_relative(LANGUAGE_WOMB_SEED_DOC),
+            "source_doc": _safe_repo_relative(LANGUAGE_WOMB_SEED_DOC) if PUBLIC_MODE == PublicMode.LOCAL else None,
             "next_question": _frontier_open_questions()[0],
         },
         "stats": {
@@ -2277,7 +2528,8 @@ def _frontier_snapshot(limit: int = 24) -> Dict[str, Any]:
             "agent_count": len(agents),
             "challenge_required_count": sum(1 for card in cards if card.get("challenge_required")),
             "standing_surface_count": standing_surface_count,
-            "standing_grant_count": standing_surface_count,
+            "standing_grant_count": standing_surface_count if PUBLIC_MODE == PublicMode.LOCAL else None,
+            "standing_grant_count_basis": "recorded" if PUBLIC_MODE == PublicMode.LOCAL else "not_verified",
             "external_action_count": external_action_count,
             "status_counts": status_counts,
             "loop_counts": loop_counts,
@@ -2341,7 +2593,12 @@ async def feed_canon(
     init_db()
     with _db() as conn:
         items = _load_feed(conn, status_value="canon", limit=limit, gate_name=gate)
-    return {"status": "canon", "sorted_by_gate": gate, "items": items}
+    return {
+        "status": "legacy_endorsements",
+        "authority": _discourse_authority(),
+        "sorted_by_gate": gate,
+        "items": items,
+    }
 
 
 @app.get("/api/feed/compost")
@@ -2357,6 +2614,9 @@ async def feed_compost(
 
 @app.get("/api/node/status")
 async def node_status() -> Dict[str, Any]:
+    if PUBLIC_SNAPSHOT is not None:
+        return {"status": "healthy", "version": SAB_VERSION, "public_mode": PUBLIC_MODE.value,
+                "publication": _publication_status(), "timestamp": _read_timestamp()}
     init_db()
     with _db() as conn:
         total = int(conn.execute("SELECT COUNT(*) AS c FROM sparks").fetchone()["c"])
@@ -2398,14 +2658,16 @@ async def node_status() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "version": SAB_VERSION,
-        "db_path": str(SPARK_DB),
+        "public_mode": PUBLIC_MODE.value,
         "system_verify_key": SYSTEM_VERIFY_KEY_HEX,
         "gate_count": len(ALL_GATES),
-        "canon_quorum": CANON_QUORUM,
+        "authority": _discourse_authority(),
+        "legacy_canon_promotion": "disabled",
         "totals": {
             "sparks": total,
-            "spark_status": spark_count,
-            "canon": canon_count,
+            "spark_status": spark_count + canon_count,
+            "canon": 0,
+            "legacy_endorsements": canon_count,
             "compost": compost_count,
             "pending_challenges": challenge_pending,
         },
@@ -2423,8 +2685,10 @@ async def health() -> Dict[str, Any]:
         "status": status_payload["status"],
         "version": status_payload["version"],
         "surface": "agora.app",
-        "db_path": status_payload["db_path"],
+        "public_mode": PUBLIC_MODE.value,
         "timestamp": status_payload["timestamp"],
+        **({"publication": status_payload["publication"], "health_scope": "reader_process"}
+           if PUBLIC_SNAPSHOT is not None else {}),
     }
 
 
@@ -2435,6 +2699,10 @@ async def healthz() -> Dict[str, Any]:
 
 @app.get("/readyz")
 async def readyz() -> Dict[str, Any]:
+    if PUBLIC_SNAPSHOT is not None:
+        return {"status": "ready", "surface": "agora.app", "publication": _publication_status(),
+                "readiness_scope": "historical_inspection", "current_use_eligible": False,
+                "timestamp": _read_timestamp()}
     init_db()
     with _db() as conn:
         conn.execute("SELECT 1").fetchone()
@@ -2452,8 +2720,80 @@ async def cache_stats() -> Dict[str, Any]:
     return get_cache_stats()
 
 
+@app.get("/status", response_class=HTMLResponse)
+async def web_public_status(request: Request) -> HTMLResponse:
+    return _render_template(request, "web_publication_status.html", {"path_name": "/status"})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def web_home(
+    request: Request,
+    mode: Optional[str] = Query(None, pattern="^(newest|most-challenged|canon|compost)$"),
+    limit: int = Query(30, ge=1, le=100),
+) -> HTMLResponse:
+    # Retain old bookmarked feed filters while giving the main entry point a
+    # concrete claim to inspect. Selection means newest, never highest trust.
+    if mode is not None:
+        if PUBLIC_MODE == PublicMode.PUBLIC_READONLY:
+            return RedirectResponse("/claims", status_code=307)
+        return RedirectResponse("/feed?" + urlencode({"mode": mode, "limit": limit}), status_code=307)
+    with _db() as conn:
+        ledger = list_claims(conn, limit=1)
+        dossier = load_claim_dossier(conn, ledger["items"][0]["seed_id"]) if ledger["items"] else None
+    response = _render_template(
+        request, "web_claim_dossier.html",
+        {"dossier": dossier, "path_name": "/", "is_home": True, "session": _read_web_session(request)},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/claims", response_class=HTMLResponse)
+async def web_claims(
+    request: Request,
+    seed_id: Optional[str] = Query(None),
+    q: str = Query("", max_length=200),
+    state: str = Query("", max_length=64),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> HTMLResponse:
+    if seed_id is not None:
+        return await web_claim_dossier(request, seed_id)
+    with _db() as conn:
+        ledger = list_claims(conn, q=q, state=state, limit=limit, offset=offset)
+    page_query = {"q": q, "state": state, "limit": limit}
+    response = _render_template(
+        request, "web_claims.html",
+        {"ledger": ledger, "q": q, "state": state, "path_name": "/claims",
+         "next_url": "/claims?" + urlencode({**page_query, "offset": offset + limit})
+         if offset + limit < ledger["total"] else None,
+         "previous_url": "/claims?" + urlencode({**page_query, "offset": max(0, offset - limit)})
+         if offset else None,
+         "session": _read_web_session(request)},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/claims/{seed_id:path}", response_class=HTMLResponse)
+async def web_claim_dossier(request: Request, seed_id: str) -> HTMLResponse:
+    if not seed_id:
+        return RedirectResponse("/claims", status_code=307)
+    with _db() as conn:
+        dossier = load_claim_dossier(conn, seed_id)
+    response = _render_template(
+        request, "web_claim_dossier.html",
+        {"dossier": dossier, "path_name": "/claims", "is_home": False,
+         "session": _read_web_session(request)},
+    )
+    if dossier is None:
+        response.status_code = 404
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/feed", response_class=HTMLResponse)
+async def web_feed(
     request: Request,
     mode: str = Query("newest", pattern="^(newest|most-challenged|canon|compost)$"),
     limit: int = Query(30, ge=1, le=100),
@@ -2482,9 +2822,9 @@ async def web_home(
         "web_feed.html",
         {
             **feed_context,
-            "title": "SAB Feed",
+            "title": "Endorsement archive" if mode == "canon" else "SAB Feed",
             "mode": mode,
-            "path_name": "/",
+            "path_name": "/feed",
             "session": session,
         },
     )
@@ -2509,7 +2849,7 @@ async def web_canon(
         "web_feed.html",
         {
             **feed_context,
-            "title": "Canon",
+            "title": "Endorsement archive",
             "mode": "canon",
             "path_name": "/canon",
             "session": _read_web_session(request),
@@ -2623,64 +2963,24 @@ async def web_seed(request: Request) -> HTMLResponse:
 @app.get("/submit", response_class=HTMLResponse)
 async def web_submit_get(request: Request) -> HTMLResponse:
     session = _read_web_session(request)
-    csrf = _csrf_token_for_session(session) if session else ""
     return _render_template(
         request,
         "web_submit.html",
-        {"session": session, "error": "", "content": "", "csrf_token": csrf, "path_name": "/submit"},
+        {"session": session, "error": "", "content": "", "path_name": "/submit"},
     )
 
 
-@app.post("/submit", response_class=HTMLResponse)
-async def web_submit_post(
-    request: Request,
-    content: str = Form(...),
-    display_name: str = Form(""),
-    content_type: Literal["text", "code", "link"] = Form("text"),
-    csrf_form: str = Form("", alias="_csrf"),
-) -> HTMLResponse:
-    session = _read_web_session(request)
-    _verify_csrf_form_token(session, csrf_form)
-
-    body = (content or "").strip()
-    if not body:
-        csrf = _csrf_token_for_session(session) if session else ""
-        return _render_template(
-            request,
-            "web_submit.html",
-            {"session": session, "error": "Content is required.", "content": body, "csrf_token": csrf, "path_name": "/submit"},
-            status_code=400,
-        )
-
-    init_db()
-    with _db() as conn:
-        session = _resolve_or_create_web_session(request, conn, display_name)
-
-    signing_key = _signing_key_from_session(session)
-    content_sha256 = _sha256_hex(body.encode())
-    signature = signing_key.sign(_message_for_submit(str(session["agent_id"]), content_sha256)).signature.hex()
-    submit_req = SparkSubmitRequest(
-        content=body,
-        content_type=content_type,
-        author_id=str(session["agent_id"]),
-        signature=signature,
-    )
-    try:
-        spark = await submit_spark(submit_req)
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        csrf = _csrf_token_for_session(session) if session else ""
-        return _render_template(
-            request,
-            "web_submit.html",
-            {"session": session, "error": detail, "content": body, "csrf_token": csrf, "path_name": "/submit"},
-            status_code=exc.status_code,
-        )
-
-    response = RedirectResponse(url=f"/spark/{int(spark['id'])}?submitted=1", status_code=303)
-    if request.cookies.get(WEB_SESSION_COOKIE) != session["token"]:
-        _set_web_session_cookie(response, session)
-    return response
+@app.post("/submit")
+@app.post("/register")
+@app.post("/spark/{spark_id}/challenge")
+@app.post("/spark/{spark_id}/witness")
+async def retired_browser_form() -> JSONResponse:
+    # No Form/body dependencies: an obsolete request cannot create an identity,
+    # sign a participant command or write any record, including malformed input.
+    return JSONResponse({"error": "browser_key_required", "detail":
+                         "Use the participant page to retain your key and sign a scoped command.",
+                         "participant_path": "/register"}, status_code=428,
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/spark/{spark_id}", response_class=HTMLResponse)
@@ -2735,101 +3035,26 @@ async def web_spark_detail(
                 }
             )
 
+        linked = conn.execute(
+            "SELECT seed_id,claim_id FROM sab_seed_packets_v1 WHERE spark_projection_id=? ORDER BY id LIMIT 1",
+            (spark_id,),
+        ).fetchone()
+        linked_seed = dict(linked) if linked else None
+
     session = _read_web_session(request)
-    csrf = _csrf_token_for_session(session) if session else ""
     return _render_template(
         request,
         "web_spark_detail.html",
         {
             "spark": spark,
+            "linked_seed": linked_seed,
             "challenges": challenges,
             "timeline": timeline,
             "submitted": bool(submitted),
             "session": session,
-            "csrf_token": csrf,
             "path_name": "/seed" if spark.get("founding_seed") else "",
         },
     )
-
-
-@app.post("/spark/{spark_id}/challenge", response_class=HTMLResponse)
-async def web_challenge_post(
-    request: Request,
-    spark_id: int,
-    content: str = Form(...),
-    display_name: str = Form(""),
-    csrf_form: str = Form("", alias="_csrf"),
-) -> HTMLResponse:
-    _verify_csrf_form_token(_read_web_session(request), csrf_form)
-
-    body = (content or "").strip()
-    if not body:
-        return RedirectResponse(url=f"/spark/{spark_id}?challenge_error=1", status_code=303)
-
-    init_db()
-    with _db() as conn:
-        session = _resolve_or_create_web_session(request, conn, display_name)
-
-    signing_key = _signing_key_from_session(session)
-    content_sha256 = _sha256_hex(body.encode())
-    signature = signing_key.sign(
-        _message_for_challenge(spark_id, str(session["agent_id"]), content_sha256)
-    ).signature.hex()
-    challenge_req = ChallengeCreateRequest(
-        challenger_id=str(session["agent_id"]),
-        content=body,
-        signature=signature,
-    )
-    try:
-        await challenge_spark(spark_id, challenge_req)
-    except HTTPException:
-        return RedirectResponse(url=f"/spark/{spark_id}?challenge_error=1", status_code=303)
-
-    response = RedirectResponse(url=f"/spark/{spark_id}#challenges", status_code=303)
-    if request.cookies.get(WEB_SESSION_COOKIE) != session["token"]:
-        _set_web_session_cookie(response, session)
-    return response
-
-
-@app.post("/spark/{spark_id}/witness", response_class=HTMLResponse)
-async def web_witness_post(
-    request: Request,
-    spark_id: int,
-    action: Literal["affirm", "canon_affirm", "compost"] = Form("affirm"),
-    note: str = Form(""),
-    display_name: str = Form(""),
-    csrf_form: str = Form("", alias="_csrf"),
-) -> HTMLResponse:
-    _verify_csrf_form_token(_read_web_session(request), csrf_form)
-    init_db()
-    with _db() as conn:
-        session = _resolve_or_create_web_session(request, conn, display_name)
-
-    payload = {
-        "note": (note or "").strip()[:500],
-        "source": "web_surface",
-    }
-    signing_key = _signing_key_from_session(session)
-    payload_sha = _sha256_hex(_canonical_bytes(payload))
-    signature = signing_key.sign(
-        _message_for_witness(spark_id, str(session["agent_id"]), action, payload_sha)
-    ).signature.hex()
-    witness_req = WitnessSignRequest(
-        spark_id=spark_id,
-        witness_id=str(session["agent_id"]),
-        action=action,
-        payload=payload,
-        signature=signature,
-    )
-    try:
-        await witness_sign(witness_req)
-    except HTTPException:
-        return RedirectResponse(url=f"/spark/{spark_id}?witness_error=1", status_code=303)
-
-    response = RedirectResponse(url=f"/spark/{spark_id}#timeline", status_code=303)
-    if request.cookies.get(WEB_SESSION_COOKIE) != session["token"]:
-        _set_web_session_cookie(response, session)
-    return response
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -2839,16 +3064,6 @@ async def web_register_get(request: Request) -> HTMLResponse:
         "web_register.html",
         {"session": _read_web_session(request), "error": "", "path_name": "/register"},
     )
-
-
-@app.post("/register", response_class=HTMLResponse)
-async def web_register_post(request: Request, display_name: str = Form(...)) -> HTMLResponse:
-    init_db()
-    with _db() as conn:
-        session = _create_web_session(conn, display_name)
-    response = RedirectResponse(url=f"/agent/{session['agent_id']}", status_code=303)
-    _set_web_session_cookie(response, session)
-    return response
 
 
 @app.get("/agent/{agent_id}", response_class=HTMLResponse)
@@ -2927,14 +3142,6 @@ async def web_agent_profile(request: Request, agent_id: str) -> HTMLResponse:
             ).fetchone()["c"]
         )
 
-    canon_rate = (canon_count / submitted_count) if submitted_count else None
-    challenge_survival = (challenged_survived / challenged_total) if challenged_total else None
-    witness_accuracy = (attestation_on_canon / attestation_total) if attestation_total else None
-    reliability = [
-        {"label": "Canonization Rate", "value": canon_rate},
-        {"label": "Challenge Survival", "value": challenge_survival},
-        {"label": "Witness Accuracy", "value": witness_accuracy},
-    ]
     return _render_template(
         request,
         "web_agent_profile.html",
@@ -2950,7 +3157,6 @@ async def web_agent_profile(request: Request, agent_id: str) -> HTMLResponse:
                 "attestation_total": attestation_total,
                 "attestation_on_canon": attestation_on_canon,
             },
-            "reliability": reliability,
             "session": _read_web_session(request),
         },
     )

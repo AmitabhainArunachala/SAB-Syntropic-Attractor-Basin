@@ -8,8 +8,8 @@ and §2.3 (finality state machine):
   canon unreachable from a single signature.
 - B5: challenge window enforced as law; unresolved challenges resolve by deadline
   (pending -> sustained_by_default -> compost; responded -> lapsed).
-- B6: standing issues as provisional unless the independence gate passes;
-  with three disclosed operators the gate becomes mechanically passable.
+- B6: standing remains provisional when independent control has not been
+  established; disclosed operator labels cannot satisfy the quorum.
 """
 from __future__ import annotations
 
@@ -62,23 +62,30 @@ class _Agent:
 def sab_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SAB_SPARK_DB_PATH", str(tmp_path / "build3_enforcement.db"))
     monkeypatch.setenv("SAB_SYSTEM_WITNESS_KEY", str(tmp_path / ".build3_system_ed25519.key"))
+    from authority_fixtures import provision_authority_policy
+    authority = provision_authority_policy(tmp_path, monkeypatch)
     for mod_name in list(sys.modules):
         if mod_name == "agora" or mod_name.startswith("agora."):
             del sys.modules[mod_name]
-    return importlib.import_module("agora.app")
+    module = importlib.import_module("agora.app")
+    module.authority_test_fixture = authority
+    return module
 
 
 @pytest.fixture
 def client(sab_app):
     with TestClient(sab_app.app) as test_client:
+        sab_app.authority_test_fixture.enroll(test_client)
         yield test_client
 
 
 def _register(client: TestClient, agent: _Agent, label: str, operator_id: str) -> dict[str, Any]:
-    response = client.post(
-        "/api/v1/agents/register",
-        json={
-            "schema": "sab.agent_identity.v1",
+    from keycontrol_fixtures import enroll_identity
+
+    body = enroll_identity(
+        client,
+        agent.key,
+        {
             "display_name": label,
             "identity_rail": "ed25519",
             "public_key": agent.public_key,
@@ -92,8 +99,6 @@ def _register(client: TestClient, agent: _Agent, label: str, operator_id: str) -
             "external_attestations": [],
         },
     )
-    assert response.status_code == 201, response.text
-    body = response.json()
     agent.subject_id = body["subject_id"]
     return body
 
@@ -105,6 +110,7 @@ def _submit_seed(
     *,
     challenge_window: str = "P7D",
     forbidden_witnesses: Optional[list[str]] = None,
+    impact: Optional[str] = None,
 ) -> dict[str, Any]:
     created_at = _iso(_now())
     packet: dict[str, Any] = {
@@ -118,15 +124,7 @@ def _submit_seed(
             "scope": "this repo, this venv, one machine",
         },
         "claimant_identity": {"subject_id": claimant.subject_id},
-        "authority_lease": {
-            "lease_ref": f"sab_lease_{seed_id}_submit",
-            "subject_id": claimant.subject_id,
-            "purpose": "submit_seed",
-            "scope": "submit one enforcement-test seed",
-            "expires_at": _iso(_now() + timedelta(days=14)),
-            "revoker": "operator_build3",
-            "challenge_path": f"/api/v1/seeds/{seed_id}/challenges",
-        },
+        "authority_lease": client.authority.reference(claimant.subject_id, seed_id),
         "challenge_plan": {"required": True, "challenge_window": challenge_window},
         "witness_plan": {
             "required_roles": ["challenger", "witness"],
@@ -135,6 +133,8 @@ def _submit_seed(
         },
         "created_at": created_at,
     }
+    if impact is not None:
+        packet["witness_plan"]["impact"] = impact
     message = {
         "kind": "sab_seed_submit",
         "seed_packet_sha256": _sha256_obj(packet),
@@ -171,6 +171,7 @@ def _submit_challenge(
         "target_seed_id": seed_id,
         "target_claim_id": claim_id,
         "challenger_identity": challenger.subject_id,
+        "authority_lease": client.authority.reference(challenger.subject_id, seed_id),
         "challenge_type": "scope",
         "challenge_text": "Scope is broader than the receipts support.",
         "severity": "blocking",
@@ -321,11 +322,33 @@ def _review_standing(
     )
 
 
+def _stored_bytes(client):
+    # The application test fixture exposes only the isolated synthetic database.
+    module = importlib.import_module("agora.app")
+    with module._db() as conn:
+        return tuple(conn.iterdump())
+
+
+def _advance(client, actor, seed_id):
+    head = client.get(f"/api/v1/seeds/{seed_id}/chain").json()["head"]
+    created_at = _iso(_now())
+    message = {"kind": "sab_seed_advance_deadlines", "seed_id": seed_id,
+               "actor_identity": actor.subject_id, "prev_hash": head, "created_at": created_at}
+    response = client.post(f"/api/v1/seeds/{seed_id}/advance", json={
+        "actor_identity": actor.subject_id, "prev_hash": head, "created_at": created_at,
+        "signature": actor.sign(message),
+    })
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def test_b2_forbidden_witness_other_than_claimant_is_rejected(client: TestClient) -> None:
     claimant, blocked = _Agent(), _Agent()
     _register(client, claimant, "b2-claimant", "operator_one")
     _register(client, blocked, "b2-blocked-witness", "operator_one")
     seed_id = "sab_seed_b2_forbidden"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed'])
+    client.authority.issue(client, blocked.subject_id, seed_id, ['submit_witness_event'])
     _submit_seed(client, claimant, seed_id, forbidden_witnesses=[blocked.subject_id])
 
     response = _witness_event(client, blocked, seed_id, "affirm", {"attestation": "should be blocked"})
@@ -338,6 +361,8 @@ def test_b3_register_persists_operator_backing_and_grades_witnesses(client: Test
     _register(client, claimant, "b3-claimant", "operator_one")
     _register(client, witness, "b3-witness", "operator_two")
     seed_id = "sab_seed_b3_grades"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed'])
+    client.authority.issue(client, witness.subject_id, seed_id, ['submit_witness_event'])
     _submit_seed(client, claimant, seed_id)
 
     response = _witness_event(client, witness, seed_id, "affirm", {"attestation": "cross-operator affirm"})
@@ -360,6 +385,8 @@ def test_b3_witness_without_disclosure_grades_undisclosed(client: TestClient) ->
     _register(client, claimant, "b3-claimant-u", "operator_one")
     _register(client, witness, "b3-witness-u", "unknown")
     seed_id = "sab_seed_b3_undisclosed"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed'])
+    client.authority.issue(client, witness.subject_id, seed_id, ['submit_witness_event'])
     _submit_seed(client, claimant, seed_id)
 
     response = _witness_event(client, witness, seed_id, "affirm", {"attestation": "undisclosed affirm"})
@@ -378,6 +405,8 @@ def test_b4_composted_seed_is_absorbing(client: TestClient) -> None:
     _register(client, claimant, "b4-claimant", "operator_one")
     _register(client, witness, "b4-witness", "operator_two")
     seed_id = "sab_seed_b4_compost"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'withdraw_seed'])
+    client.authority.issue(client, witness.subject_id, seed_id, ['submit_witness_event', 'submit_challenge'])
     _submit_seed(client, claimant, seed_id)
     _withdraw_seed(client, claimant, seed_id)
 
@@ -402,6 +431,8 @@ def test_b4_parties_cannot_adjudicate_their_own_challenge(client: TestClient) ->
     _register(client, claimant, "b4-role-claimant", "operator_one")
     _register(client, challenger, "b4-role-challenger", "operator_two")
     seed_id = "sab_seed_b4_roles"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge', 'adjudicate_challenge'])
+    client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge', 'adjudicate_challenge', 'respond_challenge'])
     _submit_seed(client, claimant, seed_id)
     challenge_id = "sab_challenge_b4_roles"
     _submit_challenge(client, challenger, seed_id, challenge_id)
@@ -423,6 +454,7 @@ def test_b4_reserved_event_types_rejected_on_witness_endpoint(client: TestClient
     claimant = _Agent()
     _register(client, claimant, "b4-reserved", "operator_one")
     seed_id = "sab_seed_b4_reserved"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'submit_witness_event'])
     _submit_seed(client, claimant, seed_id)
     for event_type in ("canon", "compost", "standing_issued", "revoked", "expired"):
         response = _witness_event(client, claimant, seed_id, event_type, {"attempt": event_type})
@@ -434,6 +466,8 @@ def test_b5_challenge_window_closed_refuses_new_challenges(client: TestClient) -
     _register(client, claimant, "b5-claimant", "operator_one")
     _register(client, challenger, "b5-challenger", "operator_two")
     seed_id = "sab_seed_b5_window"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed'])
+    client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge'])
     seed = _submit_seed(client, claimant, seed_id, challenge_window="P0D")
     assert seed["challenge_window_closes_at"] is not None
 
@@ -452,6 +486,8 @@ def test_b5_pending_challenge_past_respond_by_sustains_by_default(client: TestCl
     _register(client, claimant, "b5-default-claimant", "operator_one")
     _register(client, challenger, "b5-default-challenger", "operator_two")
     seed_id = "sab_seed_b5_default"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'advance_deadlines'])
+    client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge'])
     _submit_seed(client, claimant, seed_id)
     challenge_id = "sab_challenge_b5_default"
     _submit_challenge(
@@ -462,10 +498,13 @@ def test_b5_pending_challenge_past_respond_by_sustains_by_default(client: TestCl
         deadline=_iso(_now() - timedelta(hours=1)),
     )
 
+    before = _stored_bytes(client)
     seed = client.get(f"/api/v1/seeds/{seed_id}").json()
-    assert seed["state"] == "compost"
-    challenge = client.get(f"/api/v1/challenges/{challenge_id}").json()
-    assert challenge["status"] == "sustained_by_default"
+    assert seed["state"] == "challenged"
+    assert client.get(f"/api/v1/challenges/{challenge_id}").json()["status"] == "pending"
+    assert _stored_bytes(client) == before
+    assert _advance(client, claimant, seed_id)["state"] == "compost"
+    assert client.get(f"/api/v1/challenges/{challenge_id}").json()["status"] == "sustained_by_default"
 
 
 def test_b5_responded_challenge_past_prosecute_by_lapses(client: TestClient) -> None:
@@ -473,6 +512,8 @@ def test_b5_responded_challenge_past_prosecute_by_lapses(client: TestClient) -> 
     _register(client, claimant, "b5-lapse-claimant", "operator_one")
     _register(client, challenger, "b5-lapse-challenger", "operator_two")
     seed_id = "sab_seed_b5_lapse"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge', 'advance_deadlines'])
+    client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge'])
     _submit_seed(client, claimant, seed_id)
     challenge_id = "sab_challenge_b5_lapse"
     _submit_challenge(
@@ -485,10 +526,13 @@ def test_b5_responded_challenge_past_prosecute_by_lapses(client: TestClient) -> 
     responded = _challenge_action(client, claimant, challenge_id, "respond", {"value": "narrowed scope"})
     assert responded.status_code == 201, responded.text
 
+    before = _stored_bytes(client)
     seed = client.get(f"/api/v1/seeds/{seed_id}").json()
     assert seed["state"] == "corrected"
-    challenge = client.get(f"/api/v1/challenges/{challenge_id}").json()
-    assert challenge["status"] == "lapsed"
+    assert client.get(f"/api/v1/challenges/{challenge_id}").json()["status"] == "responded"
+    assert _stored_bytes(client) == before
+    assert _advance(client, claimant, seed_id)["state"] == "corrected"
+    assert client.get(f"/api/v1/challenges/{challenge_id}").json()["status"] == "lapsed"
 
 
 def test_b6_single_operator_standing_capped_at_provisional(client: TestClient) -> None:
@@ -496,11 +540,17 @@ def test_b6_single_operator_standing_capped_at_provisional(client: TestClient) -
     for agent, label in ((claimant, "b6-claimant"), (challenger, "b6-challenger"), (witness, "b6-witness")):
         _register(client, agent, label, "operator_one")
     seed_id = "sab_seed_b6_single"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge', 'advance_deadlines'])
+    client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge'])
+    client.authority.issue(client, witness.subject_id, seed_id, ['adjudicate_challenge', 'submit_witness_event', 'request_standing_review'])
     _submit_seed(client, claimant, seed_id)
     challenge_id = "sab_challenge_b6_single"
-    _submit_challenge(client, challenger, seed_id, challenge_id)
+    _submit_challenge(client, challenger, seed_id, challenge_id, prosecute_by=_iso(_now() - timedelta(hours=1)))
     responded = _challenge_action(client, claimant, challenge_id, "respond", {"value": "narrowed"})
     assert responded.status_code == 201, responded.text
+    rejected = _challenge_action(client, witness, challenge_id, "reject", {"value": "narrowing suffices within this rehearsal"})
+    assert rejected.status_code == 403, rejected.text
+    _advance(client, claimant, seed_id)
     affirm = _witness_event(client, witness, seed_id, "affirm", {"attestation": "same-operator affirm"})
     assert affirm.status_code == 201, affirm.text
 
@@ -509,24 +559,30 @@ def test_b6_single_operator_standing_capped_at_provisional(client: TestClient) -
     body = review.json()
     assert body["status"] == "provisional"
     assert body["issued_under"]["tier"] == "provisional"
-    assert body["issued_under"]["rehearsal_flag"] == "single_operator_rehearsal"
+    assert body["issued_under"]["rehearsal_flag"] == "unestablished_operator_control"
 
 
-def test_b6_gate_passes_with_three_disclosed_operators(client: TestClient) -> None:
+def test_b6_disclosed_operator_labels_cannot_grant_independent_standing(client: TestClient) -> None:
     claimant, challenger, witness_b, witness_c = _Agent(), _Agent(), _Agent(), _Agent()
     _register(client, claimant, "b6-multi-claimant", "operator_one")
     _register(client, challenger, "b6-multi-challenger", "operator_two")
     _register(client, witness_b, "b6-multi-witness-b", "operator_two")
     _register(client, witness_c, "b6-multi-witness-c", "operator_three")
     seed_id = "sab_seed_b6_multi"
+    client.authority.issue(client, claimant.subject_id, seed_id, ['submit_seed', 'respond_challenge', 'advance_deadlines'])
+    client.authority.issue(client, challenger.subject_id, seed_id, ['submit_challenge'])
+    client.authority.issue(client, witness_b.subject_id, seed_id, ['submit_witness_event'])
+    client.authority.issue(client, witness_c.subject_id, seed_id, ['adjudicate_challenge', 'submit_witness_event', 'request_standing_review', 'canonize_standing'])
     _submit_seed(client, claimant, seed_id)
     challenge_id = "sab_challenge_b6_multi"
-    _submit_challenge(client, challenger, seed_id, challenge_id)
+    _submit_challenge(client, challenger, seed_id, challenge_id, prosecute_by=_iso(_now() - timedelta(hours=1)))
     responded = _challenge_action(client, claimant, challenge_id, "respond", {"value": "narrowed"})
     assert responded.status_code == 201, responded.text
-    # witness_c is cross-operator vs both parties, so may adjudicate.
+    # This is a local rehearsal; distinct declared labels prove no independent
+    # control and cannot promote the resulting standing.
     rejected = _challenge_action(client, witness_c, challenge_id, "reject", {"value": "narrowing suffices"})
-    assert rejected.status_code == 201, rejected.text
+    assert rejected.status_code == 403, rejected.text
+    _advance(client, claimant, seed_id)
 
     for witness in (witness_b, witness_c):
         affirm = _witness_event(client, witness, seed_id, "affirm", {"attestation": "cross-operator affirm"})
@@ -535,9 +591,8 @@ def test_b6_gate_passes_with_three_disclosed_operators(client: TestClient) -> No
     review = _review_standing(client, witness_c, seed_id, "sab_standing_b6_multi")
     assert review.status_code == 201, review.text
     body = review.json()
-    assert body["status"] == "active"
-    assert body["issued_under"]["tier"] == "active"
-    assert body["issued_under"]["rehearsal_flag"] == "multi_operator"
+    assert body["status"] == "provisional"
+    assert body["issued_under"]["tier"] == "provisional"
 
     # Canon still requires cross_operator_attested evidence, which cannot be
     # self-declared, so single-signature canon remains unreachable.
@@ -545,6 +600,7 @@ def test_b6_gate_passes_with_three_disclosed_operators(client: TestClient) -> No
     action_payload = {"reason": "promote", "evidence": {}}
     message = {
         "kind": "sab_standing_revalidate",
+        "promote_to_canon": True,
         "standing_id": "sab_standing_b6_multi",
         "actor_identity": witness_c.subject_id,
         "payload_sha256": _sha256_obj(action_payload),

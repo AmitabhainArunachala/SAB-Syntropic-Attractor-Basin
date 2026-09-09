@@ -10,7 +10,6 @@ from typing import Any, Dict
 
 import pytest
 from fastapi.testclient import TestClient
-from nacl.encoding import HexEncoder
 from nacl.signing import SigningKey
 
 
@@ -79,10 +78,9 @@ def _sign_witness(sk: SigningKey, spark_id: int, witness_id: str, action: str, p
 
 
 def _register(client: TestClient, sk: SigningKey, name: str) -> str:
-    public_key = sk.verify_key.encode(encoder=HexEncoder).decode()
-    res = client.post("/api/agents/register", json={"name": name, "public_key": public_key})
-    assert res.status_code == 201, res.text
-    return str(res.json()["id"])
+    from keycontrol_fixtures import enroll_identity
+
+    return enroll_identity(client, sk, display_name=name)["subject_id"]
 
 
 def _submit_spark(client: TestClient, sk: SigningKey, author_id: str, content: str) -> int:
@@ -217,7 +215,7 @@ def test_pending_challenge_blocks_canon_quorum(client: TestClient) -> None:
     assert body["replay"]["canon_events"] == []
 
 
-def test_sublation_creates_successor_and_successor_canonizes_after_quorum(
+def test_sublation_preserves_correction_without_quorum_granting_standing(
     client: TestClient,
     spark_app,
 ) -> None:
@@ -267,7 +265,9 @@ def test_sublation_creates_successor_and_successor_canonizes_after_quorum(
     assert client.get(f"/api/spark/{successor_id}").json()["status"] == "spark"
 
     _affirm(client, sks[5], agents[5], successor_id, "final successor quorum")
-    assert client.get(f"/api/spark/{successor_id}").json()["status"] == "canon"
+    successor = client.get(f"/api/spark/{successor_id}").json()
+    assert successor["status"] == "spark"
+    assert successor["authority"]["standing_effect"] == "none"
 
     successor_replay = client.get(f"/api/spark/{successor_id}/replay").json()
     assert successor_replay["verified"] is True
@@ -278,7 +278,7 @@ def test_sublation_creates_successor_and_successor_canonizes_after_quorum(
     )
     assert successor_event["payload_obj"]["predecessor_spark_id"] == spark_id
     assert successor_event["payload_obj"]["challenge_id"] == challenge_id
-    assert successor_replay["replay"]["canon_events"][0]["action"] == "canon_promoted"
+    assert successor_replay["replay"]["canon_events"] == []
 
     seed_claim = spark_app._founding_seed_claim()
     assert seed_claim is not None
@@ -300,7 +300,7 @@ def test_sublation_creates_successor_and_successor_canonizes_after_quorum(
     assert artifact_ref in seed_page.text
     assert "replay verified" in seed_page.text
     assert f"spark #{successor_id}" in seed_page.text
-    assert "canon" in seed_page.text
+    assert "Spark" in seed_page.text
 
 
 def test_replay_verification_detects_tampered_sublation_event(

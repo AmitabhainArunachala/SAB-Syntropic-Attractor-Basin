@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-08T17:17:53.164697Z",
+  "title": "Design System: SAB public claim inspection",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Accent"
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Bg"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface"
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Surface raised"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted"
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border"
+      },
+      "dark-accent": {
+        "role": "primary",
+        "displayName": "Dark accent"
+      },
+      "dark-bg": {
+        "role": "neutral",
+        "displayName": "Dark bg"
+      },
+      "dark-surface": {
+        "role": "neutral",
+        "displayName": "Dark surface"
+      },
+      "dark-surface-raised": {
+        "role": "neutral",
+        "displayName": "Dark surface raised"
+      },
+      "dark-ink": {
+        "role": "neutral",
+        "displayName": "Dark ink"
+      },
+      "dark-muted": {
+        "role": "neutral",
+        "displayName": "Dark muted"
+      },
+      "dark-border": {
+        "role": "neutral",
+        "displayName": "Dark border"
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Shared body",
+        "purpose": "Declared shell interface font and line height."
+      },
+      "dossier-headline": {
+        "displayName": "Dossier headline",
+        "purpose": "Claim dossier and ledger page headings only."
+      },
+      "dossier-title": {
+        "displayName": "Dossier section title",
+        "purpose": "Claim sections and ledger record headings."
+      },
+      "dossier-prose": {
+        "displayName": "Submitted claim prose",
+        "purpose": "Exact claim text in the dossier."
+      },
+      "dossier-record": {
+        "displayName": "Dossier JSON",
+        "purpose": "Expanded structured records."
+      }
+    },
+    "motion": [
+      {
+        "name": "shell-theme-change",
+        "value": "background-color 200ms ease, color 200ms ease",
+        "purpose": "Existing body theme transition; dossier controls add no animation."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "dossier-stack",
+        "value": "600px"
+      },
+      {
+        "name": "shell-wide-padding",
+        "value": "40rem"
+      },
+      {
+        "name": "reliance-notice-compact",
+        "value": "480px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Dossier primary action",
+      "kind": "button",
+      "refersTo": "dossier-button",
+      "description": "Search button; the same local treatment is used by dossier download links.",
+      "html": "<button class=\"ds-dossier-button\" type=\"button\">Search</button>",
+      "css": ".ds-dossier-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:.65rem 1rem;border:1px solid var(--color-accent, #114e8a);border-radius:8px;background:var(--color-accent, #114e8a);color:var(--color-bg, #f4f3ef);font-family:var(--font-body, 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif);font-size:1rem;line-height:1.55;font-weight:600;cursor:pointer;text-decoration:none}.ds-dossier-button:hover{filter:brightness(.94)}.ds-dossier-button:focus-visible{outline:2px solid var(--color-accent, #114e8a);outline-offset:4px;}"
+    },
+    {
+      "name": "Claim search field",
+      "kind": "input",
+      "refersTo": "dossier-search",
+      "description": "Labeled search input from the claim ledger.",
+      "html": "<div class=\"ds-claim-search\"><label for=\"ds-claim-query\">Search claims</label><input id=\"ds-claim-query\" type=\"search\" placeholder=\"Title, claim text, or identifier\" maxlength=\"200\"></div>",
+      "css": ".ds-claim-search{font-family:var(--font-body, 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif);color:var(--color-ink, #1e1d1a);line-height:1.55}.ds-claim-search label{display:block;margin-bottom:.4rem;font-size:.9rem}.ds-claim-search input{width:100%;min-height:44px;padding:.65rem .8rem;border:1px solid var(--color-border, #d8d1c0);border-radius:8px;background:var(--color-surface, #fffdf6);color:var(--color-ink, #1e1d1a);font:inherit;caret-color:var(--color-accent, #114e8a)}.ds-claim-search input::placeholder{color:var(--color-muted, #6f6a5f);opacity:1}.ds-claim-search input:focus-visible{outline:2px solid var(--color-accent, #114e8a);outline-offset:4px;}"
+    },
+    {
+      "name": "Dossier section navigation",
+      "kind": "nav",
+      "refersTo": "dossier-section-nav",
+      "description": "Wrapping anchor links between the dossier sections.",
+      "html": "<nav class=\"ds-dossier-nav\" aria-label=\"Dossier sections\"><a href=\"#claim\">Exact claim</a><a href=\"#evidence\">Evidence</a><a href=\"#challenges\">Challenges</a></nav>",
+      "css": ".ds-dossier-nav{display:flex;flex-wrap:wrap;gap:.75rem 1.5rem;padding:1rem 0;border-block:1px solid var(--color-border, #d8d1c0);font-family:var(--font-body, 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif);font-size:1rem;line-height:1.55}.ds-dossier-nav a{display:inline-flex;align-items:center;min-height:32px;color:var(--color-accent, #114e8a);text-decoration:none;text-underline-offset:.2em;}.ds-dossier-nav a:hover{text-decoration:underline}.ds-dossier-nav a:focus-visible{outline:2px solid var(--color-accent, #114e8a);outline-offset:4px;}"
+    },
+    {
+      "name": "Dossier decision notice",
+      "kind": "card",
+      "refersTo": "dossier-decision",
+      "description": "The dossier notice uses tonal separation and a border, without a shadow.",
+      "html": "<div class=\"ds-dossier-decision\" role=\"note\" aria-label=\"Reliance decision\"><h2>Reliance not established</h2><p>This dossier exposes recorded evidence and limited integrity checks. It does not establish permission to rely on the claim.</p></div>",
+      "css": ".ds-dossier-decision{background:var(--color-surface-raised, #fff);border:1px solid var(--color-border, #d8d1c0);border-radius:12px;padding:1rem 1.25rem;color:var(--color-ink, #1e1d1a);overflow-wrap:anywhere;font-family:var(--font-body, 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif);}.ds-dossier-decision h2{font-family:var(--font-heading, 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif);font-size:1.125rem;line-height:1.3;font-weight:600;margin:0 0 .4rem}.ds-dossier-decision p{font-size:.9375rem;line-height:1.65;max-width:72ch;margin:0}"
+    },
+    {
+      "name": "Dossier check disclosure",
+      "kind": "custom",
+      "refersTo": "dossier-check",
+      "description": "Native disclosure with a named check, written state, and explanation.",
+      "html": "<details class=\"ds-dossier-check\"><summary><strong>Signature verification</strong><span class=\"ds-dossier-check-state\" data-check-state=\"not_checked\">not checked</span></summary><p>This reader does not verify signatures.</p></details>",
+      "css": ".ds-dossier-check{margin:0;padding:.35rem 0;border-bottom:1px solid var(--color-border, #d8d1c0);color:var(--color-ink, #1e1d1a);font-family:var(--font-body, 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif);font-size:1rem;overflow-wrap:anywhere}.ds-dossier-check summary{display:list-item;list-style-position:inside;min-height:44px;cursor:pointer;padding:.7rem 0;font-weight:500;line-height:1.5}.ds-dossier-check summary strong{margin-inline-end:1rem}.ds-dossier-check summary:hover{color:var(--color-accent, #114e8a)}.ds-dossier-check summary:focus-visible{outline:2px solid var(--color-accent, #114e8a);outline-offset:4px;}.ds-dossier-check-state{display:inline-block;font-size:.8125rem;text-transform:capitalize;border:1px solid var(--color-border, #d8d1c0);border-radius:6px;padding:.15rem .55rem}.ds-dossier-check-state[data-check-state=\"failed\"]{font-weight:700;text-decoration:underline;text-underline-offset:.2em}.ds-dossier-check p{margin:0 0 .75rem;font-size:.9rem;line-height:1.65;max-width:72ch}"
+    },
+    {
+      "name": "Dossier JSON record",
+      "kind": "custom",
+      "refersTo": "dossier-json",
+      "description": "Expanded record content preserves whitespace and wraps long values.",
+      "html": "<pre class=\"ds-dossier-json\">{\n  \"identity\": {\n    \"claim_id\": \"example-claim\"\n  }\n}</pre>",
+      "css": ".ds-dossier-json{white-space:pre-wrap;overflow-wrap:anywhere;max-height:36rem;overflow:auto;background:var(--color-surface-raised, #fff);color:var(--color-ink, #1e1d1a);padding:1rem;border:1px solid var(--color-border, #d8d1c0);border-radius:8px;font:.8125rem/1.65 var(--font-mono, 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace);scrollbar-color:var(--color-muted, #6f6a5f) var(--color-surface-raised, #fff)}"
+    }
+  ],
+  "narrative": {
+    "overview": "This reference records the public claim dossier, claim ledger, and shared SAB shell as implemented. The shared palette and declared font stacks come from `agora/tailwind.css` and its compiled `agora/static/web.css`; the local reading patterns come from `agora/static/dossier.css` and `agora/static/reliance.css`. Tokens prefixed `dossier-` apply to claim inspection, not to every route.\n\nThe views use a text-led document layout: headings, prose, labeled facts, ruled records, and native disclosures. Cream surfaces and a blue accent form the light theme; navy surfaces and a teal accent form the dark theme. The feature contract remains in [Public claim inspection](docs/PUBLIC_CLAIM_DOSSIER.md).",
+    "keyCharacteristics": [
+      "Shared theme variables for surfaces, text, borders, and focus.",
+      "Sans-serif interface text, serif claim prose, and monospace records.",
+      "Written states, wrapping records, and native disclosure controls."
+    ],
+    "rules": [
+      {
+        "name": "The Theme Inheritance Rule",
+        "body": "Dossier surfaces, text, borders, links, and focus outlines resolve through the shared color variables in both themes.",
+        "section": "colors"
+      },
+      {
+        "name": "The Written State Rule",
+        "body": "Dossier states remain written text. Failed check states additionally use bold weight and an underline; their meaning does not depend on a colored badge.",
+        "section": "components"
+      }
+    ]
+  }
+}

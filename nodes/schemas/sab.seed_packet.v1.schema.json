@@ -261,6 +261,11 @@
         "forbidden_witnesses"
       ],
       "properties": {
+        "impact": {
+          "type": "string",
+          "enum": ["low", "high", "critical", "standing", "canon", "deployment", "payment", "authority"],
+          "description": "Absent means legacy low-impact data only; independent standing always requires reviewed control evidence."
+        },
         "required_roles": {
           "type": "array",
           "minItems": 1,

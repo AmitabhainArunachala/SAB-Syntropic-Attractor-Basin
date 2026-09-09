@@ -1,4 +1,4 @@
-"""Minimal read-only SAB standing verifier.
+"""Read-only SAB standing observation, without a current reliance grant.
 
 Given a standing_id, seed_id, claim_id, claim_hash (seed packet_hash), or
 lease_hash, answer:
@@ -9,24 +9,24 @@ lease_hash, answer:
 
 Sources, in order:
   1. The local SQLite store (default: <repo>/data/spark.db), opened READ-ONLY
-     (`file:...?mode=ro`). This tool never writes. Unlike the API's lazy
-     `_expire_standing_if_needed` (agora/sab_seeding_api.py:1913), expiry here
-     is computed at read time without mutating the row.
+     (`file:...?mode=ro`). Expiry is computed without mutating stored history.
   2. Optional dogfood receipt JSONs (`--receipts DIR`): the numbered
      `*.response.json` snapshots written by the Demonstration Zero loop.
      Receipts are point-in-time snapshots, not the live store.
 
-Honesty rules baked in:
-  - `rehearsal_only` is reported instead of `active` whenever the lease/seed
-    carries single-operator rehearsal markers. A single-operator loop is
-    pipeline evidence, not cross-operator standing.
-  - Independence grading follows the conservative collapse rule of
-    docs/SAB_STANDING_SEMANTICS_V0.md (R2): absent operator evidence grades
-    `undisclosed`, never upward. This verifier can never emit
-    `cross_operator_*` because the local store persists no operator identity
-    for registered agents (web_agents keeps only id/name/public_key,
-    agora/app.py:1268-1275) and no endpoint calls
-    `validate_witness_independence` (agora/sab_identity.py:491).
+`recorded_status` and its compatibility alias `raw_status` preserve the source's
+stored value. For receipts with both `stored_status` and an observed `status`,
+`captured_status` also retains that observation. Neither establishes current use.
+This tool does not verify historical signatures, trusted policy pins, current key
+control, cohort scope, evidence or revocation. A signed snapshot cannot supply
+the registry's current evaluation. Thus `effective_reliance` is `unestablished`
+and `current_use_eligible` is false, including when history records active/canon.
+
+`status` conservatively reports observable expiry, terminal/challenged history,
+or rehearsal markers; otherwise it is unknown. `active` remains in the vocabulary
+for compatibility but is never inferred from stored labels. Independence labels
+describe disclosed relationships only: different keys, different operator
+strings and absent rehearsal markers do not prove independent control.
 """
 
 from __future__ import annotations
@@ -50,16 +50,16 @@ REHEARSAL_MARKERS = (
     "rehearsal",
 )
 
-# Live lease statuses (agora/sab_seeding_api.py:30) -> profile vocabulary.
+# Recorded lease statuses -> observation vocabulary.
 _LEASE_STATUS_MAP = {
     "revoked": "revoked",
     "expired": "expired",
     "challenged": "challenged",
-    # "active" / "canon" handled specially (expiry + rehearsal checks).
-    # "compost" handled specially (out-of-vocab, mapped with a note).
+    # Positive recorded statuses need expiry and control checks.
+    # Other terminal statuses are mapped with an explicit note.
 }
 
-# Seed states (agora/sab_seeding_api.py:15-27) -> profile vocabulary when no
+# Seed states -> observation vocabulary when no
 # standing lease exists for the seed.
 _SEED_STATE_MAP = {
     "challenged": "challenged",
@@ -68,25 +68,25 @@ _SEED_STATE_MAP = {
 }
 
 
-def _parse_dt(value: str) -> Optional[datetime]:
-    if not value:
+def _parse_dt(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
         return None
     text = value.strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
         parsed = datetime.fromisoformat(text)
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
     return parsed
 
 
 def _connect_ro(db_path: Path) -> Optional[sqlite3.Connection]:
     if not db_path.is_file():
         return None
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -119,10 +119,7 @@ def _independence_status(
 ) -> str:
     if claimant_identity and issuer_identity and claimant_identity == issuer_identity:
         return "self"
-    disclosure = ""
-    if seed_packet:
-        backing = seed_packet.get("operator_backing") or {}
-        disclosure = str(backing.get("disclosure") or "").lower()
+    disclosure = _operator_disclosure(seed_packet).lower()
     same_operator_disclosed = "same operator" in disclosure
     if same_operator_disclosed or "not_cross_operator_independent" in markers or (
         "single_operator_rehearsal" in markers
@@ -130,28 +127,39 @@ def _independence_status(
         if claimant_identity and issuer_identity and claimant_identity != issuer_identity:
             return "same_operator_distinct_keys"
         return "same_operator"
-    # Conservative collapse (SAB_STANDING_SEMANTICS_V0.md R2): no verifiable
-    # operator evidence in the local store -> undisclosed, never upward.
+    # Disclosures are historical observations, never current control proofs.
     return "undisclosed"
 
 
+def _operator_disclosure(seed_packet: Optional[Dict[str, Any]]) -> str:
+    backing = (seed_packet or {}).get("operator_backing")
+    if not isinstance(backing, dict):
+        return ""
+    disclosure = backing.get("disclosure")
+    return disclosure if isinstance(disclosure, str) else ""
+
+
 def _status_from_lease(
-    raw_status: str,
-    expiry: Optional[str],
+    raw_status: Any,
+    expiry: Any,
     markers: List[str],
     now: datetime,
     notes: List[str],
 ) -> str:
+    if not isinstance(raw_status, str):
+        notes.append("recorded lease status is missing or malformed")
+        return "unknown"
     if raw_status in _LEASE_STATUS_MAP:
         return _LEASE_STATUS_MAP[raw_status]
-    if raw_status == "compost":
-        notes.append("raw lease status 'compost' is outside the profile vocabulary; mapped to 'revoked'")
+    if raw_status in ("compost", "superseded"):
+        notes.append(f"raw lease status '{raw_status}' is terminal and outside the profile vocabulary; mapped to 'revoked'")
         return "revoked"
-    if raw_status in ("active", "canon"):
-        if raw_status == "canon":
-            notes.append("raw lease status 'canon' mapped to the 'active' family")
-        expiry_dt = _parse_dt(expiry or "")
-        if expiry_dt is not None and expiry_dt <= now:
+    if raw_status in ("active", "canon", "provisional"):
+        expiry_dt = _parse_dt(expiry)
+        if expiry_dt is None:
+            notes.append("lease expiry is missing, malformed or timezone-ambiguous; current validity is unknown")
+            return "unknown"
+        if expiry_dt <= now:
             notes.append(
                 "expiry computed at read time; the stored row may still say "
                 f"'{raw_status}' because this verifier never writes"
@@ -159,12 +167,15 @@ def _status_from_lease(
             return "expired"
         if markers:
             notes.append(
-                "lease records status 'active' but carries single-operator rehearsal "
-                "markers; reported as rehearsal_only, not active"
+                "lease carries single-operator rehearsal markers; reported as rehearsal_only"
             )
             return "rehearsal_only"
-        return "active"
-    notes.append(f"unrecognized raw lease status '{raw_status}'")
+        notes.append(
+            "recorded promotion does not establish current independent control or reliance; "
+            "a current trusted registry evaluation for the exact cohort and claim is required"
+        )
+        return "unknown"
+    notes.append("unrecognized recorded lease status")
     return "unknown"
 
 
@@ -174,6 +185,9 @@ def _status_from_seed_state(state: str, markers: List[str], notes: List[str]) ->
     if state == "compost":
         notes.append("seed state 'compost' is outside the profile vocabulary; mapped to 'revoked'")
         return "revoked"
+    if state == "standing_active" and markers:
+        notes.append("seed records standing_active with rehearsal markers; reported as rehearsal_only")
+        return "rehearsal_only"
     notes.append(
         f"seed exists (state='{state}') but no standing lease has been issued; "
         "standing status is unknown"
@@ -188,6 +202,14 @@ def _base_result(query: str, db_path: Path) -> Dict[str, Any]:
         "source": "none",
         "status": "unknown",
         "raw_status": None,
+        "recorded_status": None,
+        "captured_status": None,
+        "effective_reliance": "unestablished",
+        "current_use_eligible": False,
+        "control_verification_status": "not_verified",
+        "historical_integrity": "not_verified",
+        "authority_effect": "none",
+        "standing_effect": "none",
         "independence_status": "unknown",
         "expires_at": None,
         "standing_id": None,
@@ -201,7 +223,10 @@ def _base_result(query: str, db_path: Path) -> Dict[str, Any]:
         "rehearsal_markers": [],
         "checked_at": None,
         "db_path": str(db_path),
-        "notes": [],
+        "notes": [
+            "offline observation does not verify historical signatures or current operator-control eligibility; "
+            "stored status, disclosures and receipt assessments do not establish current reliance"
+        ],
     }
 
 
@@ -209,7 +234,8 @@ def _load_seed_packet(row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
     if row is None:
         return None
     try:
-        return json.loads(str(row["packet_json"]))
+        packet = json.loads(str(row["packet_json"]))
+        return packet if isinstance(packet, dict) else None
     except (KeyError, ValueError, IndexError):
         return None
 
@@ -273,14 +299,14 @@ def _resolve_from_db(
     if lease_row is not None:
         result["resolved_as"] = "standing_lease"
         result["standing_id"] = str(lease_row["standing_id"])
-        result["raw_status"] = str(lease_row["status"])
-        result["expires_at"] = str(lease_row["expiry"])
+        result["raw_status"] = result["recorded_status"] = lease_row["status"]
+        result["expires_at"] = lease_row["expiry"]
         result["scope"] = str(lease_row["scope"])
         result["challenge_uri"] = str(lease_row["challenge_path"]) or None
         result["revocation_uri"] = f"/api/v1/standing/{lease_row['standing_id']}/revoke"
         notes.append(
             "revocation_uri derived from the live route "
-            "POST /api/v1/standing/{standing_id}/revoke (agora/sab_seeding_api.py:735); "
+            "POST /api/v1/standing/{standing_id}/revoke; "
             "the lease itself stores a revoker identity, not a URI"
         )
         markers = _collect_markers(
@@ -288,11 +314,11 @@ def _resolve_from_db(
             str(lease_row["purpose"]),
             str(lease_row["lease_json"]),
             (seed_packet or {}).get("labels"),
-            ((seed_packet or {}).get("operator_backing") or {}).get("disclosure"),
+            _operator_disclosure(seed_packet),
         )
         result["rehearsal_markers"] = markers
         result["status"] = _status_from_lease(
-            str(lease_row["status"]), str(lease_row["expiry"]), markers, now, notes
+            lease_row["status"], lease_row["expiry"], markers, now, notes
         )
         result["independence_status"] = _independence_status(
             seed_packet, claimant, str(lease_row["issued_by"]), markers
@@ -301,10 +327,10 @@ def _resolve_from_db(
 
     # Seed found, no lease.
     result["resolved_as"] = "seed"
-    result["raw_status"] = str(seed_row["state"])
+    result["raw_status"] = result["recorded_status"] = seed_row["state"]
     markers = _collect_markers(
         (seed_packet or {}).get("labels"),
-        ((seed_packet or {}).get("operator_backing") or {}).get("disclosure"),
+        _operator_disclosure(seed_packet),
     )
     result["rehearsal_markers"] = markers
     result["status"] = _status_from_seed_state(str(seed_row["state"]), markers, notes)
@@ -322,10 +348,10 @@ def _resolve_from_receipts(
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (ValueError, OSError):
             continue
-        body = payload.get("body")
+        body = payload.get("body") if isinstance(payload, dict) else None
         if not isinstance(body, dict):
             continue
-        candidates = {
+        candidates = (
             body.get("standing_id"),
             body.get("seed_id"),
             body.get("claim_id"),
@@ -333,7 +359,7 @@ def _resolve_from_receipts(
             body.get("subject_claim_id"),
             body.get("packet_hash"),
             body.get("lease_hash"),
-        }
+        )
         if identifier in candidates:
             matches.append({"path": path.name, "body": body})
     if not matches:
@@ -355,14 +381,18 @@ def _resolve_from_receipts(
         result["standing_id"] = latest.get("standing_id")
         result["seed_id"] = latest.get("subject_seed_id")
         result["claim_id"] = latest.get("subject_claim_id")
-        result["raw_status"] = latest.get("status")
+        result["raw_status"] = result["recorded_status"] = latest.get("stored_status", latest.get("status"))
+        result["captured_status"] = latest.get("status")
         result["expires_at"] = latest.get("expiry")
         result["scope"] = latest.get("scope")
         result["challenge_uri"] = latest.get("challenge_path")
-        markers = _collect_markers(latest.get("scope"), latest.get("purpose"))
+        markers = _collect_markers(
+            latest.get("scope"), latest.get("purpose"), latest.get("standing_lease"),
+            (seed_packet or {}).get("labels"), _operator_disclosure(seed_packet),
+        )
         result["rehearsal_markers"] = markers
         result["status"] = _status_from_lease(
-            str(latest.get("status") or ""), latest.get("expiry"), markers, now, notes
+            result["recorded_status"], latest.get("expiry"), markers, now, notes
         )
         result["independence_status"] = _independence_status(
             seed_packet, claimant if isinstance(claimant, str) else None,
@@ -374,24 +404,15 @@ def _resolve_from_receipts(
     result["seed_id"] = latest.get("seed_id")
     result["claim_id"] = latest.get("claim_id")
     result["claim_hash"] = latest.get("packet_hash")
-    result["raw_status"] = latest.get("state")
+    result["raw_status"] = result["recorded_status"] = latest.get("state")
+    result["captured_status"] = latest.get("state")
     markers = _collect_markers(
         (seed_packet or {}).get("labels"),
-        ((seed_packet or {}).get("operator_backing") or {}).get("disclosure"),
+        _operator_disclosure(seed_packet),
     )
     result["rehearsal_markers"] = markers
     state = str(latest.get("state") or "")
-    if state == "standing_active":
-        if markers:
-            notes.append(
-                "receipt shows state 'standing_active' with rehearsal markers; "
-                "reported as rehearsal_only"
-            )
-            result["status"] = "rehearsal_only"
-        else:
-            result["status"] = "active"
-    else:
-        result["status"] = _status_from_seed_state(state, markers, notes)
+    result["status"] = _status_from_seed_state(state, markers, notes)
     result["independence_status"] = _independence_status(
         seed_packet, claimant if isinstance(claimant, str) else None, None, markers
     )
@@ -406,16 +427,24 @@ def verify(
 ) -> Dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     result = _base_result(identifier, db_path)
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        result["notes"].append("observation time is invalid or timezone-ambiguous")
+        return result
     result["checked_at"] = now.isoformat()
 
-    conn = _connect_ro(db_path)
-    if conn is None:
-        result["notes"].append(f"database not found at {db_path}")
-    else:
-        try:
-            if _resolve_from_db(conn, identifier, result, now):
-                return result
-        finally:
+    conn = None
+    try:
+        conn = _connect_ro(db_path)
+        if conn is None:
+            result["notes"].append(f"database not found at {db_path}")
+        elif _resolve_from_db(conn, identifier, result, now):
+            return result
+    except (sqlite3.Error, OSError, KeyError, IndexError):
+        result = _base_result(identifier, db_path)
+        result["checked_at"] = now.isoformat()
+        result["notes"].append("database could not be read consistently; no current status established")
+    finally:
+        if conn is not None:
             conn.close()
 
     if receipts_dir is not None and receipts_dir.is_dir():
@@ -430,7 +459,7 @@ def verify(
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Read-only SAB standing verifier (never writes)."
+        description="Read-only SAB standing observation; recorded status does not establish current reliance."
     )
     parser.add_argument(
         "identifier",

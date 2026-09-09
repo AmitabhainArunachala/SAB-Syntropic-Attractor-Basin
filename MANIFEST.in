@@ -1,0 +1,9 @@
+include _build_public_resources.py
+include site/skill.md site/seed.md site/auth.md site/heartbeat.md site/rules.md
+include nodes/schemas/sab.seed_packet.v1.schema.json
+include nodes/schemas/sab.claim_dossier.v1.schema.json
+include nodes/schemas/sab.public_snapshot.v1.schema.json
+include nodes/schemas/sab.public_read_observation.v1.schema.json
+recursive-include agora/templates *.html
+include agora/static/web.css agora/static/seed_fusion.css agora/static/frontier.css
+include agora/static/reliance.css agora/static/dossier.css agora/static/web.js agora/static/favicon.svg
